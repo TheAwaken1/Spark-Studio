@@ -680,7 +680,14 @@ def stop_run(rid: str, force: bool = False):
 async def stream_run(rid: str, request: Request):
     r = runner.get(rid)
     if not r:
-        raise HTTPException(404, "run not found")
+        # Stale tab from before a server restart: its EventSource auto-
+        # reconnects for a run this process never knew. A 404 makes browsers
+        # log errors (and some retry forever) — send a clean one-shot eof so
+        # the old tab's stream closes quietly instead.
+        async def _gone():
+            yield {"event": "log", "data": "[server] this run belongs to a previous session — refresh the page"}
+            yield {"event": "eof", "data": ""}
+        return EventSourceResponse(_gone())
     q: asyncio.Queue = asyncio.Queue(maxsize=4000)
     for line in list(r.ring)[-500:]:
         await q.put(line)
