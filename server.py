@@ -2354,11 +2354,20 @@ async def install_engine(engine: str, request: Request):
             cmd = ["uv", "pip", "install", "--no-progress", "--python", sys.executable, *pkgs]
         else:
             cmd = [sys.executable, "-m", "pip", "install", *pkgs]
+        env = os.environ.copy()
+        # Some engine deps ship no aarch64 wheel and compile CUDA extensions
+        # from source (e.g. sglang → torch-memory-saver). The build needs the
+        # CUDA toolkit headers; DGX OS installs them at /usr/local/cuda but
+        # desktop sessions rarely export CUDA_HOME — point the build at them.
+        cuda_home = Path("/usr/local/cuda")
+        if not env.get("CUDA_HOME") and (cuda_home / "include" / "cuda_runtime_api.h").exists():
+            env["CUDA_HOME"] = str(cuda_home)
+            env["PATH"] = f"{cuda_home}/bin:{env.get('PATH', '')}"
         proc = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
-            env=os.environ.copy(),
+            env=env,
         )
         assert proc.stdout is not None
         yield {"event": "log", "data": "$ " + " ".join(cmd)}
