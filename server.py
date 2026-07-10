@@ -606,6 +606,41 @@ def list_runs():
     return runner.list()
 
 
+def _autosave_adhoc_recipe(engine: str, args: dict, env: dict, raw_cmd: str | None) -> int | None:
+    """Every launch should land in My Recipes — not just sparkrun/forge/wizard
+    ones. Ad-hoc runs from the engine tabs get an 'auto-saved' recipe capturing
+    exactly what ran (no normalization — these args are proven by the launch).
+    Deduped per engine+model (or raw_cmd), so repeat launches update in place
+    and never clobber recipes the user authored themselves."""
+    try:
+        args = dict(args or {})
+        model = args.pop("model", None) or args.pop("model-path", None)
+        args.pop("model-path", None)
+        if not model and not raw_cmd:
+            return None
+        for r in db.recipes_list():
+            tags = {t.strip() for t in (r.get("tags") or "").split(",")}
+            if "auto-saved" not in tags or r.get("engine") != engine:
+                continue
+            if (model and r.get("model") == model) or (not model and raw_cmd and r.get("raw_cmd") == raw_cmd):
+                updated = db.recipes_upsert({**r, "args": args, "env": env or {}, "raw_cmd": raw_cmd})
+                return updated["id"]
+        label = model or (raw_cmd or "").split()[0] or "run"
+        rec = db.recipes_upsert({
+            "name": f"{label} · {engine}",
+            "engine": engine,
+            "model": model,
+            "args": args,
+            "env": env or {},
+            "notes": "Auto-saved from a direct launch.",
+            "tags": "auto-saved",
+            "raw_cmd": raw_cmd,
+        })
+        return rec["id"] if rec else None
+    except Exception:  # noqa: BLE001
+        return None
+
+
 @app.post("/api/runs")
 def start_run(req: StartReq):
     # sparkrun recipes (auto-saved community launches) re-route through the
@@ -645,6 +680,17 @@ def start_run(req: StartReq):
             managed_containers=managed or None,
             skip_memory_guard=req.force,
         )
+        # Ad-hoc launch (engine tabs): auto-save a recipe AFTER the spawn
+        # succeeded and attach it, so it shows in My Recipes with its engine
+        # and earns the ✓ working badge from the watchdog like any other run.
+        if run.recipe_id is None:
+            rid = _autosave_adhoc_recipe(req.engine, req.args, req.env, raw_cmd)
+            if rid:
+                run.recipe_id = rid
+                try:
+                    db.runs_update(run.id, recipe_id=rid)
+                except Exception:  # noqa: BLE001
+                    pass
     except MemoryTooTight as e:
         # 507 Insufficient Storage: distinct from a 400 so the UI can offer a
         # "launch anyway" (force) path instead of treating it as a bad recipe.
