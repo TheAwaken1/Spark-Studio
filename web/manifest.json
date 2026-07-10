@@ -1,0 +1,12 @@
+{
+  "name": "Spark Studio",
+  "short_name": "Spark Studio",
+  "description": "DGX Spark control plane — launch and manage vLLM, SGLang, llama.cpp and more.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f17",
+  "theme_color": "#0b0f17",
+  "icons": [
+    { "src": "/static/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}
