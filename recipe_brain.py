@@ -388,12 +388,17 @@ def synthesize_recipe(
     host_mem = (host or {}).get("effective_memory_gb") or (host or {}).get("total_memory_gb")
     gpu_count = (host or {}).get("effective_gpu_count") or 1
     max_model_len = _suggested_max_model_len(report, weight_gb, host_mem)
-    # tensor_parallel: stay at 1 for solo Sparks; if a mesh is set up and the
-    # model is fat, scale up. We'll let run-recipe.py's solo override fire if
-    # the user runs solo anyway.
+    # tensor_parallel: the smallest node count whose combined memory fits the
+    # weights with KV headroom (~70% usable per node). Solo Sparks stay at 1;
+    # meshes scale as far as they go — no artificial cap, community meshes run
+    # well past 4 Sparks. Powers of two first (what TP sharding likes), clamped
+    # to the mesh size.
     tp = 1
-    if gpu_count >= 2 and weight_gb and host_mem and weight_gb > host_mem * 0.5:
-        tp = min(gpu_count, 4)
+    if gpu_count >= 2 and weight_gb and host_mem:
+        per_node = host_mem / gpu_count
+        while tp < gpu_count and weight_gb > tp * per_node * 0.7:
+            tp *= 2
+        tp = min(tp, gpu_count)
 
     defaults: dict[str, Any] = {
         "port": 8000,

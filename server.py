@@ -918,7 +918,8 @@ async def cluster_info():
 @app.get("/api/cluster/readiness")
 async def cluster_readiness(tp: int = 1):
     """Plain-English pre-launch checks for a tp-node run."""
-    return await asyncio.to_thread(cluster_mod.readiness, max(1, min(int(tp), 16)))
+    # No upper cap — community meshes run well past 4 Sparks.
+    return await asyncio.to_thread(cluster_mod.readiness, max(1, int(tp)))
 
 
 @app.get("/api/sparkrun/nodelog")
