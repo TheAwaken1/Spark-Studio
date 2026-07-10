@@ -35,8 +35,8 @@ APP_DIR="$(pwd)"
 # ----- desktop launcher (.desktop file) --------------------------------------
 if [[ "$MODE" == "install-launcher" ]]; then
     # Icon goes into the hicolor theme under a simple name — an absolute
-    # Icon= path (especially one with spaces, like "AI Spaces") is unreliable
-    # across desktop shells; a themed name always resolves.
+    # Icon= path (especially one containing spaces) is unreliable across
+    # desktop shells; a themed name always resolves.
     if [[ -f "$APP_DIR/icon.png" ]]; then
         mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
         cp "$APP_DIR/icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/spark-studio.png"

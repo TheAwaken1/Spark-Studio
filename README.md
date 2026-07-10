@@ -7,12 +7,23 @@ Runs **vLLM**, **SGLang**, **llama.cpp**, **WebGPU (WebLLM)**, and **sparkrun** 
 ## Quick Start
 
 ```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/TheAwaken1/Spark-Studio/main/install.sh)
+```
+
+or clone it yourself:
+
+```bash
 git clone https://github.com/TheAwaken1/Spark-Studio.git
 cd Spark-Studio
 ./start.sh
 ```
 
 Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on your LAN). First run sets up the Python environment automatically, then a **setup wizard** checks your system, recommends a model that fits your Spark, and launches it.
+
+> **Security note:** the dashboard has no authentication and binds to all
+> interfaces so your LAN can use it. Anyone on your network can control it —
+> use `./start.sh --host 127.0.0.1` for local-only, and never expose the port
+> to the internet.
 
 ```bash
 ./start.sh --doctor   # full system health report at any time
@@ -104,9 +115,6 @@ install optional pieces per profile:
 Piped installs (`curl … \| bash`) can't prompt, so they run fully
 non-interactive with the defaults above; use the `bash <(curl …)` form for
 prompts. `--dir <path>` picks the install location.
-
-> While this repo is private the raw URL needs auth — clone with git (Option B)
-> instead, or run `./install.sh` from a checkout.
 
 ### Option B — Clone and start
 
