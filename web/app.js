@@ -2482,6 +2482,9 @@ async function syncChatTarget() {
   const active = await api('/active').catch(() => null);
   if (active) {
     const served = await api('/models/served').catch(() => ({}));
+    // Reflect the engine's real context in the max-tokens slider immediately —
+    // not only at first send — so the default is never the 4096 markup value.
+    if (served.max_model_len) _applyMaxModelLen('chatMaxTokens', 'chatMaxTokensValue', served.max_model_len);
     const ready = active.ready && served.model;
     const badgeClass = ready ? 'ok' : 'no';
     const badgeLabel = ready ? active.engine : `${active.engine} · loading`;
@@ -2954,16 +2957,19 @@ async function currentServerModelInfo() {
 function _applyMaxModelLen(sliderId, labelId, maxModelLen) {
   const slider = $('#' + sliderId);
   if (!slider || !maxModelLen) return;
-  const prevMax = Number(slider.max) || 0;
+  // Track the engine context we've applied in a dataset flag — the old
+  // "did slider.max change?" heuristic silently failed whenever the engine's
+  // context happened to equal the HTML max attribute (131072 — very common),
+  // leaving the value stuck at the 4096 markup default.
+  const seen = slider.dataset.engineCtx;
   slider.max = maxModelLen;
-  // When the engine's context window changes (including on first detection),
-  // default the slider to the full context — the server auto-reduces based on
-  // actual prompt tokens, so "full context" is always safe to request.
-  if (prevMax !== maxModelLen) {
+  if (seen !== String(maxModelLen)) {
+    // New engine (or first detection): default to the FULL context. The
+    // server auto-fits to actual prompt size, so full is always safe.
+    slider.dataset.engineCtx = String(maxModelLen);
     slider.value = maxModelLen;
     if (labelId) $('#' + labelId).textContent = String(maxModelLen);
   } else if (Number(slider.value) > maxModelLen) {
-    // Safety clamp: current value exceeds new limit
     slider.value = maxModelLen;
     if (labelId) $('#' + labelId).textContent = String(maxModelLen);
   }

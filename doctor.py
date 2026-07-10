@@ -174,7 +174,17 @@ def _probe_engine(engine: str, hint: str):
     def fn() -> dict[str, Any]:
         from runners import engine_available
         if engine_available(engine):
-            return {"status": "ok", "detail": "installed"}
+            return {"status": "ok", "detail": "installed (native)"}
+        # On DGX Spark the native pip builds of vLLM/SGLang don't support
+        # CUDA 13 / aarch64 — the Docker pipeline is the intended path, so a
+        # missing native install is NOT a problem when Docker is available.
+        if engine in ("vllm", "sglang") and shutil.which("docker"):
+            mirror = APP_DIR / "data" / "registry" / "spark-vllm-docker"
+            via = ("spark-vllm-docker containers" if engine == "vllm"
+                   else "sparkrun container recipes")
+            if engine == "sglang" or mirror.exists():
+                return {"status": "ok",
+                        "detail": f"via {via} (recommended on GB10 — native pip install not needed)"}
         return {"status": "warn", "detail": "not installed — engine unavailable", "fix": hint}
     return fn
 
