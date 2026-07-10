@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 💬 Questions & ideas (DGX Spark forum thread)
+    url: https://github.com/TheAwaken1/Spark-Studio/discussions
+    about: Not a bug? Ask questions or share what you're running in Discussions.

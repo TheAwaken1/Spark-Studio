@@ -148,6 +148,11 @@ if [[ "$MODE" == "desktop" ]]; then
     fi
     _serving || { echo "Spark Studio did not come up — see data/spark-studio.log" >&2; exit 1; }
     command -v xdg-open >/dev/null 2>&1 && xdg-open "$URL" >/dev/null 2>&1 || echo "Open: $URL"
+    # Belt & suspenders: xdg-open can "succeed" while the browser silently
+    # fails to launch (e.g. a broken snap content mount). A notification with
+    # the URL means a desktop-icon click is never an invisible no-op.
+    command -v notify-send >/dev/null 2>&1 && \
+        notify-send -i spark-studio "Spark Studio is running" "Open $URL in your browser if a tab didn't appear." 2>/dev/null || true
     exit 0
 fi
 
