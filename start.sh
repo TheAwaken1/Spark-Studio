@@ -10,6 +10,7 @@ HOST=0.0.0.0
 PORT=7860
 NO_SPARKRUN_UPDATE="${SPARK_STUDIO_NO_SPARKRUN_UPDATE:-0}"
 DOCTOR=0
+UPDATE=0
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
         --port) PORT="$2"; shift 2 ;;
         --no-sparkrun-update) NO_SPARKRUN_UPDATE=1; shift ;;
         --doctor) DOCTOR=1; shift ;;
+        --update) UPDATE=1; shift ;;
         *) EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
@@ -39,6 +41,29 @@ if [[ ! -x env/bin/python ]]; then
         env/bin/pip install -r requirements.txt
     fi
     echo "Environment ready."
+fi
+
+# Update mode: pull the latest code + refresh dependencies, then continue
+# into a normal start (one command to be current *and* running).
+if [[ "$UPDATE" == "1" ]]; then
+    OLD_VER=$(cat VERSION 2>/dev/null || echo "?")
+    echo "Updating Spark Studio (currently v$OLD_VER)…"
+    if git rev-parse --git-dir >/dev/null 2>&1; then
+        git pull --ff-only || echo "warning: git pull failed (local changes or diverged branch) — continuing with the current code" >&2
+    else
+        echo "warning: not a git checkout — cannot self-update; re-clone from GitHub instead" >&2
+    fi
+    if command -v uv >/dev/null 2>&1; then
+        uv pip install --python env/bin/python -r requirements.txt --upgrade --quiet
+    else
+        env/bin/pip install --quiet -r requirements.txt --upgrade
+    fi
+    NEW_VER=$(cat VERSION 2>/dev/null || echo "?")
+    if [[ "$NEW_VER" != "$OLD_VER" ]]; then
+        echo "Updated: v$OLD_VER → v$NEW_VER"
+    else
+        echo "Up to date (v$NEW_VER)"
+    fi
 fi
 
 # Doctor mode: print the system health report and exit (no server start).

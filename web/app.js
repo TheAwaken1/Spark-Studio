@@ -121,6 +121,12 @@ async function refreshSystem() {
       `<div>${escapeHtml(sys.platform)}</div>` +
       `<div>Python ${escapeHtml(sys.python)}</div>` +
       hostBlock;
+    // Sidebar footer: version + how to reach this dashboard from the LAN.
+    const meta = $('#sidebarMeta');
+    if (meta && sys.version) {
+      const lan = (sys.urls?.lan || [])[0];
+      meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}`;
+    }
   } catch (e) { console.error(e); }
   try {
     const a = await api('/agents/status');

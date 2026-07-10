@@ -2350,12 +2350,18 @@ def host_info(refresh: bool = False):
 
 
 @app.get("/api/system")
-def system_info():
+def system_info(request: Request):
     import platform
     import subprocess
+    port = request.url.port or 7860
     info = {
         "platform": platform.platform(),
         "python": platform.python_version(),
+        "version": doctor.app_version(),
+        "urls": {
+            "local": f"http://127.0.0.1:{port}",
+            "lan": [f"http://{ip}:{port}" for ip in doctor._lan_ips()],
+        },
         "engines": {
             "vllm": engine_available("vllm"),
             "sglang": engine_available("sglang"),

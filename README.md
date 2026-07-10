@@ -84,7 +84,30 @@ Optional extras:
 
 ## Installation
 
-### 1. Clone and start
+### Option A — One-command installer
+
+```bash
+bash <(curl -fsSL https://raw.githubusercontent.com/TheAwaken1/Spark-Studio/main/install.sh)
+```
+
+Checks your system (git, Python/uv, GPU, Docker, npm), clones into
+`~/spark-studio`, bootstraps the environment, runs the doctor, and offers to
+install optional pieces per profile:
+
+| Profile | Adds |
+|---|---|
+| `--basic` | dashboard + recipes + local runs |
+| `--recommended` *(default)* | + sparkrun CLI (community recipes, kernel tuning) |
+| `--full` | + llama-benchy + Claude/Codex agent CLIs |
+
+Piped installs (`curl … \| bash`) can't prompt, so they run fully
+non-interactive with the defaults above; use the `bash <(curl …)` form for
+prompts. `--dir <path>` picks the install location.
+
+> While this repo is private the raw URL needs auth — clone with git (Option B)
+> instead, or run `./install.sh` from a checkout.
+
+### Option B — Clone and start
 
 ```bash
 git clone https://github.com/TheAwaken1/Spark-Studio.git
@@ -273,7 +296,14 @@ treating the dashboard as a preferred sacrifice.
 
 ## Updating
 
-Pull the latest source and refresh dependencies:
+```bash
+./start.sh --update
+```
+
+Pulls the latest code, refreshes Python dependencies, reports the version
+change, and starts the app — one command to be current *and* running.
+
+Manual equivalent:
 
 ```bash
 git pull

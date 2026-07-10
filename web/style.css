@@ -896,6 +896,8 @@ body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
 .ui-mode-btn { flex: 1; padding: 6px 4px; font-size: 11px; background: transparent;
   color: var(--text, #e5e7eb); border: 0; cursor: pointer; opacity: 0.65; }
 .ui-mode-btn.active { background: rgba(255,255,255,0.08); opacity: 1; font-weight: 600; }
+.sidebar-meta { font-size: 10px; opacity: 0.55; margin-bottom: 8px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* First-run wizard */
 .wiz-checks { display: flex; flex-direction: column; gap: 4px; max-height: 320px;
