@@ -9,6 +9,7 @@ cd "$(dirname "$0")"
 HOST=0.0.0.0
 PORT=7860
 NO_SPARKRUN_UPDATE="${SPARK_STUDIO_NO_SPARKRUN_UPDATE:-0}"
+NO_OPEN="${SPARK_STUDIO_NO_OPEN:-0}"
 DOCTOR=0
 UPDATE=0
 MODE=serve   # serve | desktop | install-launcher | install-service
@@ -19,6 +20,7 @@ while [[ $# -gt 0 ]]; do
         --host) HOST="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
         --no-sparkrun-update) NO_SPARKRUN_UPDATE=1; shift ;;
+        --no-open) NO_OPEN=1; shift ;;
         --doctor) DOCTOR=1; shift ;;
         --update) UPDATE=1; shift ;;
         --desktop) MODE=desktop; shift ;;
@@ -32,6 +34,14 @@ APP_DIR="$(pwd)"
 
 # ----- desktop launcher (.desktop file) --------------------------------------
 if [[ "$MODE" == "install-launcher" ]]; then
+    # Icon goes into the hicolor theme under a simple name — an absolute
+    # Icon= path (especially one with spaces, like "AI Spaces") is unreliable
+    # across desktop shells; a themed name always resolves.
+    if [[ -f "$APP_DIR/icon.png" ]]; then
+        mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
+        cp "$APP_DIR/icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/spark-studio.png"
+        gtk-update-icon-cache -q "$HOME/.local/share/icons/hicolor" 2>/dev/null || true
+    fi
     mkdir -p "$HOME/.local/share/applications"
     DESK="$HOME/.local/share/applications/spark-studio.desktop"
     cat > "$DESK" <<DESKTOP
@@ -40,14 +50,25 @@ Type=Application
 Name=Spark Studio
 Comment=DGX Spark inference dashboard
 Exec=/bin/bash "$APP_DIR/start.sh" --desktop
-Icon=$APP_DIR/icon.png
+Icon=spark-studio
 Terminal=false
-Categories=Development;Utility;
+Categories=Utility;
+StartupNotify=true
 DESKTOP
     chmod +x "$DESK"
     command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$HOME/.local/share/applications" 2>/dev/null || true
-    echo "Desktop launcher installed: $DESK"
-    echo "Find 'Spark Studio' in your application menu — it starts the server if needed and opens the dashboard."
+    command -v desktop-file-validate >/dev/null 2>&1 && desktop-file-validate "$DESK" || true
+    echo "App menu entry installed: $DESK"
+    # Also drop an icon on the Desktop itself — that's what most people mean
+    # by "desktop icon". GNOME wants the trusted flag to allow launching.
+    if [[ -d "$HOME/Desktop" ]]; then
+        cp "$DESK" "$HOME/Desktop/spark-studio.desktop"
+        chmod +x "$HOME/Desktop/spark-studio.desktop"
+        gio set "$HOME/Desktop/spark-studio.desktop" metadata::trusted true 2>/dev/null || true
+        echo "Desktop icon installed: ~/Desktop/spark-studio.desktop"
+        echo "  (if it shows an 'untrusted' warning, right-click → Allow Launching)"
+    fi
+    echo "Search 'Spark Studio' in your app menu — it starts the server if needed and opens the dashboard."
     exit 0
 fi
 
@@ -189,13 +210,37 @@ then
     exit 1
 fi
 
+# Print URLs as OSC-8 hyperlinks when on a terminal that renders them
+# (GNOME Terminal, Konsole, iTerm2, …) — plain text otherwise.
+_url() {
+    if [[ -t 1 ]]; then
+        printf '  %s \e]8;;%s\e\\%s\e]8;;\e\\\n' "$1" "$2" "$2"
+    else
+        printf '  %s %s\n' "$1" "$2"
+    fi
+}
 echo "Spark Studio starting on port $PORT"
-echo "  Local:   http://127.0.0.1:$PORT"
+_url "Local:  " "http://127.0.0.1:$PORT"
 if [[ "$HOST" == "0.0.0.0" ]]; then
     for ip in $(hostname -I); do
         [[ "$ip" == *:* ]] && continue  # skip IPv6
-        echo "  Network: http://$ip:$PORT"
+        _url "Network:" "http://$ip:$PORT"
     done
+fi
+
+# Desktop session (not headless, not SSH): open the dashboard in the browser
+# once the server answers. Opt out with --no-open or SPARK_STUDIO_NO_OPEN=1.
+if [[ "$NO_OPEN" != "1" && -z "${SSH_CONNECTION:-}" && "${SPARK_STUDIO_SERVICE:-0}" != "1" ]] \
+   && [[ -n "${DISPLAY:-}" || -n "${WAYLAND_DISPLAY:-}" ]] \
+   && command -v xdg-open >/dev/null 2>&1; then
+    (
+        for _ in $(seq 1 60); do
+            curl -sf -m 2 -o /dev/null "http://127.0.0.1:$PORT/api/system" && break
+            sleep 2
+        done
+        xdg-open "http://127.0.0.1:$PORT" >/dev/null 2>&1 || true
+    ) &
+    disown
 fi
 
 exec env/bin/python -m uvicorn server:app --host "$HOST" --port "$PORT" ${EXTRA_ARGS[@]+"${EXTRA_ARGS[@]}"}
