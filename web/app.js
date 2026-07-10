@@ -74,6 +74,7 @@ $$('.tab').forEach((t) =>
     if (t.dataset.tab === 'logs') refreshRuns();
     if (t.dataset.tab === 'bench') refreshBenchTab();
     if (t.dataset.tab === 'agents') refreshAgents();
+    if (t.dataset.tab === 'cluster') refreshCluster();
     if (t.dataset.tab === 'forge') refreshForgeSuggest();
     if (t.dataset.tab === 'chat') syncChatTarget();
     if (t.dataset.tab === 'webgpu') { refreshWgServerStatus(); refreshWgSearchStatus(); startAmbient(); }
@@ -1615,7 +1616,27 @@ function updateLogsRecovery(run, lines) {
     const el = $(`#${id}`);
     if (el) el.disabled = !canOptimize;
   });
+  // Failed multi-node sparkrun run → offer the classic recovery: fewer nodes.
+  const retry = $('#logsRetryLowerTp');
+  if (retry) {
+    const lowerTp = (run && run.engine === 'sparkrun' && runOutcome(run) === 'failed'
+      && run.ref && Number(run.tp) > 1) ? Math.floor(Number(run.tp) / 2) : 0;
+    retry.hidden = !lowerTp;
+    if (lowerTp) {
+      retry.textContent = `⬇ Retry with TP ${lowerTp}`;
+      retry.dataset.ref = run.ref;
+      retry.dataset.tp = String(lowerTp);
+    }
+  }
 }
+$('#logsRetryLowerTp')?.addEventListener('click', async (ev) => {
+  const b = ev.currentTarget;
+  try {
+    const run = await api('/sparkrun/run', { method: 'POST', body: { ref: b.dataset.ref, tp: Number(b.dataset.tp) } });
+    toast(`Relaunched ${b.dataset.ref} with TP ${b.dataset.tp}`);
+    window.selectRun(run.id);
+  } catch (e) { toast(e.message, 'danger'); }
+});
 
 async function refreshRuns() {
   const runs = await api('/runs').catch(() => []);
@@ -4445,6 +4466,66 @@ function applyUiMode(mode) {
   }
 }
 $$('.ui-mode-btn').forEach((b) => b.addEventListener('click', () => applyUiMode(b.dataset.mode)));
+
+// ---------- cluster page ------------------------------------------------------
+async function refreshCluster() {
+  try {
+    const c = await api('/cluster');
+    $('#clusterTitle').textContent = c.mesh
+      ? `${c.cluster_name || 'Cluster'} — ${c.online_nodes}/${c.nodes.length} nodes online`
+      : `${c.cluster_name || 'Cluster'} — Single Node`;
+    $('#clusterSoloCta').hidden = c.mesh;
+    $('#clusterNodes').innerHTML = c.nodes.map((n) => {
+      const dot = n.online ? '🟢' : '🔴';
+      const mem = n.memory_free_gb != null ? ` · ${n.memory_free_gb} GB free / ${n.memory_total_gb} GB` : '';
+      const wl = n.workload
+        ? `<div class="muted">▶ ${escapeHtml(n.workload.job)} · ${escapeHtml(n.workload.role)} (${escapeHtml(n.workload.state)})</div>` : '';
+      return `<div class="cluster-node">
+        <div>${dot} <b>${escapeHtml(n.ip)}</b>${n.local ? ' <span class="badge">this Spark</span>' : ''}
+          ${n.summary ? `<span class="muted"> · ${escapeHtml(n.summary)}${mem}</span>` : (n.online ? '' : ' <span class="muted">— unreachable</span>')}</div>
+        ${wl}</div>`;
+    }).join('');
+    $('#clusterTp').innerHTML = 'Tensor parallel: ' + c.tp_options.map((t) =>
+      `<span class="badge ${t.ok ? 'ok' : 'no'}" title="${escapeHtml(t.why || '')}">TP ${t.tp} ${t.ok ? '✓' : '✗'}</span>`
+    ).join(' ');
+    const sel = $('#clusterTpSel');
+    sel.innerHTML = c.tp_options.map((t) => `<option value="${t.tp}" ${!t.ok ? 'disabled' : ''}>${t.tp}</option>`).join('');
+    $('#clusterJobs').innerHTML = c.jobs.length ? c.jobs.map((j) => `
+      <div class="cluster-job">
+        <b>${escapeHtml(j.ref)}</b> · TP ${j.tp} · <span class="mono">${escapeHtml(j.jobid)}</span>
+        <div>${(j.containers || []).map((ct) =>
+          `<button class="btn" data-nodelog="${escapeHtml(ct)}">📄 ${escapeHtml(ct.split('_').pop())} log</button>`).join(' ')}</div>
+      </div>`).join('') : '<span class="muted">None.</span>';
+    $$('#clusterJobs [data-nodelog]').forEach((b) => b.addEventListener('click', async () => {
+      const pre = $('#clusterNodeLog');
+      pre.style.display = 'block';
+      pre.textContent = 'Loading…';
+      try {
+        const r = await api(`/sparkrun/nodelog?container=${encodeURIComponent(b.dataset.nodelog)}`);
+        pre.textContent = r.lines.length ? r.lines.join('\n')
+          : (r.note || 'no log') + '\nFor remote nodes use: sparkrun logs <jobid>';
+        pre.scrollTop = pre.scrollHeight;
+      } catch (e) { pre.textContent = e.message; }
+    }));
+  } catch (e) {
+    $('#clusterNodes').innerHTML = `<span class="muted">${escapeHtml(e.message)}</span>`;
+  }
+}
+$('#clusterCheck')?.addEventListener('click', async () => {
+  const box = $('#clusterReadiness');
+  box.innerHTML = '<div class="muted">Checking…</div>';
+  try {
+    const r = await api(`/cluster/readiness?tp=${$('#clusterTpSel').value}`);
+    const icon = { ok: '✅', warn: '⚠️', error: '❌' };
+    box.innerHTML = r.checks.map((c) =>
+      `<div class="wiz-check ${c.status}"><span>${icon[c.status]}</span><span>${escapeHtml(c.detail)}</span></div>`
+      + (c.fix && c.status !== 'ok' ? `<div class="muted" style="margin-left:24px">↳ ${escapeHtml(c.fix)}</div>` : '')
+    ).join('')
+    + `<div class="wiz-note ${r.ok ? 'ok' : 'error'}" style="margin-top:8px">${r.ok
+        ? `Ready for a TP ${r.tp} launch — pick a recipe on the Recipes tab.`
+        : `Not ready for TP ${r.tp} — fix the ❌ items above.`}</div>`;
+  } catch (e) { box.innerHTML = `<div class="wiz-note error">${escapeHtml(e.message)}</div>`; }
+});
 
 // ---------- LAN QR + update check -------------------------------------------
 function openQrModal() {

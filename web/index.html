@@ -36,6 +36,7 @@
       <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
       <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
       <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
+      <a class="tab" data-tab="cluster"><i class="fa-solid fa-circle-nodes"></i> Cluster</a>
       <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> Recovery</a>
     </nav>
     <!-- live vitals + status stacked at bottom -->
@@ -432,6 +433,7 @@
               <button id="logsFixInlineCodex" class="btn"><i class="fa-solid fa-code"></i> Fix with Codex</button>
               <button id="logsAutofix" class="btn primary" title="Claude diagnoses, patches, relaunches, and retries with fresh logs — up to 3 attempts, hands-free"><i class="fa-solid fa-rotate"></i> Auto-Fix &amp; Retry</button>
               <button id="logsAutofixCodex" class="btn" title="Same hands-free fix loop, driven by Codex"><i class="fa-solid fa-rotate"></i> Auto-Fix (Codex)</button>
+              <button id="logsRetryLowerTp" class="btn" hidden title="A smaller node count often succeeds where a full-mesh launch failed"><i class="fa-solid fa-down-long"></i> Retry with fewer nodes</button>
               <button id="logsOptimize" class="btn primary" disabled title="Benchmark the running engine, have Claude tune the recipe for tok/s, relaunch, re-benchmark — the fastest measured config wins"><i class="fa-solid fa-gauge-high"></i> Optimize Speed</button>
               <button id="logsOptimizeCodex" class="btn" disabled title="Same speed-optimization loop, driven by Codex"><i class="fa-solid fa-gauge-high"></i> Optimize (Codex)</button>
             </div>
@@ -457,6 +459,39 @@
           <button class="btn primary" id="codexLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
           <pre id="codexLog" class="login-log"></pre>
         </div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="cluster">
+      <header class="panel-header"><h1>Cluster</h1><p>Your Spark mesh, powered by sparkrun. Spark Studio reads what sparkrun reports — it never SSHes into your nodes.</p></header>
+      <div class="grid grid-2">
+        <div class="card">
+          <h3><i class="fa-solid fa-circle-nodes"></i> <span id="clusterTitle">Cluster</span></h3>
+          <div id="clusterNodes" class="muted">Loading…</div>
+          <div id="clusterTp" style="margin-top:10px"></div>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-clipboard-check"></i> Launch readiness</h3>
+          <p class="muted">Checks this box + the mesh before a multi-node launch.</p>
+          <div class="toolbar">
+            <label>Nodes (TP)
+              <select id="clusterTpSel"><option value="1">1</option></select>
+            </label>
+            <button class="btn primary" id="clusterCheck">Run Checks</button>
+          </div>
+          <div id="clusterReadiness"></div>
+        </div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <h3><i class="fa-solid fa-list"></i> Running cluster jobs</h3>
+        <div id="clusterJobs" class="muted">None.</div>
+        <pre id="clusterNodeLog" class="mono" style="display:none;max-height:300px;overflow:auto;font-size:11px"></pre>
+      </div>
+      <div id="clusterSoloCta" class="wiz-note" hidden>
+        Cluster features light up when sparkrun sees 2 or more Sparks.
+        Mesh yours with <code>sparkrun cluster create &lt;name&gt; &lt;ip1&gt;,&lt;ip2&gt;</code>
+        (or the guided <code>sparkrun setup</code>) — recipes too big for one Spark become launchable,
+        and this page shows per-node health and logs.
       </div>
     </section>
 

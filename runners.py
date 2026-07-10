@@ -341,6 +341,8 @@ class Run:
             "cmd": " ".join(shlex.quote(c) for c in self.cmd),
             "raw_cmd": self.raw_cmd,
             "ref": self.meta.get("ref"),
+            "tp": self.meta.get("tp"),
+            "containers": list(self.managed_containers),
             "detached": self.detached,
             "label": self.label or self.meta.get("ref"),
             "load_secs": self.meta.get("load_secs"),

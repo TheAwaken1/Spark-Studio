@@ -903,6 +903,10 @@ body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
 .qr-box { display: flex; justify-content: center; padding: 10px; }
 .qr-box svg { background: #fff; border-radius: 8px; }
 .qr-urls { font-size: 11px; opacity: 0.75; line-height: 1.7; }
+.cluster-node { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
+.cluster-node:last-child { border-bottom: 0; }
+.cluster-job { padding: 8px 0; font-size: 13px; }
+.cluster-job .btn { font-size: 11px; padding: 3px 8px; margin-top: 4px; }
 
 /* First-run wizard */
 .wiz-checks { display: flex; flex-direction: column; gap: 4px; max-height: 320px;

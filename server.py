@@ -27,6 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 import agents
 import bench
 import benchy
+import cluster as cluster_mod
 import db
 import docker_recipe
 import doctor
@@ -904,6 +905,32 @@ def sparkrun_run(req: SparkrunReq):
         return _start_sparkrun(req.ref, req.tp, force=req.force).summary()
     except MemoryTooTight as e:
         raise HTTPException(507, str(e)) from e
+
+
+# ----- Cluster (multi-node view over sparkrun) --------------------------------
+
+@app.get("/api/cluster")
+async def cluster_info():
+    """Node health, TP availability, and running jobs for the Cluster page."""
+    return await asyncio.to_thread(cluster_mod.cluster_info)
+
+
+@app.get("/api/cluster/readiness")
+async def cluster_readiness(tp: int = 1):
+    """Plain-English pre-launch checks for a tp-node run."""
+    return await asyncio.to_thread(cluster_mod.readiness, max(1, min(int(tp), 16)))
+
+
+@app.get("/api/sparkrun/nodelog")
+async def sparkrun_node_log(container: str, n: int = 200):
+    """Serve-log tail from one job container on THIS host. Remote nodes'
+    containers aren't reachable via local docker — use `sparkrun logs <jobid>`
+    for the aggregated stream instead."""
+    if not sparkrun_service.CONTAINER_RE.match(container):
+        raise HTTPException(400, "not a sparkrun container name")
+    lines = await asyncio.to_thread(sparkrun_service.serve_log_tail, container, max(10, min(n, 1000)))
+    return {"container": container, "lines": lines,
+            "note": None if lines else "no local log — the container may live on another node"}
 
 
 # ----- Spark Arena import ----------------------------------------------------
