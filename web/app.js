@@ -122,10 +122,15 @@ async function refreshSystem() {
       `<div>Python ${escapeHtml(sys.python)}</div>` +
       hostBlock;
     // Sidebar footer: version + how to reach this dashboard from the LAN.
+    // Clicking it opens the QR modal for phones/tablets.
     const meta = $('#sidebarMeta');
     if (meta && sys.version) {
       const lan = (sys.urls?.lan || [])[0];
-      meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}`;
+      window._lanUrls = sys.urls || {};
+      const upd = window._updateAvailable
+        ? ` · <span class="update-badge" title="Click for update options">⬆ v${escapeHtml(window._updateAvailable)}</span>` : '';
+      meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}${upd}`;
+      meta.style.cursor = 'pointer';
     }
   } catch (e) { console.error(e); }
   try {
@@ -4440,6 +4445,49 @@ function applyUiMode(mode) {
   }
 }
 $$('.ui-mode-btn').forEach((b) => b.addEventListener('click', () => applyUiMode(b.dataset.mode)));
+
+// ---------- LAN QR + update check -------------------------------------------
+function openQrModal() {
+  const urls = window._lanUrls || {};
+  const target = (urls.lan || [])[0] || urls.local;
+  if (!target || typeof qrcode === 'undefined') return;
+  const qr = qrcode(0, 'M');
+  qr.addData(target);
+  qr.make();
+  $('#qrCode').innerHTML = qr.createSvgTag({ cellSize: 5, margin: 2 });
+  $('#qrUrls').innerHTML = [urls.local, ...(urls.lan || [])].filter(Boolean)
+    .map((u) => `<div>${escapeHtml(u)}</div>`).join('');
+  $('#qrModal').hidden = false;
+}
+$('#sidebarMeta')?.addEventListener('click', async () => {
+  // With an update pending, the badge click offers the one-click update first.
+  if (window._updateAvailable) {
+    if (confirm(`Update to v${window._updateAvailable}?\n\nPulls the latest code and refreshes dependencies.`
+        + (window._updateRestarts ? '\nThe service restarts itself; models keep serving.' : '\nRestart ./start.sh afterwards to finish.'))) {
+      try {
+        const r = await api('/update/apply', { method: 'POST', body: {} });
+        toast(r.restarting ? 'Updated — restarting… (reload this page in ~10s)' : 'Updated — restart ./start.sh to finish', undefined);
+        if (!r.restarting) window._updateAvailable = null;
+      } catch (e) { toast(e.message, 'danger'); }
+      return;
+    }
+  }
+  openQrModal();
+});
+$$('#qrModal [data-close]').forEach((b) => b.addEventListener('click', () => ($('#qrModal').hidden = true)));
+
+// One update check per page load, a few seconds after boot (git fetch is slow).
+setTimeout(async () => {
+  try {
+    const u = await api('/update/check');
+    if (u.update_available) {
+      window._updateAvailable = u.latest_version || 'latest';
+      window._updateRestarts = !!u.can_self_restart;
+      refreshSystem(); // repaint the sidebar meta with the badge
+      toast(`Update available: v${u.latest_version} (${u.behind_commits} commit${u.behind_commits === 1 ? '' : 's'} behind) — click the version in the sidebar`, undefined);
+    }
+  } catch { /* offline or not a git checkout — fine */ }
+}, 6000);
 
 // ---------- recovery page ---------------------------------------------------
 function recoveryReport(html) { $('#recoveryResult').innerHTML = html; }

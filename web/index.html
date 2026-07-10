@@ -660,6 +660,22 @@ rm -rf env && ./start.sh       # rebuild Python env
     </div>
   </div>
 
+  <!-- LAN access / QR modal -->
+  <div class="modal" id="qrModal" hidden>
+    <div class="modal-body" style="max-width:380px">
+      <div class="modal-header">
+        <h3>Open on another device</h3>
+        <button class="btn" data-close>&times;</button>
+      </div>
+      <div class="modal-content" style="text-align:center">
+        <div id="qrCode" class="qr-box"></div>
+        <p class="muted">Scan with your phone or tablet — same Wi‑Fi/LAN required.</p>
+        <div id="qrUrls" class="qr-urls mono"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/vendor/qrcode.js"></script>
   <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/vendor/js-yaml.min.js"></script>
   <script src="/static/vendor/marked.min.js"></script>

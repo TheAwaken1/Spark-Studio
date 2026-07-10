@@ -898,6 +898,11 @@ body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
 .ui-mode-btn.active { background: rgba(255,255,255,0.08); opacity: 1; font-weight: 600; }
 .sidebar-meta { font-size: 10px; opacity: 0.55; margin-bottom: 8px; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-meta:hover { opacity: 0.9; }
+.update-badge { color: var(--accent, #60a5fa); font-weight: 700; }
+.qr-box { display: flex; justify-content: center; padding: 10px; }
+.qr-box svg { background: #fff; border-radius: 8px; }
+.qr-urls { font-size: 11px; opacity: 0.75; line-height: 1.7; }
 
 /* First-run wizard */
 .wiz-checks { display: flex; flex-direction: column; gap: 4px; max-height: 320px;

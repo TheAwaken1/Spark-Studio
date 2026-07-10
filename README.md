@@ -164,6 +164,25 @@ After installing, log in from the **Agents** tab inside Spark Studio — no API 
 
 (First run also sets up the Python environment — see Installation.)
 
+### Run it like an app
+
+```bash
+./start.sh --install-launcher   # "Spark Studio" in your application menu
+./start.sh --install-service    # systemd user service (auto-start, self-updating)
+```
+
+The **desktop launcher** starts the server if needed and opens the dashboard —
+no terminal. The **service** survives reboots (`loginctl enable-linger $USER`
+to run without being logged in), keeps models serving across restarts
+(`KEEP_RUNS_ON_EXIT` baked into the unit), and enables one-click in-app
+updates: when a new version is on GitHub, the sidebar version badge lights up —
+click it and the service pulls, refreshes dependencies, and restarts itself.
+Without the service the badge still appears; the update applies and you restart
+`./start.sh` yourself.
+
+Click the version line in the sidebar any time for a **QR code** — scan it to
+open Spark Studio on a phone or tablet on the same network.
+
 ### Health check (doctor)
 
 ```bash
@@ -471,6 +490,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/recommend?k=` | Starter-model recommendations per goal, ranked from local signals |
 | `POST` | `/api/recovery/{clear-runs\|clean-containers\|reset-registry\|reset-db}` | One-click recovery actions (reset-db needs `{"confirm":true}`) |
 | `GET` | `/api/bugreport?run_id=` | Markdown bug report: doctor + run + recipe (redacted) + logs |
+| `GET` `POST` | `/api/update/check` `/api/update/apply` | Update check against origin/main / pull + deps (+ self-restart under systemd) |
 | `GET` | `/api/host?refresh=` | Structured GPU + Spark-mesh probe |
 | `GET` | `/api/active` | Engine currently serving chat |
 | `GET` `POST` `DELETE` | `/api/recipes[...]` | Recipe CRUD (POST normalizes vLLM context/batch) |

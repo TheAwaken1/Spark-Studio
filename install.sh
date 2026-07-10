@@ -149,6 +149,16 @@ if [[ "$PROFILE" == "full" ]]; then
     fi
 fi
 
+# ----- app-like polish (interactive only) --------------------------------------
+if [[ "$INTERACTIVE" == "1" ]]; then
+    if ask "Create a desktop launcher (application menu entry)? [Y/n]" y; then
+        bash start.sh --install-launcher
+    fi
+    if ask "Install as a systemd user service (auto-start, in-app updates)? [y/N]" n; then
+        bash start.sh --install-service
+    fi
+fi
+
 # ----- done -------------------------------------------------------------------
 echo
 ok "Spark Studio is installed in $DIR"

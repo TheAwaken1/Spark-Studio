@@ -2357,6 +2357,72 @@ async def recovery_reset_db(req: ConfirmReq):
     return result
 
 
+# ----- In-app updates ----------------------------------------------------------
+
+def _git(args: list[str], timeout: int = 60) -> tuple[int, str]:
+    import subprocess as _sp
+    try:
+        res = _sp.run(["git"] + args, cwd=str(APP_DIR), capture_output=True,
+                      text=True, timeout=timeout)
+        return res.returncode, (res.stdout or res.stderr or "").strip()
+    except Exception as e:  # noqa: BLE001
+        return 1, str(e)
+
+
+@app.get("/api/update/check")
+async def update_check():
+    """Compare the local checkout against origin/main (uses the checkout's own
+    git credentials, so it works on private repos too)."""
+    def _check() -> dict:
+        rc, _ = _git(["rev-parse", "--git-dir"], timeout=10)
+        if rc != 0:
+            return {"update_available": False, "error": "not a git checkout"}
+        _git(["fetch", "--quiet", "origin", "main"], timeout=45)
+        rc, behind = _git(["rev-list", "--count", "HEAD..origin/main"], timeout=10)
+        behind_n = int(behind) if rc == 0 and behind.isdigit() else 0
+        rc, latest = _git(["show", "origin/main:VERSION"], timeout=10)
+        return {
+            "current_version": doctor.app_version(),
+            "latest_version": latest.strip() if rc == 0 else None,
+            "behind_commits": behind_n,
+            "update_available": behind_n > 0,
+            "can_self_restart": os.environ.get("SPARK_STUDIO_SERVICE") == "1",
+        }
+    return await asyncio.to_thread(_check)
+
+
+@app.post("/api/update/apply")
+async def update_apply():
+    """git pull + dependency refresh. Under the systemd service the process
+    exits cleanly afterwards and systemd (Restart=always) brings the new
+    version up — models keep serving thanks to KEEP_RUNS_ON_EXIT in the unit.
+    Outside the service, the caller restarts ./start.sh manually."""
+    def _apply() -> dict:
+        rc, out = _git(["pull", "--ff-only"], timeout=120)
+        if rc != 0:
+            return {"ok": False, "error": f"git pull failed: {out[:300]}"}
+        import shutil as _sh
+        import subprocess as _sp
+        if _sh.which("uv"):
+            cmd = ["uv", "pip", "install", "--python", sys.executable, "-r", "requirements.txt", "--upgrade", "--quiet"]
+        else:
+            cmd = [sys.executable, "-m", "pip", "install", "-q", "-r", "requirements.txt", "--upgrade"]
+        res = _sp.run(cmd, cwd=str(APP_DIR), capture_output=True, text=True, timeout=600)
+        if res.returncode != 0:
+            return {"ok": False, "error": f"dependency refresh failed: {(res.stderr or res.stdout)[:300]}"}
+        return {"ok": True, "pulled": out.splitlines()[-1] if out else ""}
+    result = await asyncio.to_thread(_apply)
+    if not result.get("ok"):
+        raise HTTPException(500, result.get("error") or "update failed")
+    restarting = os.environ.get("SPARK_STUDIO_SERVICE") == "1"
+    result["restarting"] = restarting
+    result["new_version"] = doctor.app_version()
+    if restarting:
+        # Give the HTTP response time to flush, then exit; systemd restarts us.
+        asyncio.get_event_loop().call_later(1.5, os._exit, 0)
+    return result
+
+
 # ----- Bug report -------------------------------------------------------------
 
 _SECRET_KEY_RE = re.compile(r"token|secret|key|password|credential", re.I)
