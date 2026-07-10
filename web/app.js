@@ -644,16 +644,26 @@ async function refreshEnginePanel(engine) {
   ]);
   const banner = ui.querySelector('[data-slot="missing-banner"]');
   if (!sys.engines[engine]) {
+    // A pip install can take many minutes (torch is GBs) — its state must
+    // survive panel rebuilds (tab switches re-render this banner), otherwise
+    // a running install silently "resets" to the Install button.
+    const st = _installs[engine];
+    const running = !!st?.active;
+    const failed = !!st && !st.active && st.code !== 0 && st.code !== null;
     banner.innerHTML = `<div class="card" style="border-color:var(--warn);background:rgba(255,183,74,0.08)">
       <h3 style="color:var(--warn)"><i class="fa-solid fa-triangle-exclamation"></i> ${engine} is not installed</h3>
       <div class="muted" style="margin-bottom:10px">Spark Studio can't find <code>${engine === 'llamacpp' ? 'llama-server' : engine}</code> in this launcher's environment.</div>
       ${engine === 'llamacpp'
         ? `<div class="muted">Install via conda or build from source:</div>
            <pre class="mono" style="background:var(--bg);padding:10px;border-radius:6px">conda install -c conda-forge llama.cpp</pre>`
-        : `<button class="btn primary" data-install="${engine}"><i class="fa-solid fa-download"></i> Install ${engine}</button>
-           <pre class="login-log" data-slot="install-log" hidden></pre>`
+        : `${running
+              ? `<div><span class="badge">⏳ installing… this can take several minutes (large downloads)</span></div>`
+              : `<button class="btn primary" data-install="${engine}"><i class="fa-solid fa-download"></i> ${failed ? `Retry install (last attempt exited ${st.code})` : `Install ${engine}`}</button>`}
+           <pre class="login-log" data-slot="install-log" ${st?.lines.length ? '' : 'hidden'}></pre>`
       }
     </div>`;
+    const log = banner.querySelector('[data-slot="install-log"]');
+    if (log && st?.lines.length) { log.textContent = st.lines.join('\n'); log.scrollTop = log.scrollHeight; }
     const btn = banner.querySelector('[data-install]');
     if (btn) btn.addEventListener('click', () => streamInstall(engine, banner));
   } else {
@@ -666,22 +676,42 @@ async function refreshEnginePanel(engine) {
   ui.querySelector('[data-slot="recent"]').innerHTML = runs.map(renderRunRow).join('') || '<div class="muted">None yet.</div>';
 }
 
+// Engine installs in flight — keyed by engine so state survives re-renders.
+const _installs = {};
 function streamInstall(engine, bannerEl) {
-  const log = bannerEl.querySelector('[data-slot="install-log"]');
-  log.hidden = false; log.textContent = '';
-  const btn = bannerEl.querySelector('[data-install]');
-  if (btn) btn.disabled = true;
+  if (_installs[engine]?.active) return; // one install at a time per engine
+  const st = (_installs[engine] = { active: true, code: null, lines: [] });
+  refreshEnginePanel(engine); // swap the button for the "installing…" badge
+  const liveLog = () => document.querySelector(`.panel[data-panel="${engine}"] [data-slot="install-log"]`);
   const es = new EventSource(`/api/engines/install/${engine}`);
   es.addEventListener('log', (ev) => {
-    log.textContent += ev.data + '\n'; log.scrollTop = log.scrollHeight;
+    st.lines.push(ev.data);
+    if (st.lines.length > 500) st.lines.shift();
+    const log = liveLog(); // re-query: the panel may have been rebuilt since
+    if (log) { log.hidden = false; log.textContent = st.lines.join('\n'); log.scrollTop = log.scrollHeight; }
   });
   es.addEventListener('done', (ev) => {
     es.close();
-    toast(ev.data === '0' ? `${engine} installed` : `${engine} install exited ${ev.data}`, ev.data === '0' ? 'ok' : 'danger');
-    refreshEnginePanel(engine);
+    st.active = false;
+    st.code = Number(ev.data);
+    if (st.code === 0) {
+      toast(`${engine} installed`);
+      delete _installs[engine];
+    } else {
+      st.lines.push(`[install failed — exit ${st.code}]`);
+      toast(`${engine} install failed (exit ${st.code}) — the log stays on the ${engine} tab`, 'danger');
+    }
+    refreshEnginePanel(engine); // success clears the banner; failure keeps log + Retry
     refreshSystem();
   });
-  es.addEventListener('error', () => { es.close(); toast('Install stream error', 'danger'); if (btn) btn.disabled = false; });
+  es.addEventListener('error', () => {
+    es.close();
+    st.active = false;
+    st.code = st.code ?? -1;
+    st.lines.push('[install stream disconnected — the pip process may still be running; re-check in a minute]');
+    toast('Install stream disconnected', 'danger');
+    refreshEnginePanel(engine);
+  });
 }
 
 $$('.panel[data-engine]').forEach(buildEnginePanel);

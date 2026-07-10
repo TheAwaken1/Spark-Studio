@@ -2322,6 +2322,10 @@ async def benchy_run(req: BenchyReq, request: Request):
 
 # ----- Engine install ------------------------------------------------------
 
+# Engines with a pip install currently streaming (one per engine at a time).
+_engine_installs: set[str] = set()
+
+
 @app.get("/api/engines/install/{engine}")
 async def install_engine(engine: str, request: Request):
     """Stream `uv pip install` for the requested engine into the launcher venv."""
@@ -2339,8 +2343,15 @@ async def install_engine(engine: str, request: Request):
 
     async def gen():
         import shutil
+        # One install per engine at a time — a stream reconnect or an eager
+        # re-click must not race a second pip against the same environment.
+        if engine in _engine_installs:
+            yield {"event": "log", "data": f"an install for {engine} is already running — give it a few minutes, then refresh"}
+            yield {"event": "done", "data": "-2"}
+            return
+        _engine_installs.add(engine)
         if shutil.which("uv"):
-            cmd = ["uv", "pip", "install", "--python", sys.executable, *pkgs]
+            cmd = ["uv", "pip", "install", "--no-progress", "--python", sys.executable, *pkgs]
         else:
             cmd = [sys.executable, "-m", "pip", "install", *pkgs]
         proc = await asyncio.create_subprocess_exec(
@@ -2350,13 +2361,32 @@ async def install_engine(engine: str, request: Request):
             env=os.environ.copy(),
         )
         assert proc.stdout is not None
-        async for raw in proc.stdout:
-            if await request.is_disconnected():
-                proc.terminate()
-                break
-            yield {"event": "log", "data": raw.decode("utf-8", "replace").rstrip("\n")}
-        await proc.wait()
-        yield {"event": "done", "data": str(proc.returncode)}
+        yield {"event": "log", "data": "$ " + " ".join(cmd)}
+        handed_off = False
+        try:
+            async for raw in proc.stdout:
+                yield {"event": "log", "data": raw.decode("utf-8", "replace").rstrip("\n")}
+            await proc.wait()
+            yield {"event": "done", "data": str(proc.returncode)}
+        except asyncio.CancelledError:
+            # Client went away (refresh, tab close). Do NOT kill the install —
+            # torch-sized downloads shouldn't die with a browser tab. Drain the
+            # pipe in the background so pip can't block on a full buffer; the
+            # drain task releases the one-install-per-engine guard when done.
+            handed_off = True
+
+            async def _drain():
+                try:
+                    async for _ in proc.stdout:
+                        pass
+                    await proc.wait()
+                finally:
+                    _engine_installs.discard(engine)
+            asyncio.create_task(_drain())
+            raise
+        finally:
+            if not handed_off:
+                _engine_installs.discard(engine)
 
     return EventSourceResponse(gen())
 
