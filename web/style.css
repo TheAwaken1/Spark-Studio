@@ -883,6 +883,42 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
 .modal-content { padding: 16px 18px; overflow-y: auto; }
 .modal-content label { margin-bottom: 10px; }
 
+/* Beginner mode: hide power-user tabs (toggle lives in the sidebar) */
+body[data-uimode="beginner"] .tab[data-tab="vllm"],
+body[data-uimode="beginner"] .tab[data-tab="sglang"],
+body[data-uimode="beginner"] .tab[data-tab="llamacpp"],
+body[data-uimode="beginner"] .tab[data-tab="webgpu"],
+body[data-uimode="beginner"] .tab[data-tab="forge"],
+body[data-uimode="beginner"] .tab[data-tab="bench"],
+body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
+.ui-mode { display: flex; gap: 0; margin-bottom: 10px; border: 1px solid var(--border);
+  border-radius: 8px; overflow: hidden; }
+.ui-mode-btn { flex: 1; padding: 6px 4px; font-size: 11px; background: transparent;
+  color: var(--text, #e5e7eb); border: 0; cursor: pointer; opacity: 0.65; }
+.ui-mode-btn.active { background: rgba(255,255,255,0.08); opacity: 1; font-weight: 600; }
+
+/* First-run wizard */
+.wiz-checks { display: flex; flex-direction: column; gap: 4px; max-height: 320px;
+  overflow-y: auto; margin: 8px 0; }
+.wiz-check { display: flex; gap: 8px; align-items: baseline; font-size: 13px; }
+.wiz-check-label { font-weight: 600; min-width: 150px; }
+.wiz-note { margin-top: 10px; padding: 8px 10px; border-radius: 8px;
+  border: 1px solid var(--border); font-size: 13px; }
+.wiz-note.ok { border-color: rgba(74, 222, 128, 0.4); background: rgba(74, 222, 128, 0.08); }
+.wiz-note.error { border-color: rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
+.wiz-goals { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px; margin: 12px 0; }
+.wiz-goal { padding: 14px 10px; text-align: center; line-height: 1.5; font-size: 14px; }
+.wiz-goal .muted { font-size: 11px; }
+.wiz-rec { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px;
+  margin: 8px 0; cursor: pointer; }
+.wiz-rec.hero { border-color: var(--accent, #60a5fa); background: rgba(96, 165, 250, 0.07); }
+.wiz-rec-name { font-weight: 700; margin-bottom: 4px; word-break: break-all; }
+.wiz-rec-badges { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 4px; }
+.wiz-alts .wiz-rec { opacity: 0.85; }
+.wiz-launching { font-size: 15px; margin: 14px 0; }
+.wiz-footer { padding: 12px 0 0; border-top: 0; display: flex; gap: 8px; justify-content: flex-end; }
+
 /* Recipe capability toggles (tool calling / reasoning) */
 .rm-caps { display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
   margin-bottom: 12px; padding: 8px 10px; border: 1px solid var(--border);

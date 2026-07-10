@@ -36,6 +36,7 @@ import hostinfo
 import models
 import vitals as _vitals
 import recipe_brain
+import recommend as recommend_mod
 import registry
 import searxng_service
 import oomguard
@@ -2325,6 +2326,14 @@ async def install_engine(engine: str, request: Request):
 
 
 # ----- System info ---------------------------------------------------------
+
+@app.get("/api/recommend")
+async def recommend_models(k: int = 3):
+    """Starter-model recommendations per category (fastest / best_quality /
+    coding / tool_calling / low_memory), ranked from proven local recipes,
+    cached models, registry recipes, and bench history. Powers the wizard."""
+    return await asyncio.to_thread(recommend_mod.recommend, max(1, min(k, 10)))
+
 
 @app.get("/api/doctor")
 async def doctor_report():

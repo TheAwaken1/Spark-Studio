@@ -4418,6 +4418,184 @@ $('#vitalsToggle').addEventListener('click', () => {
   });
 })();
 
+// ---------- UI mode (Beginner / Advanced) ---------------------------------
+// Beginner hides power-user tabs behind a simple five-tab layout. Stored per
+// browser; fresh installs (no recipes, no runs) default to Beginner, existing
+// setups stay Advanced so nobody gets demoted on their own box.
+const BEGINNER_TABS = new Set(['overview', 'recipes', 'models', 'chat', 'logs']);
+function applyUiMode(mode) {
+  document.body.dataset.uimode = mode;
+  localStorage.setItem('uiMode', mode);
+  $$('.ui-mode-btn').forEach((b) => b.classList.toggle('active', b.dataset.mode === mode));
+  // If the active tab just got hidden, land somewhere visible.
+  const active = $('.tab.active');
+  if (mode === 'beginner' && active && !BEGINNER_TABS.has(active.dataset.tab)) {
+    $('.tab[data-tab="overview"]')?.click();
+  }
+}
+$$('.ui-mode-btn').forEach((b) => b.addEventListener('click', () => applyUiMode(b.dataset.mode)));
+
+// ---------- first-run setup wizard ----------------------------------------
+const wiz = {
+  modal: null, goal: 'fastest', recs: null, pick: null, runId: null,
+  watch: null, startedAt: 0,
+};
+function wizStep(n) {
+  $$('#wizardModal .wiz-step').forEach((s) => (s.hidden = s.dataset.step !== String(n)));
+}
+function wizClose(markDone = true) {
+  if (markDone) localStorage.setItem('wizardDone', '1');
+  if (wiz.watch) { clearInterval(wiz.watch); wiz.watch = null; }
+  $('#wizardModal').hidden = true;
+}
+async function openWizard() {
+  $('#wizardModal').hidden = false;
+  wizStep(1);
+  $('#wizNext1').disabled = true;
+  $('#wizChecks').innerHTML = '<div class="muted">Running checks…</div>';
+  try {
+    const rep = await api('/doctor');
+    const icon = { ok: '✅', warn: '⚠️', error: '❌' };
+    $('#wizChecks').innerHTML = rep.checks.map((c) => `
+      <div class="wiz-check ${c.status}">
+        <span>${icon[c.status] || '•'}</span>
+        <span class="wiz-check-label">${escapeHtml(c.label)}</span>
+        <span class="muted">${escapeHtml(c.detail)}</span>
+      </div>`).join('');
+    const s = rep.summary;
+    const note = s.error
+      ? `<div class="wiz-note error">⚠ ${s.error} core issue(s) — you can continue, but fixes above are recommended.</div>`
+      : (s.warn ? `<div class="wiz-note">Optional features missing (${s.warn}) — everything else is ready.</div>`
+                : '<div class="wiz-note ok">Everything looks great — your Spark is ready.</div>');
+    $('#wizChecks').insertAdjacentHTML('beforeend', note);
+  } catch (e) {
+    $('#wizChecks').innerHTML = `<div class="wiz-note error">System check failed: ${escapeHtml(e.message)}</div>`;
+  }
+  $('#wizNext1').disabled = false;
+}
+function wizRecCard(e, hero) {
+  const badges = [
+    e.proven ? '<span class="badge ok">✓ ran on this Spark</span>' : '',
+    e.cached ? '<span class="badge">💾 already downloaded</span>' : '',
+    e.tokens_per_sec ? `<span class="badge">${Math.round(e.tokens_per_sec)} tok/s measured</span>` : '',
+    e.est_weight_gb ? `<span class="badge">~${e.est_weight_gb} GB</span>` : '',
+  ].filter(Boolean).join(' ');
+  return `
+    <div class="wiz-rec ${hero ? 'hero' : ''}" data-model="${escapeHtml(e.model)}">
+      <div class="wiz-rec-name">${escapeHtml(e.model)}</div>
+      <div class="wiz-rec-badges">${badges}</div>
+      <div class="muted">${escapeHtml(e.reason)}</div>
+    </div>`;
+}
+async function wizShowRecs() {
+  wizStep(3);
+  $('#wizRec').innerHTML = '<div class="muted">Finding the best model for your Spark…</div>';
+  $('#wizAlts').innerHTML = '';
+  try {
+    wiz.recs = wiz.recs || await api('/recommend');
+    const list = (wiz.recs.categories[wiz.goal] || []);
+    if (!list.length) {
+      $('#wizRec').innerHTML = '<div class="wiz-note">No ready-made match for that goal yet — the Recipe Forge can build one from any Hugging Face model id.</div>';
+      $('#wizLaunch').disabled = true;
+      return;
+    }
+    $('#wizLaunch').disabled = false;
+    wiz.pick = list[0];
+    $('#wizRec').innerHTML = '<div class="muted">Recommended for your Spark:</div>' + wizRecCard(list[0], true);
+    if (list.length > 1) {
+      $('#wizAlts').innerHTML = '<div class="muted">Alternatives:</div>'
+        + list.slice(1).map((e) => wizRecCard(e, false)).join('');
+    }
+    $$('#wizardModal .wiz-rec').forEach((el) => el.addEventListener('click', () => {
+      const m = el.dataset.model;
+      wiz.pick = list.find((x) => x.model === m) || wiz.pick;
+      $$('#wizardModal .wiz-rec').forEach((x) => x.classList.toggle('hero', x.dataset.model === m));
+    }));
+  } catch (e) {
+    $('#wizRec').innerHTML = `<div class="wiz-note error">${escapeHtml(e.message)}</div>`;
+  }
+}
+async function wizLaunch() {
+  if (!wiz.pick) return;
+  localStorage.setItem('wizardDone', '1'); // launching counts as onboarded
+  wizStep(4);
+  wiz.startedAt = Date.now();
+  const status = $('#wizLaunchStatus');
+  status.textContent = 'Saving recipe…';
+  try {
+    let recipe = wiz.pick.recipe;
+    if (!recipe.id) recipe = await api('/recipes', { method: 'POST', body: recipe });
+    status.textContent = 'Launching engine…';
+    const body = (!recipe.args?._registry && recipe.raw_cmd)
+      ? { engine: recipe.engine, raw_cmd: recipe.raw_cmd, env: recipe.env || {}, recipe_id: recipe.id }
+      : { engine: recipe.engine, args: { model: recipe.model, ...(recipe.args || {}) }, env: recipe.env || {}, recipe_id: recipe.id };
+    const run = await api('/runs', { method: 'POST', body });
+    wiz.runId = run.id;
+    refreshRecipes(); refreshRuns();
+    wiz.watch = setInterval(async () => {
+      try {
+        const r = await api(`/runs/${wiz.runId}`);
+        const secs = Math.round((Date.now() - wiz.startedAt) / 1000);
+        if (r.ready) {
+          clearInterval(wiz.watch); wiz.watch = null;
+          const stats = [
+            r.load_secs ? `Loaded in ${fmtDur(r.load_secs)}` : `Ready after ${secs}s`,
+            r.ram_delta_gb != null ? `${r.ram_delta_gb >= 0 ? '+' : ''}${r.ram_delta_gb} GB RAM` : '',
+            r.url ? `Endpoint: ${r.url}/v1` : '',
+          ].filter(Boolean).join(' · ');
+          $('#wizSuccess').innerHTML = `
+            <div class="wiz-note ok">🎉 <b>${escapeHtml(wiz.pick.model)}</b> is serving.</div>
+            <div class="muted">${escapeHtml(stats)}</div>`;
+          wizStep(5);
+        } else if (r.status === 'exited') {
+          clearInterval(wiz.watch); wiz.watch = null;
+          status.innerHTML = `<div class="wiz-note error">The launch failed (exit ${r.exit_code ?? '?'}).
+            Auto-Fix can read the logs and patch the recipe for you.</div>`;
+          $('#wizWatchLogs').textContent = 'Open Logs & Auto-Fix';
+        } else {
+          status.textContent = `Loading model… ${secs}s elapsed (status: ${r.status})`;
+        }
+      } catch { /* transient — keep polling */ }
+    }, 3000);
+  } catch (e) {
+    status.innerHTML = `<div class="wiz-note error">${escapeHtml(e.message)}</div>`;
+  }
+}
+function wizGotoRun(tab) {
+  wizClose();
+  $(`.tab[data-tab="${tab}"]`)?.click();
+  if (wiz.runId && tab === 'logs') setTimeout(() => window.selectRun(wiz.runId), 80);
+}
+$('#openWizard')?.addEventListener('click', () => { wiz.recs = null; openWizard(); });
+$('#wizSkip')?.addEventListener('click', () => wizClose(true));
+$('#wizNext1')?.addEventListener('click', () => wizStep(2));
+$$('#wizardModal .wiz-goal').forEach((b) => b.addEventListener('click', () => {
+  wiz.goal = b.dataset.goal; wizShowRecs();
+}));
+$('#wizBack3')?.addEventListener('click', () => wizStep(2));
+$('#wizLaunch')?.addEventListener('click', wizLaunch);
+$('#wizWatchLogs')?.addEventListener('click', () => wizGotoRun('logs'));
+$('#wizChat')?.addEventListener('click', () => wizGotoRun('chat'));
+$('#wizBench')?.addEventListener('click', () => wizGotoRun('bench'));
+$('#wizDone')?.addEventListener('click', () => wizClose(true));
+
+// Fresh-install detection: default Beginner Mode + auto-open the wizard only
+// when there is truly nothing here yet (no recipes, no runs, never dismissed).
+(async function bootOnboarding() {
+  const savedMode = localStorage.getItem('uiMode');
+  try {
+    const [recipes, runs] = await Promise.all([
+      api('/recipes').catch(() => []),
+      api('/runs').catch(() => []),
+    ]);
+    const fresh = !recipes.length && !runs.length;
+    applyUiMode(savedMode || (fresh ? 'beginner' : 'advanced'));
+    if (fresh && !localStorage.getItem('wizardDone')) openWizard();
+  } catch {
+    applyUiMode(savedMode || 'advanced');
+  }
+})();
+
 // ---------- boot ---------------------------------------------------------
 refreshSystem();
 refreshOverview();

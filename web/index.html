@@ -40,6 +40,12 @@
     <!-- live vitals + status stacked at bottom -->
     <div class="sidebar-bottom">
 
+      <!-- Beginner/Advanced UI mode -->
+      <div class="ui-mode" title="Beginner hides advanced tabs; Advanced shows everything">
+        <button class="ui-mode-btn" id="modeBeginner" data-mode="beginner">Beginner</button>
+        <button class="ui-mode-btn" id="modeAdvanced" data-mode="advanced">Advanced</button>
+      </div>
+
       <!-- DGX Spark live telemetry widget -->
       <div class="vitals-widget" id="vitalsWidget">
         <div class="vitals-header" id="vitalsToggle" title="Click to expand live vitals">
@@ -80,6 +86,7 @@
       <header class="panel-header">
         <h1>Overview</h1>
         <p>One place to launch and control every engine running on your DGX Spark.</p>
+        <button class="btn" id="openWizard" title="Guided setup: system check → pick a goal → launch a recommended model"><i class="fa-solid fa-wand-magic-sparkles"></i> Setup Wizard</button>
       </header>
       <div class="grid grid-3">
         <div class="card">
@@ -548,6 +555,63 @@
       <div class="modal-footer">
         <button class="btn" data-close>Discard</button>
         <button class="btn primary" id="fixApply">Save &amp; Run patch</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- First-run setup wizard -->
+  <div class="modal" id="wizardModal" hidden>
+    <div class="modal-body" style="max-width:680px">
+      <div class="modal-header">
+        <h3 id="wizTitle">Welcome to Spark Studio</h3>
+        <button class="btn" id="wizSkip" title="You can reopen the wizard any time from the Overview tab">Skip setup</button>
+      </div>
+      <div class="modal-content">
+        <!-- Step 1: system check -->
+        <div class="wiz-step" data-step="1">
+          <p class="muted">Checking your Spark…</p>
+          <div id="wizChecks" class="wiz-checks"></div>
+          <div class="modal-footer wiz-footer">
+            <button class="btn primary" id="wizNext1" disabled>Continue</button>
+          </div>
+        </div>
+        <!-- Step 2: goal -->
+        <div class="wiz-step" data-step="2" hidden>
+          <p class="muted">What do you want to do first? Spark Studio will pick the best model for your hardware.</p>
+          <div class="wiz-goals">
+            <button class="btn wiz-goal" data-goal="fastest">💬 Fast chat<br /><span class="muted">snappiest responses</span></button>
+            <button class="btn wiz-goal" data-goal="best_quality">🧠 Best quality<br /><span class="muted">biggest model that fits</span></button>
+            <button class="btn wiz-goal" data-goal="coding">💻 Coding<br /><span class="muted">code generation</span></button>
+            <button class="btn wiz-goal" data-goal="tool_calling">🔧 Agents &amp; tools<br /><span class="muted">native tool calling</span></button>
+            <button class="btn wiz-goal" data-goal="low_memory">🪶 Low memory<br /><span class="muted">leave room for other work</span></button>
+          </div>
+        </div>
+        <!-- Step 3: recommendation -->
+        <div class="wiz-step" data-step="3" hidden>
+          <div id="wizRec"></div>
+          <div id="wizAlts" class="wiz-alts"></div>
+          <div class="modal-footer wiz-footer">
+            <button class="btn" id="wizBack3">Back</button>
+            <button class="btn success" id="wizLaunch">🚀 Launch</button>
+          </div>
+        </div>
+        <!-- Step 4: launching -->
+        <div class="wiz-step" data-step="4" hidden>
+          <div id="wizLaunchStatus" class="wiz-launching">Starting…</div>
+          <p class="muted">First launches can take a few minutes if the model needs to download. You can close this window — the run keeps going in Runs &amp; Logs.</p>
+          <div class="modal-footer wiz-footer">
+            <button class="btn" id="wizWatchLogs">Watch full logs</button>
+          </div>
+        </div>
+        <!-- Step 5: success -->
+        <div class="wiz-step" data-step="5" hidden>
+          <div id="wizSuccess"></div>
+          <div class="modal-footer wiz-footer">
+            <button class="btn primary" id="wizChat">💬 Chat Now</button>
+            <button class="btn" id="wizBench">📊 Benchmark</button>
+            <button class="btn" id="wizDone">Done</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>

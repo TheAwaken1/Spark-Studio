@@ -1,9 +1,40 @@
 # Spark Studio
 
-A dashboard to manage and control **vLLM**, **SGLang**, **llama.cpp**, and **WebGPU (WebLLM)** on NVIDIA DGX Spark. Drop recipes in, click Run, and get one-click agent assistance from Claude Code or OpenAI Codex when something breaks — using your own Pro / Max / Plus subscription, no API keys required.
+**Your DGX Spark, one friendly dashboard.** Launch local models with one click, watch memory and logs live, chat, benchmark — and when a recipe breaks or runs slow, let Claude Code or Codex diagnose, patch, and relaunch it for you (your own Pro/Max/Plus subscription, no API keys).
+
+Runs **vLLM**, **SGLang**, **llama.cpp**, **WebGPU (WebLLM)**, and **sparkrun** community recipes.
+
+## Quick Start
+
+```bash
+git clone https://github.com/TheAwaken1/Spark-Studio.git
+cd Spark-Studio
+./start.sh
+```
+
+Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on your LAN). First run sets up the Python environment automatically, then a **setup wizard** checks your system, recommends a model that fits your Spark, and launches it.
+
+```bash
+./start.sh --doctor   # full system health report at any time
+```
+
+## What you can do in 60 seconds
+
+1. Open the dashboard — the wizard checks your Spark and picks a starter model
+2. Click **Launch** — watch load progress and unified-memory use live
+3. **Chat** with the model the moment it's serving
+4. Click **Benchmark** for tok/s + TTFT, or **Optimize Speed** to let an agent tune it
+5. If anything fails, **Auto-Fix & Retry** reads the logs and patches the recipe
+
+## Demo
+
+<!-- TODO: capture docs/demo.gif — paste a HF model id → Forge → Run → chat -->
+*Screenshots and demo GIF coming soon.*
 
 ## Features
 
+- **First-run setup wizard** — on a fresh install the browser opens to a guided flow: full system check (`/api/doctor`), pick a goal (fast chat / best quality / coding / agents & tools / low memory), and launch a model **recommended for your hardware** — ranked from recipes proven on your Spark, models already on disk, community-validated registry recipes, and your own benchmark history. Reopen any time via **Setup Wizard** on the Overview tab
+- **Beginner / Advanced mode** — a sidebar toggle. Beginner shows just the essentials (Overview, Recipes, Models, Chat, Runs & Logs); Advanced shows every engine tab, Forge, Benchmarks, and Agents. Fresh installs start in Beginner; existing setups stay Advanced
 - **Dashboard UI** with dedicated tabs per engine (vLLM, SGLang, llama.cpp, WebGPU). Run lists are named by model/recipe (not hex ids), recipe editors are full Monaco editors with YAML/JSON/shell highlighting, and on phones/tablets the sidebar collapses into a slide-out menu — handy for checking vitals or logs from the couch
 - **LAN-ready** — `./start.sh` binds to all interfaces so every computer on your network can use the app (no login; don't expose it to the internet)
 - **Zero-CDN, offline-ready UI** — fonts (Inter / JetBrains Mono), Font Awesome icons, Monaco, Chart.js, and highlight.js are bundled under `web/vendor/` and served locally; the dashboard is fully functional on a firewalled or offline box. The browser tab shows the running engine (`▶ vllm · Spark Studio`) and the app is installable as a PWA
@@ -397,6 +428,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 |---|---|---|
 | `GET` | `/api/system` | GPU / engine / platform info |
 | `GET` | `/api/doctor` | Full system health report (same as `./start.sh --doctor`) |
+| `GET` | `/api/recommend?k=` | Starter-model recommendations per goal, ranked from local signals |
 | `GET` | `/api/host?refresh=` | Structured GPU + Spark-mesh probe |
 | `GET` | `/api/active` | Engine currently serving chat |
 | `GET` `POST` `DELETE` | `/api/recipes[...]` | Recipe CRUD (POST normalizes vLLM context/batch) |
