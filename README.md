@@ -557,3 +557,9 @@ Spark Studio is built on the work of the DGX Spark / GB10 community:
 - [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) — canonical docker orchestration for Spark recipes (used verbatim for docker runs)
 - [eugr/llama-benchy](https://github.com/eugr/llama-benchy) — the benchmark engine behind the Benchmarks tab
 - [Spark Arena leaderboard](https://spark-arena.com/leaderboard) — community benchmark hub; paste its recipe YAMLs straight into the engine tabs, and share your own results with the ⧉ report button
+
+## License
+
+MIT — see [LICENSE](LICENSE). Vendored assets under `web/vendor/` (Monaco
+Editor, Chart.js, marked, DOMPurify, highlight.js, qrcode-generator,
+Font Awesome Free) retain their own licenses; see the headers in each file.

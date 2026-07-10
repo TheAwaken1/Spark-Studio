@@ -19,7 +19,3 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
-
-Vendored third-party assets under web/vendor/ retain their own licenses
-(Monaco Editor, Chart.js, marked, DOMPurify, highlight.js, qrcode-generator,
-Font Awesome Free) — see the license headers within each file.
