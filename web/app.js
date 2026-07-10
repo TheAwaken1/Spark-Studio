@@ -4428,7 +4428,7 @@ $('#vitalsToggle').addEventListener('click', () => {
 // Beginner hides power-user tabs behind a simple five-tab layout. Stored per
 // browser; fresh installs (no recipes, no runs) default to Beginner, existing
 // setups stay Advanced so nobody gets demoted on their own box.
-const BEGINNER_TABS = new Set(['overview', 'recipes', 'models', 'chat', 'logs']);
+const BEGINNER_TABS = new Set(['overview', 'recipes', 'models', 'chat', 'logs', 'recovery']);
 function applyUiMode(mode) {
   document.body.dataset.uimode = mode;
   localStorage.setItem('uiMode', mode);
@@ -4440,6 +4440,50 @@ function applyUiMode(mode) {
   }
 }
 $$('.ui-mode-btn').forEach((b) => b.addEventListener('click', () => applyUiMode(b.dataset.mode)));
+
+// ---------- recovery page ---------------------------------------------------
+function recoveryReport(html) { $('#recoveryResult').innerHTML = html; }
+$$('[data-recover]').forEach((b) => b.addEventListener('click', async () => {
+  const action = b.dataset.recover;
+  b.disabled = true;
+  recoveryReport('Working…');
+  try {
+    const r = await api(`/recovery/${action}`, { method: 'POST', body: {} });
+    if (action === 'clear-runs') {
+      recoveryReport(`Removed ${r.removed_from_list.length} finished run(s) from the list`
+        + (r.stale_rows_closed ? ` · closed ${r.stale_rows_closed} stale database row(s)` : '') + '.');
+      refreshRuns();
+    } else if (action === 'clean-containers') {
+      const rm = r.removed.length ? `Removed: ${r.removed.map(escapeHtml).join(', ')}` : 'Nothing to remove';
+      const sk = (r.skipped || []).length
+        ? `<br>Kept: ${r.skipped.map((s) => `${escapeHtml(s.name)} <span class="muted">(${escapeHtml(s.why)})</span>`).join(', ')}` : '';
+      recoveryReport(rm + sk);
+    } else if (action === 'reset-registry') {
+      recoveryReport('Registry cache cleared — re-downloading community recipes in the background.');
+    }
+    toast('Done');
+  } catch (e) { recoveryReport(''); toast(e.message, 'danger'); }
+  b.disabled = false;
+}));
+$('#recoverResetDb')?.addEventListener('click', async () => {
+  if (!confirm('Delete ALL saved recipes, run history, and benchmark history?\n\nDownloaded models are NOT deleted. A running model keeps serving.\n\nThere is no undo.')) return;
+  try {
+    const r = await api('/recovery/reset-db', { method: 'POST', body: { confirm: true } });
+    recoveryReport('Database reset: ' + Object.entries(r.deleted).map(([t, n]) => `${t} ${n}`).join(' · '));
+    toast('Database reset');
+    refreshRecipes(); refreshRuns(); refreshOverview();
+  } catch (e) { toast(e.message, 'danger'); }
+});
+async function copyBugReport(runId) {
+  try {
+    toast('Building bug report…');
+    const r = await api(`/bugreport${runId ? `?run_id=${runId}` : ''}`);
+    await copyText(r.markdown);
+    toast('Bug report copied to clipboard 📋');
+  } catch (e) { toast(`Bug report failed: ${e.message}`, 'danger'); }
+}
+$('#recoverBugReport')?.addEventListener('click', () => copyBugReport(null));
+$('#logsBugReport')?.addEventListener('click', () => copyBugReport(currentRunId));
 
 // ---------- first-run setup wizard ----------------------------------------
 const wiz = {

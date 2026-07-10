@@ -37,6 +37,7 @@ import models
 import vitals as _vitals
 import recipe_brain
 import recommend as recommend_mod
+import recovery
 import registry
 import searxng_service
 import oomguard
@@ -2323,6 +2324,88 @@ async def install_engine(engine: str, request: Request):
         yield {"event": "done", "data": str(proc.returncode)}
 
     return EventSourceResponse(gen())
+
+
+# ----- Recovery (the "I broke it" page) --------------------------------------
+
+class ConfirmReq(BaseModel):
+    confirm: bool = False
+
+
+@app.post("/api/recovery/clear-runs")
+def recovery_clear_runs():
+    return recovery.clear_finished_runs()
+
+
+@app.post("/api/recovery/clean-containers")
+async def recovery_clean_containers():
+    return await asyncio.to_thread(recovery.clean_containers)
+
+
+@app.post("/api/recovery/reset-registry")
+async def recovery_reset_registry():
+    result = await asyncio.to_thread(recovery.reset_registry)
+    asyncio.create_task(_background_registry_sync())  # re-clone in the background
+    return result
+
+
+@app.post("/api/recovery/reset-db")
+async def recovery_reset_db(req: ConfirmReq):
+    result = await asyncio.to_thread(recovery.wipe_db, req.confirm)
+    if not result.get("ok"):
+        raise HTTPException(400, result.get("error") or "reset refused")
+    return result
+
+
+# ----- Bug report -------------------------------------------------------------
+
+_SECRET_KEY_RE = re.compile(r"token|secret|key|password|credential", re.I)
+
+
+def _redact_env(env: dict | None) -> dict:
+    return {k: ("•••" if _SECRET_KEY_RE.search(k) else v) for k, v in (env or {}).items()}
+
+
+@app.get("/api/bugreport")
+async def bug_report(run_id: str | None = None):
+    """Everything a GitHub issue (or an agent) needs, as copy-paste markdown:
+    version, doctor report, the run's recipe (secrets redacted), and its last
+    300 log lines."""
+    rep = await asyncio.to_thread(doctor.run_checks)
+    icon = {"ok": "✅", "warn": "⚠️", "error": "❌"}
+    lines = [
+        f"## Spark Studio bug report · v{rep['version']}",
+        "",
+        "### System",
+        *[f"- {icon.get(c['status'], '•')} **{c['label']}**: {c['detail']}" for c in rep["checks"]],
+        "",
+    ]
+    run = runner.get(run_id) if run_id else runner.active()
+    if run:
+        s = run.summary()
+        lines += [
+            "### Run",
+            f"- engine: `{s['engine']}` · status: `{s['outcome']}` · exit: `{s['exit_code']}`",
+            f"- model/label: `{s['label']}` · url: `{s['url']}` · ready: `{s['ready']}`",
+            f"- load: {s['load_secs'] or '?'}s · RAM delta: {s['ram_delta_gb'] or '?'} GB",
+            "",
+        ]
+        recipe = db.recipes_get(run.recipe_id) if run.recipe_id else None
+        if recipe:
+            spec = {
+                "engine": recipe.get("engine"),
+                "model": recipe.get("model"),
+                "args": recipe.get("args"),
+                "env": _redact_env(recipe.get("env")),
+                "raw_cmd": recipe.get("raw_cmd"),
+            }
+            lines += ["### Recipe", "```json", json.dumps(spec, indent=2), "```", ""]
+        tail = list(run.ring)[-300:]
+        if tail:
+            lines += ["### Last log lines", "```", *tail, "```", ""]
+    else:
+        lines += ["### Run", "_no active run_", ""]
+    return {"markdown": "\n".join(lines)}
 
 
 # ----- System info ---------------------------------------------------------

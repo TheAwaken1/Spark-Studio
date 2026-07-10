@@ -36,6 +36,7 @@
       <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
       <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
       <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
+      <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> Recovery</a>
     </nav>
     <!-- live vitals + status stacked at bottom -->
     <div class="sidebar-bottom">
@@ -417,6 +418,7 @@
             <button id="logsKill" class="btn danger" disabled><i class="fa-solid fa-skull"></i> Force</button>
             <button id="logsFix" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Claude</button>
             <button id="logsFixCodex" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Codex</button>
+            <button id="logsBugReport" class="btn" title="Copy a markdown bug report: system health + this run's recipe and last 300 log lines (secrets redacted)"><i class="fa-solid fa-bug"></i> Bug Report</button>
           </div>
           <div id="logsRecovery" class="logs-recovery" hidden>
             <div class="logs-recovery-copy">
@@ -456,6 +458,45 @@
           <pre id="codexLog" class="login-log"></pre>
         </div>
       </div>
+    </section>
+
+    <section class="panel" data-panel="recovery">
+      <header class="panel-header"><h1>Recovery</h1><p>Something stuck or broken? Every action below says exactly what it does — none of them delete downloaded models.</p></header>
+      <div class="grid grid-2">
+        <div class="card">
+          <h3><i class="fa-solid fa-broom"></i> Clear finished runs</h3>
+          <p class="muted">Removes exited runs from the run list. Run history stays in the database; nothing running is touched.</p>
+          <button class="btn primary" data-recover="clear-runs">Clear Finished Runs</button>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-box-open"></i> Remove orphan containers</h3>
+          <p class="muted">Removes leftover <code>spark-vllm-*</code> / <code>sparkrun_*</code> containers that no live run controls. Containers owned by running workloads, active sparkrun jobs, and anything you manage yourself (like <code>vllm_node</code>) are never touched.</p>
+          <button class="btn primary" data-recover="clean-containers">Clean Containers</button>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-rotate"></i> Reset registry cache</h3>
+          <p class="muted">Deletes the local mirror of the community recipe repos and forged YAML cache, then re-downloads fresh copies in the background. Fixes stale or corrupted recipe listings.</p>
+          <button class="btn" data-recover="reset-registry">Reset Registry Cache</button>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-triangle-exclamation"></i> Reset app database</h3>
+          <p class="muted"><b>Deletes saved recipes, run history, benchmark and eval history.</b> Does not stop a running model and does not delete downloaded model files. There is no undo.</p>
+          <button class="btn danger" id="recoverResetDb">Reset Database…</button>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-bug"></i> Copy bug report</h3>
+          <p class="muted">Copies a markdown report — system health, active run, recipe (secrets redacted), and the last 300 log lines — ready to paste into a GitHub issue or hand to an agent.</p>
+          <button class="btn primary" id="recoverBugReport"><i class="fa-solid fa-copy"></i> Copy Bug Report</button>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-terminal"></i> Full reset (terminal)</h3>
+          <p class="muted">If the app itself won't start, run these from the install folder:</p>
+          <pre class="mono" style="font-size:11px">rm -f data/spark_studio.db     # settings/history only
+rm -rf env && ./start.sh       # rebuild Python env
+./start.sh --doctor            # health report</pre>
+        </div>
+      </div>
+      <div id="recoveryResult" class="muted" style="margin-top:12px"></div>
     </section>
   </main>
 

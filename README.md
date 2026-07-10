@@ -317,15 +317,25 @@ npm install -g @anthropic-ai/claude-code @openai/codex
 Registry mirrors refresh themselves on every app start (or click **Refresh
 now** on the Forge tab) — no manual git commands needed.
 
-## Resetting
+## I Broke It — Safe Reset
 
-To start completely fresh (wipes the venv and the local database):
+The **Recovery** tab (visible in Beginner Mode too) has one-click, plainly
+labeled actions: clear finished runs, remove orphan containers (never touches
+containers you manage yourself or active sparkrun jobs), reset the registry
+cache, reset the app database (confirm-gated; models on disk are untouched),
+and **Copy Bug Report** — a markdown bundle of system health + the failing
+run's recipe and last 300 log lines (secrets redacted), ready for a GitHub
+issue or an agent.
+
+From the terminal, when the app itself won't start:
 
 ```bash
-rm -rf env data/spark_studio.db
+rm -f data/spark_studio.db     # clear saved recipes/history only
+rm -rf env && ./start.sh       # rebuild the Python environment
+rm -rf env data/spark_studio.db && ./start.sh   # full reset
 ```
 
-Then just `./start.sh` again — it rebuilds the environment automatically.
+Downloaded models live in the HF cache and survive every reset above.
 
 ## Recipe Schema
 
@@ -459,6 +469,8 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/system` | GPU / engine / platform info |
 | `GET` | `/api/doctor` | Full system health report (same as `./start.sh --doctor`) |
 | `GET` | `/api/recommend?k=` | Starter-model recommendations per goal, ranked from local signals |
+| `POST` | `/api/recovery/{clear-runs\|clean-containers\|reset-registry\|reset-db}` | One-click recovery actions (reset-db needs `{"confirm":true}`) |
+| `GET` | `/api/bugreport?run_id=` | Markdown bug report: doctor + run + recipe (redacted) + logs |
 | `GET` | `/api/host?refresh=` | Structured GPU + Spark-mesh probe |
 | `GET` | `/api/active` | Engine currently serving chat |
 | `GET` `POST` `DELETE` | `/api/recipes[...]` | Recipe CRUD (POST normalizes vLLM context/batch) |
