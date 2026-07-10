@@ -59,14 +59,27 @@ def _nvidia_smi_query() -> list[dict[str, Any]]:
             continue
         try:
             idx = int(parts[0])
-            mem_mib = int(parts[2])
         except ValueError:
             continue
+        # GB10 reports memory.total as [N/A]: its 128 GB is unified with system
+        # RAM, so nvidia-smi has no discrete VRAM number. Dropping the GPU here
+        # (the old behavior) silently broke DGX Spark detection and every
+        # fits-this-Spark check — fall back to total system memory instead,
+        # which IS the GPU-visible pool on unified-memory boxes.
+        memory_gb: float | None = None
+        try:
+            memory_gb = round(int(parts[2]) / 1024, 1)
+        except ValueError:
+            try:
+                import psutil
+                memory_gb = round(psutil.virtual_memory().total / 1024 ** 3, 1)
+            except Exception:  # noqa: BLE001
+                memory_gb = 0.0
         gpus.append(
             {
                 "index": idx,
                 "name": parts[1],
-                "memory_gb": round(mem_mib / 1024, 1),
+                "memory_gb": memory_gb,
                 "driver": parts[3],
             }
         )

@@ -9,6 +9,7 @@ cd "$(dirname "$0")"
 HOST=0.0.0.0
 PORT=7860
 NO_SPARKRUN_UPDATE="${SPARK_STUDIO_NO_SPARKRUN_UPDATE:-0}"
+DOCTOR=0
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -16,6 +17,7 @@ while [[ $# -gt 0 ]]; do
         --host) HOST="$2"; shift 2 ;;
         --port) PORT="$2"; shift 2 ;;
         --no-sparkrun-update) NO_SPARKRUN_UPDATE=1; shift ;;
+        --doctor) DOCTOR=1; shift ;;
         *) EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
@@ -37,6 +39,11 @@ if [[ ! -x env/bin/python ]]; then
         env/bin/pip install -r requirements.txt
     fi
     echo "Environment ready."
+fi
+
+# Doctor mode: print the system health report and exit (no server start).
+if [[ "$DOCTOR" == "1" ]]; then
+    exec env/bin/python doctor.py
 fi
 
 # Keep sparkrun fresh on launch: a bare `sparkrun update` upgrades the tool

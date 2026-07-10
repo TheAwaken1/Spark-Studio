@@ -29,6 +29,7 @@ import bench
 import benchy
 import db
 import docker_recipe
+import doctor
 import forge
 import hf_check
 import hostinfo
@@ -45,7 +46,7 @@ from runners import runner, engine_available, MemoryTooTight
 APP_DIR = Path(__file__).parent
 WEB_DIR = APP_DIR / "web"
 
-app = FastAPI(title="Spark Studio", version="1.0.0")
+app = FastAPI(title="Spark Studio", version=doctor.app_version())
 
 # No cross-origin access. The dashboard is served from the same origin as the
 # API, so it needs no CORS grant. A wildcard here would let any website the
@@ -2324,6 +2325,15 @@ async def install_engine(engine: str, request: Request):
 
 
 # ----- System info ---------------------------------------------------------
+
+@app.get("/api/doctor")
+async def doctor_report():
+    """Full system health report (same source of truth as `./start.sh --doctor`).
+    Powers the first-run wizard's system check, the Feature Health card, and
+    bug-report export. Runs in a thread — probes shell out to nvidia-smi,
+    docker, sparkrun, etc."""
+    return await asyncio.to_thread(doctor.run_checks)
+
 
 @app.get("/api/host")
 def host_info(refresh: bool = False):

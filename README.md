@@ -56,7 +56,7 @@ Optional extras:
 ### 1. Clone and start
 
 ```bash
-git clone https://github.com/your-username/Spark-Studio.git
+git clone https://github.com/TheAwaken1/Spark-Studio.git
 cd Spark-Studio
 ./start.sh
 ```
@@ -109,6 +109,18 @@ After installing, log in from the **Agents** tab inside Spark Studio — no API 
 ```
 
 (First run also sets up the Python environment — see Installation.)
+
+### Health check (doctor)
+
+```bash
+./start.sh --doctor
+```
+
+Prints a full system report — OS/GPU/driver, unified memory, Docker, every
+engine (vLLM/SGLang/llama.cpp), sparkrun, Claude/Codex agents, llama-benchy,
+SearXNG, and your dashboard URLs — with a one-line fix for anything missing.
+Exit code is non-zero when a core check fails, so it's scriptable. The same
+report is served at `GET /api/doctor` for the UI and bug reports.
 
 or manually:
 
@@ -384,6 +396,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/api/system` | GPU / engine / platform info |
+| `GET` | `/api/doctor` | Full system health report (same as `./start.sh --doctor`) |
 | `GET` | `/api/host?refresh=` | Structured GPU + Spark-mesh probe |
 | `GET` | `/api/active` | Engine currently serving chat |
 | `GET` `POST` `DELETE` | `/api/recipes[...]` | Recipe CRUD (POST normalizes vLLM context/batch) |
