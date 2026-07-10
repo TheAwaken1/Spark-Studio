@@ -119,6 +119,10 @@ cd "$DIR"
 echo
 echo "Setting up the Python environment (first run can take a few minutes)…"
 bash start.sh --doctor || true   # non-zero just means a core check warned — report is what matters
+# The doctor exits non-zero on hardware warnings too, so verify the part that
+# must have worked: the venv exists and the app's core deps import.
+env/bin/python -c "import fastapi, uvicorn, httpx" 2>/dev/null \
+    || fail "Python environment setup failed — scroll up for the dependency error, then re-run this installer."
 
 # ----- profile extras ---------------------------------------------------------
 if [[ "$PROFILE" == "recommended" || "$PROFILE" == "full" ]]; then
