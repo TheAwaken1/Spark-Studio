@@ -280,6 +280,25 @@ answers from real content with inline source citations — not from homepage
 snippets. Reasoning models' chain-of-thought renders as a collapsible
 "Thinking" section instead of polluting the answer.
 
+## Prometheus / Grafana
+
+Every Spark Studio instance exposes standard [Prometheus](https://prometheus.io)
+metrics at `/metrics` — GPU utilization/temperature/power/clock, unified memory,
+CPU, and per-run readiness gauges. For historic dashboards across a mesh, add a
+scrape job per Spark and point Grafana at Prometheus:
+
+```yaml
+scrape_configs:
+  - job_name: spark-studio
+    static_configs:
+      - targets: ["192.168.0.132:7860", "192.168.0.133:7860"]
+```
+
+Token-level engine metrics (throughput, KV-cache usage, queue depth) come from
+the engines themselves — the active vLLM run serves its own `/metrics` on its
+port; scrape that alongside. No Kubernetes/DCGM stack required, but if you run
+one, these endpoints scrape the same way.
+
 ## Memory / OOM protection
 
 DGX Spark shares one 128 GB pool between GPU and system RAM, so a model that
@@ -544,6 +563,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/tooleval/status` | Live progress, per-case results, and scores of the current/last eval |
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |
+| `GET` | `/metrics` | Prometheus exposition: GPU/CPU/memory + run gauges (scrape each Spark for Grafana history) |
 
 ## Platform
 

@@ -2737,6 +2737,56 @@ def _has_module(name: str) -> bool:
     return importlib.util.find_spec(name) is not None
 
 
+# ----- Prometheus metrics ----------------------------------------------------
+
+def _prom_escape(v: str) -> str:
+    return str(v).replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Node + run telemetry in Prometheus exposition format. Point a
+    Prometheus scrape job at each Spark's :7860/metrics and Grafana gets
+    per-node dashboards with history — no k8s/DCGM stack required, but fully
+    compatible if you run one. (Engine token metrics: scrape the active
+    vLLM's own /metrics on its port.)"""
+    snap = await asyncio.to_thread(_vitals.snapshot)
+    lines: list[str] = [
+        "# HELP spark_studio_info Build info (constant 1).",
+        "# TYPE spark_studio_info gauge",
+        f'spark_studio_info{{version="{_prom_escape(doctor.app_version())}"}} 1',
+    ]
+
+    def gauge(name: str, help_: str, value, labels: str = "") -> None:
+        if value is None:
+            return
+        lines.append(f"# HELP {name} {help_}")
+        lines.append(f"# TYPE {name} gauge")
+        lines.append(f"{name}{{{labels}}} {value}" if labels else f"{name} {value}")
+
+    gauge("spark_gpu_utilization_percent", "GPU utilization.", snap.get("gpu_util"))
+    gauge("spark_gpu_temperature_celsius", "GPU temperature.", snap.get("gpu_temp"))
+    gauge("spark_gpu_power_watts", "GPU power draw.", snap.get("gpu_power"))
+    gauge("spark_gpu_clock_mhz", "GPU graphics clock.", snap.get("gpu_clock"))
+    gauge("spark_cpu_utilization_percent", "CPU utilization.", snap.get("cpu_pct"))
+    if snap.get("mem_used_gb") is not None:
+        gauge("spark_unified_memory_used_bytes", "Unified memory used.",
+              int(snap["mem_used_gb"] * 1024 ** 3))
+        gauge("spark_unified_memory_total_bytes", "Unified memory total.",
+              int(snap["mem_total_gb"] * 1024 ** 3))
+
+    running = [r for r in runner.runs.values() if r.status == "running"]
+    gauge("spark_studio_runs_running", "Engine runs currently running.", len(running))
+    for r in running:
+        labels = (f'engine="{_prom_escape(r.engine)}",'
+                  f'model="{_prom_escape(r.label or "")}",'
+                  f'run_id="{_prom_escape(r.id)}"')
+        gauge("spark_studio_run_ready", "1 when the run's engine is serving.",
+              1 if r.ready else 0, labels)
+    return Response("\n".join(lines) + "\n",
+                    media_type="text/plain; version=0.0.4; charset=utf-8")
+
+
 # ----- Static UI -----------------------------------------------------------
 
 WEB_DIR.mkdir(parents=True, exist_ok=True)
