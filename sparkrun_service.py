@@ -134,6 +134,42 @@ def start_update(channel: str | None, timeout: int = 900) -> dict[str, Any]:
     return update_status()
 
 
+def list_recipes(timeout: int = 30) -> list[dict[str, Any]]:
+    """`sparkrun list --json` → every launchable recipe across ALL configured
+    registries (official, eugr, transitional, …) — far more complete than our
+    local mirror of two repos. [] when sparkrun is missing or predates --json."""
+    exe = sparkrun_bin()
+    if not exe:
+        return []
+    try:
+        res = subprocess.run([exe, "list", "--json"], capture_output=True, text=True, timeout=timeout)
+        if res.returncode != 0 or not (res.stdout or "").lstrip().startswith("["):
+            return []
+        out = []
+        for r in json.loads(res.stdout):
+            ref = r.get("name") or ""
+            if not ref.startswith("@"):
+                continue
+            try:
+                min_nodes = int(r.get("min_nodes") or 1)
+            except (TypeError, ValueError):
+                min_nodes = 1
+            out.append({
+                "ref": ref,
+                "workload": r.get("file") or ref.rsplit("/", 1)[-1],
+                "namespace": (r.get("registry") or ref[1:].split("/", 1)[0]),
+                "name": r.get("file") or ref,
+                "model": r.get("model"),
+                "engine": r.get("runtime"),
+                "description": r.get("description") or "",
+                "min_nodes": min_nodes,
+                "max_nodes": None,
+            })
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
 def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
     """Parse `sparkrun status` into
     [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}].

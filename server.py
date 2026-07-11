@@ -845,7 +845,13 @@ def sparkrun_update_status():
 
 @app.get("/api/sparkrun/recipes")
 def sparkrun_recipes():
-    """Mirrored registry recipes addressable by sparkrun ref (@official/…, @experimental/…)."""
+    """Launchable community recipes. Preferred source: `sparkrun list --json`
+    (every registry sparkrun knows — official, eugr, transitional, …); falls
+    back to our two-mirror registry scrape when sparkrun is missing or old."""
+    via_sparkrun = sparkrun_service.list_recipes()
+    if via_sparkrun:
+        via_sparkrun.sort(key=lambda x: (x["namespace"], x["workload"]))
+        return via_sparkrun
     namespaces = {"official-recipes": "official", "experimental-recipes": "experimental"}
     out = []
     for r in registry.all_recipes():
