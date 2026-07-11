@@ -170,35 +170,56 @@ def list_recipes(timeout: int = 30) -> list[dict[str, Any]]:
         return []
 
 
+def _jobs_from_cluster_status(doc: dict[str, Any]) -> list[dict[str, Any]]:
+    """Map `sparkrun cluster status --json` output to our job shape.
+
+    Schema (sparkrun ClusterStatusResult.to_dict): groups is
+    {cluster_id: {meta, containers: [{host, role, status, image}]}}; solo
+    single-container jobs land in solo_entries [{cluster_id, meta, host,
+    status, image}]. meta carries recipe (the ref), hosts, port, and
+    overrides.tensor_parallel."""
+    def _job(cid: str, meta: dict[str, Any], members: list[dict[str, Any]]) -> dict[str, Any]:
+        jobid = cid.removeprefix("sparkrun_")
+        meta = meta or {}
+        try:
+            tp = int(((meta.get("overrides") or {}).get("tensor_parallel")) or meta.get("tp") or len(members) or 1)
+        except (TypeError, ValueError):
+            tp = max(len(members), 1)
+        hosts = [{"role": m.get("role") or "solo", "ip": m.get("host") or "",
+                  "status": m.get("status") or ""} for m in members]
+        return {
+            "ref": meta.get("recipe") or meta.get("ref") or "",
+            "tp": tp,
+            "jobid": jobid,
+            "hosts": hosts,
+            "containers": [f"sparkrun_{jobid}_{h['role']}" for h in hosts],
+        }
+
+    out: list[dict[str, Any]] = []
+    for cid, group in (doc.get("groups") or {}).items():
+        out.append(_job(cid, group.get("meta") or {}, group.get("containers") or []))
+    for entry in doc.get("solo_entries") or []:
+        out.append(_job(entry.get("cluster_id") or "", entry.get("meta") or {},
+                        [{"host": entry.get("host"), "role": "solo", "status": entry.get("status")}]))
+    return out
+
+
 def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
-    """Parse `sparkrun status` into
+    """Parse sparkrun's container status into
     [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}].
 
-    Tries `--json` first (per spark-arena guidance, most commands are growing
-    it — status doesn't have it as of 0.3.0-alpha) and falls back to parsing
-    the human output, so we upgrade automatically when sparkrun ships it."""
+    Primary source: `sparkrun cluster status --json` (the `status` alias
+    doesn't accept --json, but the underlying command does — thanks to the
+    spark-arena admin for the pointer). Text parsing of `sparkrun status`
+    remains as the fallback for older builds."""
     exe = sparkrun_bin()
     if not exe:
         return []
     try:
-        res = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=timeout)
-        if res.returncode == 0 and (res.stdout or "").lstrip().startswith(("[", "{")):
-            doc = json.loads(res.stdout)
-            jobs = doc if isinstance(doc, list) else doc.get("jobs") or []
-            out: list[dict[str, Any]] = []
-            for j in jobs:
-                jobid = j.get("jobid") or j.get("job_id") or j.get("id") or ""
-                hosts = [{"role": h.get("role") or "solo", "ip": h.get("ip") or h.get("host") or "",
-                          "status": h.get("status") or ""} for h in (j.get("hosts") or [])]
-                out.append({
-                    "ref": j.get("ref") or j.get("recipe") or "",
-                    "tp": int(j.get("tp") or 1),
-                    "jobid": jobid,
-                    "hosts": hosts,
-                    "containers": j.get("containers")
-                                  or [f"sparkrun_{jobid}_{h['role']}" for h in hosts],
-                })
-            return out
+        res = subprocess.run([exe, "cluster", "status", "--json"],
+                             capture_output=True, text=True, timeout=timeout)
+        if res.returncode == 0 and (res.stdout or "").lstrip().startswith("{"):
+            return _jobs_from_cluster_status(json.loads(res.stdout))
     except Exception:  # noqa: BLE001
         pass  # fall through to the text parser
     try:
