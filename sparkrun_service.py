@@ -204,6 +204,64 @@ def _jobs_from_cluster_status(doc: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def find_recipes_by_model(model: str, timeout: int = 30) -> list[dict[str, Any]]:
+    """Every sparkrun-launchable recipe whose model matches `model` exactly
+    (case-insensitive) — the Forge's highest-trust source for 'make this new
+    model work': if ANY community registry has validated the model (official,
+    eugr, atlas, …), that beats adapting or synthesizing.
+
+    Prefers `sparkrun list --json`; falls back to scanning the synced registry
+    cache on disk, because older sparkrun builds omit newer recipe formats
+    (e.g. 0.2.40-beta doesn't list recipe_version-2 / alternate-runtime
+    recipes that are sitting right there in ~/.cache/sparkrun/registries)."""
+    target = (model or "").strip().lower()
+    if not target:
+        return []
+    out = [r for r in list_recipes(timeout)
+           if (r.get("model") or "").strip().lower() == target]
+    seen = {r["ref"] for r in out}
+
+    # Disk fallback / supplement: registries synced by `sparkrun update`.
+    import yaml
+    from pathlib import Path
+    root = Path.home() / ".cache" / "sparkrun" / "registries"
+    if root.is_dir():
+        for reg_dir in sorted(p for p in root.iterdir() if p.is_dir()):
+            for yml in sorted(reg_dir.rglob("*.y*ml")):
+                try:
+                    if yml.stat().st_size > 128 * 1024:
+                        continue
+                    doc = yaml.safe_load(yml.read_text(encoding="utf-8", errors="replace"))
+                except Exception:  # noqa: BLE001
+                    continue
+                if not isinstance(doc, dict):
+                    continue
+                if (str(doc.get("model") or "")).strip().lower() != target:
+                    continue
+                ref = f"@{reg_dir.name}/{yml.stem}"
+                if ref in seen:
+                    continue
+                seen.add(ref)
+                meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+                desc = (doc.get("description") or meta.get("description") or "").strip()
+                try:
+                    min_nodes = int(doc.get("min_nodes") or (doc.get("defaults") or {}).get("tensor_parallel") or 1)
+                except (TypeError, ValueError):
+                    min_nodes = 1
+                out.append({
+                    "ref": ref,
+                    "workload": yml.stem,
+                    "namespace": reg_dir.name,
+                    "name": doc.get("name") or yml.stem,
+                    "model": doc.get("model"),
+                    "engine": doc.get("runtime") or "vllm",
+                    "description": desc.splitlines()[0][:200] if desc else "",
+                    "min_nodes": min_nodes,
+                    "max_nodes": int(doc["max_nodes"]) if str(doc.get("max_nodes") or "").isdigit() else None,
+                })
+    return out
+
+
 def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
     """Parse sparkrun's container status into
     [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}].

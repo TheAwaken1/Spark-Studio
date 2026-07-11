@@ -20,6 +20,7 @@ Each emitted recipe carries a ``source`` field (``registry`` / ``similar``
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import yaml
@@ -27,6 +28,49 @@ import yaml
 import hostinfo
 import recipe_brain
 import registry
+import sparkrun_service
+
+# MoE naming convention: "…-35B-A3B-…" — total params with A<active>B suffix.
+_MOE_RE = re.compile(r"[-_][Aa]\d+(?:\.\d+)?[Bb]\b")
+
+
+def _from_sparkrun_match(m: dict[str, Any]) -> dict[str, Any]:
+    """A validated community recipe (any sparkrun registry — official, eugr,
+    atlas, …) as a Forge card. Highest trust: someone already made this exact
+    model work on Spark hardware, possibly on a runtime vLLM can't match."""
+    min_nodes = int(m.get("min_nodes") or 1)
+    return {
+        "name": f"{m['ref']} · Community",
+        "engine": "sparkrun",
+        "model": m.get("model"),
+        # tensor_parallel informs the fit badge; the launch path reads
+        # args._sparkrun (ref + tp so multi-node recipes launch correctly).
+        "args": {"_sparkrun": {"ref": m["ref"], "port": 8000,
+                               **({"tp": min_nodes} if min_nodes > 1 else {})},
+                 "tensor_parallel": min_nodes},
+        "env": {},
+        "notes": (m.get("description") or "")
+                 or f"Validated community recipe from the {m.get('namespace')} registry (runtime: {m.get('engine')}).",
+        "tags": f"sparkrun,{m.get('namespace')}",
+        "raw_cmd": None,
+        "source": "sparkrun",
+        "sparkrun": {"ref": m["ref"], "runtime": m.get("engine"),
+                     "registry": m.get("namespace"), "min_nodes": min_nodes},
+    }
+
+
+def _compatible_adaptation(requested_repo: str, candidate_model: str | None) -> bool:
+    """Guard against adaptations that cross quant or architecture lines —
+    e.g. stapling a Marlin-MoE NVFP4 recipe onto a dense model produced a
+    silent FlashInfer hang in the field. Same quant family and same
+    MoE-ness, or no adaptation at all."""
+    if not candidate_model:
+        return False
+    if registry._quant_tokens_in(requested_repo) != registry._quant_tokens_in(candidate_model):
+        return False
+    if bool(_MOE_RE.search(requested_repo)) != bool(_MOE_RE.search(candidate_model)):
+        return False
+    return True
 
 
 # ----------------------------- fit annotation ----------------------------
@@ -341,13 +385,23 @@ def forge(report: dict[str, Any]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
 
     if repo:
+        # Highest trust first: a community registry (official, eugr, atlas, …)
+        # already validated THIS exact model on Spark hardware — that beats
+        # anything we could adapt or synthesize, and covers models whose only
+        # working path is a non-vLLM runtime.
+        try:
+            for m in sparkrun_service.find_recipes_by_model(repo):
+                out.append(_from_sparkrun_match(m))
+        except Exception:  # noqa: BLE001
+            pass
+
         exact = registry.by_exact_repo(repo)
         if exact:
             for rec in exact:
                 out.append(_from_registry_recipe(rec, repo, "registry"))
             return _finalize(out, report)
 
-        # No exact hit — surface adapted curated recipes (if any) AND a
+        # No exact mirror hit — surface adapted curated recipes (if any) AND a
         # freshly synthesized spark-vllm-docker shaped recipe for the repo.
         # Synth comes first because it actually targets the requested model.
         synth = _synth_recipe(report)
@@ -356,6 +410,10 @@ def forge(report: dict[str, Any]) -> list[dict[str, Any]]:
 
         similar = registry.by_similar(repo, k=3)
         for rec in similar:
+            # Cross-quant / cross-architecture adaptations produce recipes
+            # that hang or crash — offer only compatible ones.
+            if not _compatible_adaptation(repo, rec.model):
+                continue
             out.append(_from_registry_recipe(
                 rec, repo, "similar",
                 adapted_from=rec.model or rec.name,

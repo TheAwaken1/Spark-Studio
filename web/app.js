@@ -1404,7 +1404,8 @@ function renderFitBadge(fit) {
 function renderForgeCard(r, i) {
   const source = r.source || 'heuristic';
   const reg = r.registry;
-  const sourceLabel = source === 'registry' ? 'Spark-validated'
+  const sourceLabel = source === 'sparkrun' ? `Community-validated (${escapeHtml(r.sparkrun?.registry || 'sparkrun')})`
+    : source === 'registry' ? 'Spark-validated'
     : source === 'similar' ? 'Adapted from registry'
     : source === 'synth' ? 'Synthesized for your hardware'
     : 'Heuristic guess';
