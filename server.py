@@ -984,6 +984,52 @@ async def cluster_readiness(tp: int = 1):
     return await asyncio.to_thread(cluster_mod.readiness, max(1, int(tp)))
 
 
+@app.get("/api/cluster/monitor")
+async def cluster_monitor(request: Request):
+    """Live per-node telemetry via `sparkrun cluster monitor --json` (NDJSON:
+    {timestamp, hosts: {ip: {cpu_*, mem_*, gpu_*, sparkrun_jobs, …}}}),
+    relayed as SSE. sparkrun does the SSH transport to remote Sparks — we
+    never touch the nodes ourselves. One monitor subprocess per client,
+    killed on disconnect."""
+    exe = sparkrun_service.sparkrun_bin()
+    if not exe:
+        raise HTTPException(400, "sparkrun is not installed")
+
+    async def gen():
+        import signal as _signal
+        proc = await asyncio.create_subprocess_exec(
+            exe, "cluster", "monitor", "--json", "--interval", "2",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,  # own group: monitor spawns ssh children
+        )
+        try:
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                if await request.is_disconnected():
+                    break
+                line = raw.decode("utf-8", "replace").strip()
+                if line.startswith("{"):
+                    yield {"event": "nodes", "data": line}
+        finally:
+            if proc.returncode is None:
+                # Kill the whole group — terminating just the wrapper orphans
+                # the per-host ssh/host_monitor children it spawned.
+                try:
+                    os.killpg(os.getpgid(proc.pid), _signal.SIGTERM)
+                except (ProcessLookupError, PermissionError, OSError):
+                    proc.terminate()
+                try:
+                    await asyncio.wait_for(proc.wait(), timeout=5)
+                except asyncio.TimeoutError:
+                    try:
+                        os.killpg(os.getpgid(proc.pid), _signal.SIGKILL)
+                    except (ProcessLookupError, PermissionError, OSError):
+                        proc.kill()
+
+    return EventSourceResponse(gen())
+
+
 @app.get("/api/sparkrun/nodelog")
 async def sparkrun_node_log(container: str, n: int = 200):
     """Serve-log tail from one job container on THIS host. Remote nodes'

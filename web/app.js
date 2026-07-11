@@ -75,6 +75,7 @@ $$('.tab').forEach((t) =>
     if (t.dataset.tab === 'bench') refreshBenchTab();
     if (t.dataset.tab === 'agents') refreshAgents();
     if (t.dataset.tab === 'cluster') refreshCluster();
+    if (t.dataset.tab !== 'cluster') stopClusterMonitor(); // one ssh-fanout stream only while watching
     if (t.dataset.tab === 'forge') refreshForgeSuggest();
     if (t.dataset.tab === 'chat') syncChatTarget();
     if (t.dataset.tab === 'webgpu') { refreshWgServerStatus(); refreshWgSearchStatus(); startAmbient(); }
@@ -4504,6 +4505,37 @@ function applyUiMode(mode) {
 $$('.ui-mode-btn').forEach((b) => b.addEventListener('click', () => applyUiMode(b.dataset.mode)));
 
 // ---------- cluster page ------------------------------------------------------
+// Live node telemetry: sparkrun cluster monitor --json relayed over SSE.
+let clusterMonES = null;
+function stopClusterMonitor() {
+  if (clusterMonES) { clusterMonES.close(); clusterMonES = null; }
+}
+function startClusterMonitor() {
+  if (clusterMonES) return;
+  clusterMonES = new EventSource('/api/cluster/monitor');
+  clusterMonES.addEventListener('nodes', (ev) => {
+    let d;
+    try { d = JSON.parse(ev.data); } catch { return; }
+    for (const [ip, m] of Object.entries(d.hosts || {})) {
+      const el = document.querySelector(`.cluster-node[data-ip="${CSS.escape(ip)}"] .node-vitals`);
+      if (!el) continue;
+      const n = (v) => (v === '' || v == null ? null : Number(v));
+      const memUsed = n(m.mem_used_mb), memTot = n(m.mem_total_mb);
+      const bits = [
+        n(m.cpu_usage_pct) != null ? `CPU ${m.cpu_usage_pct}%` : null,
+        memUsed != null && memTot ? `mem ${(memUsed / 1024).toFixed(1)}/${(memTot / 1024).toFixed(0)} GB` : null,
+        n(m.gpu_util_pct) != null ? `GPU ${m.gpu_util_pct}%` : null,
+        n(m.gpu_temp_c) != null ? `${m.gpu_temp_c}°C` : null,
+        n(m.gpu_power_w) != null ? `${Number(m.gpu_power_w).toFixed(0)} W` : null,
+        n(m.sparkrun_jobs) ? `▶ ${m.sparkrun_jobs} job${Number(m.sparkrun_jobs) > 1 ? 's' : ''}` : null,
+      ].filter(Boolean);
+      el.textContent = bits.join(' · ');
+      el.title = `${m.hostname || ip} · load ${m.cpu_load_1m ?? '?'} · GPU clock ${m.gpu_clock_mhz || '?'} MHz`;
+    }
+  });
+  clusterMonES.addEventListener('error', () => { /* browser retries; sparkrun may be busy */ });
+}
+
 async function refreshCluster() {
   try {
     const c = await api('/cluster');
@@ -4516,11 +4548,13 @@ async function refreshCluster() {
       const mem = n.memory_free_gb != null ? ` · ${n.memory_free_gb} GB free / ${n.memory_total_gb} GB` : '';
       const wl = n.workload
         ? `<div class="muted">▶ ${escapeHtml(n.workload.job)} · ${escapeHtml(n.workload.role)} (${escapeHtml(n.workload.state)})</div>` : '';
-      return `<div class="cluster-node">
+      return `<div class="cluster-node" data-ip="${escapeHtml(n.ip)}">
         <div>${dot} <b>${escapeHtml(n.ip)}</b>${n.local ? ' <span class="badge">this Spark</span>' : ''}
           ${n.summary ? `<span class="muted"> · ${escapeHtml(n.summary)}${mem}</span>` : (n.online ? '' : ' <span class="muted">— unreachable</span>')}</div>
+        <div class="node-vitals muted mono"></div>
         ${wl}</div>`;
     }).join('');
+    startClusterMonitor(); // live per-node CPU/mem/GPU/power via sparkrun
     $('#clusterTp').innerHTML = 'Tensor parallel: ' + c.tp_options.map((t) =>
       `<span class="badge ${t.ok ? 'ok' : 'no'}" title="${escapeHtml(t.why || '')}">TP ${t.tp} ${t.ok ? '✓' : '✗'}</span>`
     ).join(' ');

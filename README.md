@@ -72,7 +72,7 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 - **WebGPU tab** — in-browser inference via MLC WebLLM, with PDF/CSV/XLSX attachment extraction and built-in web search (bundled SearXNG, auto-started)
 - **Crash-loop patching** — accept Claude / Codex's patched recipe with one click; re-runs immediately
 - **Honest run states** — badges distinguish **failed** (crash, red) from **stopped** (you hit Stop) and clean exits, so a page of finished runs doesn't look like a page of errors
-- **Cluster page (multi-node over sparkrun)** — node health cards (this Spark in full detail, remote Sparks via reachability + what `sparkrun status` reports — no SSH agents), TP availability at a glance, plain-English **launch readiness checks** before a multi-node run, per-node serve-log viewer for local job containers, and **Retry with fewer nodes** on failed multi-node launches. Single-Spark boxes see a clean "Single Node" view with a how-to-mesh pointer — nothing feels missing
+- **Cluster page (multi-node over sparkrun)** — node health cards with **live per-node telemetry** (CPU, unified memory, GPU util/temp/power — streamed from `sparkrun cluster monitor --json`, so remote Sparks report real numbers without Spark Studio ever SSHing anywhere), TP availability at a glance, plain-English **launch readiness checks** before a multi-node run, per-node serve-log viewer for local job containers, and **Retry with fewer nodes** on failed multi-node launches. Single-Spark boxes see a clean "Single Node" view with a how-to-mesh pointer — nothing feels missing
 - **OpenAI-compatible gateway** — point any client (Continue, Cursor, etc.) at the active run's `:<port>/v1`
 
 ## Prerequisites
@@ -501,6 +501,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/bugreport?run_id=` | Markdown bug report: doctor + run + recipe (redacted) + logs |
 | `GET` `POST` | `/api/update/check` `/api/update/apply` | Update check against origin/main / pull + deps (+ self-restart under systemd) |
 | `GET` | `/api/cluster` `/api/cluster/readiness?tp=` | Spark-mesh node health + TP availability / pre-launch checks |
+| `GET` | `/api/cluster/monitor` | SSE: live per-node CPU/mem/GPU/power via `sparkrun cluster monitor --json` |
 | `GET` | `/api/sparkrun/nodelog?container=` | Per-node serve-log tail for local sparkrun job containers |
 | `GET` | `/api/host?refresh=` | Structured GPU + Spark-mesh probe |
 | `GET` | `/api/active` | Engine currently serving chat |
