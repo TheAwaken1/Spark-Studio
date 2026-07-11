@@ -907,6 +907,8 @@ body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
 .cluster-node:last-child { border-bottom: 0; }
 .cluster-job { padding: 8px 0; font-size: 13px; }
 .cluster-job .btn { font-size: 11px; padding: 3px 8px; margin-top: 4px; }
+.sparkrun-badge { font-size: 10px; font-weight: 600; vertical-align: middle;
+  margin-left: 6px; letter-spacing: 0.2px; }
 
 /* First-run wizard */
 .wiz-checks { display: flex; flex-direction: column; gap: 4px; max-height: 320px;
