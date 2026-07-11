@@ -968,16 +968,23 @@ async function refreshRecipes() {
   }));
 }
 // ---- Community recipes via sparkrun ---------------------------------------
+// Community-recipe cache: avoids a ~1s `sparkrun list` subprocess on every
+// tab visit, but with a TTL — a session-long cache meant an app update (or
+// registry sync) never showed new recipes until a full page reload.
 let _sparkrunCache = null;
+let _sparkrunCacheAt = 0;
+const SPARKRUN_CACHE_TTL_MS = 120000;
 async function refreshSparkrun() {
   const list = $('#sparkrunList');
   const state = $('#sparkrunState');
   try {
     const [status, recipes] = await Promise.all([
       api('/sparkrun/status'),
-      _sparkrunCache ? Promise.resolve(_sparkrunCache) : api('/sparkrun/recipes'),
+      (_sparkrunCache && Date.now() - _sparkrunCacheAt < SPARKRUN_CACHE_TTL_MS)
+        ? Promise.resolve(_sparkrunCache) : api('/sparkrun/recipes'),
     ]);
     _sparkrunCache = recipes;
+    _sparkrunCacheAt = Date.now();
     const tp = Math.max(1, Number($('#sparkrunTp').value) || 1);
     const q = ($('#sparkrunSearch').value || '').toLowerCase();
     // Only recipes that can actually run on the selected node count.
