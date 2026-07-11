@@ -2746,6 +2746,11 @@ def spa(path: str):
     # `GET /../server.py` (sent raw, past client URL normalization) would
     # string-join to web/../server.py and leak source, the SQLite DB, HF
     # tokens, etc. This is an SPA fallback, not a file server.
+    # Unknown API routes must be REAL 404s — serving index.html for
+    # /api/anything makes "is this endpoint deployed?" checks lie (a stale
+    # server looks current because every probe returns 200 with HTML).
+    if path.startswith("api/"):
+        raise HTTPException(404, "unknown API endpoint")
     web_root = WEB_DIR.resolve()
     try:
         f = (web_root / path).resolve()

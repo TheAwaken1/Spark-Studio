@@ -210,8 +210,19 @@ then
     echo "error: port $PORT is already in use." >&2
     holder=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K[0-9]+' | head -1)
     [[ -n "${holder:-}" ]] && echo "  in use by: $(ps -p "$holder" -o pid=,cmd= 2>/dev/null)" >&2
-    echo "  another Spark Studio may already be running — check http://127.0.0.1:$PORT" >&2
-    echo "  or start on a different port: ./start.sh --port $((PORT + 1))" >&2
+    if [[ "$UPDATE" == "1" ]]; then
+        # The pull above already succeeded — without this warning people think
+        # they're updated while the OLD server quietly keeps serving old code.
+        echo >&2
+        echo "  ⚠ The code WAS updated, but the running server still has the OLD version." >&2
+        echo "    Restart it to finish the update:" >&2
+        [[ -n "${holder:-}" ]] && echo "      kill $holder && ./start.sh" >&2
+        systemctl --user is-enabled spark-studio.service >/dev/null 2>&1 \
+            && echo "      (or: systemctl --user restart spark-studio)" >&2
+    else
+        echo "  another Spark Studio may already be running — check http://127.0.0.1:$PORT" >&2
+        echo "  or start on a different port: ./start.sh --port $((PORT + 1))" >&2
+    fi
     exit 1
 fi
 
