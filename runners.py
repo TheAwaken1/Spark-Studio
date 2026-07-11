@@ -229,6 +229,11 @@ class Run:
     # means nothing to a person scanning for "which run was gemma?".
     label: str | None = None
     ring: deque[str] = field(default_factory=lambda: deque(maxlen=4000))
+    # Timestamp of the last engine log line — lets the watchdog tell "loading
+    # slowly" (lines still flowing) from "hung" (silent for minutes).
+    last_line_at: float = field(default_factory=time.time)
+    # Last time the watchdog nagged about silence (rate-limits the warning).
+    stall_warned_at: float = 0.0
     subscribers: list[asyncio.Queue] = field(default_factory=list)
     url: str | None = None
     ready: bool = False
@@ -264,6 +269,8 @@ class Run:
         )
 
     def publish(self, line: str) -> None:
+        if not line.startswith("[watchdog]"):
+            self.last_line_at = time.time()
         self.ring.append(line)
         if not self.ready and any(p in line for p in READY_PATTERNS):
             self.mark_ready()

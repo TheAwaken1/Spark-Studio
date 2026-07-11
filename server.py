@@ -1543,6 +1543,7 @@ async def agents_autofix(rid: str, request: Request, agent: str = "claude", atte
             current = runner.get(new_id)
             started = time.time()
             last_beat = 0.0
+            hung = False
             while current and time.time() - started < _AUTOFIX_WAIT:
                 if await request.is_disconnected():
                     return
@@ -1552,11 +1553,31 @@ async def agents_autofix(rid: str, request: Request, agent: str = "claude", atte
                     return
                 if current.status == "exited":
                     break
+                # Hung load (silent at idle — the GB10 NVFP4/fastsafetensors
+                # wedge): don't burn the whole wait window, change tack now.
+                silent = time.time() - max(current.last_line_at, current.started_at)
+                if silent > 2 * _STALL_AFTER:
+                    yield _ev({"type": "status", "attempt": attempt, "of": tries,
+                               "text": f"No engine output for {int(silent // 60)}m — treating the load as hung; stopping it…"})
+                    runner.stop(new_id, force=True)
+                    hung = True
+                    break
                 if time.time() - last_beat > 30:
                     last_beat = time.time()
                     yield _ev({"type": "status", "attempt": attempt, "of": tries,
                                "text": f"Waiting for the engine… {int(time.time() - started)}s (downloads/builds can take a while)"})
                 await asyncio.sleep(5)
+            if hung:
+                goal = (
+                    f"The relaunch HUNG during model load: no output for over {(2 * _STALL_AFTER) // 60} "
+                    "minutes at near-idle CPU. On DGX Spark (sm_121) this usually means an NVFP4 model "
+                    "going through FlashInfer kernels — the reliable fix is switching to an FP8 or AWQ "
+                    "quantization of the same model — or a fastsafetensors load stall (remove "
+                    "--load-format fastsafetensors). Produce a recipe that avoids the hang."
+                )
+                yield _ev({"type": "status", "attempt": attempt, "of": tries,
+                           "text": f"Attempt {attempt} hung — asking {agent} for a different approach…"})
+                continue
             if current and current.status == "running" and not current.ready:
                 yield _ev({"type": "done", "ok": True, "run_id": new_id,
                            "text": f"Still starting after {_AUTOFIX_WAIT}s — leaving it running; watch the logs."})
@@ -1720,6 +1741,13 @@ async def agents_optimize(rid: str, request: Request, agent: str = "claude", att
                 if await request.is_disconnected():
                     return
                 if current.ready or current.status == "exited":
+                    break
+                # Same hung-load bail-out as Auto-Fix: silence at idle means
+                # the tuned config wedged the engine — stop and move on.
+                if time.time() - max(current.last_line_at, current.started_at) > 2 * _STALL_AFTER:
+                    yield _ev({"type": "status", "attempt": attempt, "of": tries,
+                               "text": "Engine silent too long — treating the tuned config as hung; stopping it…"})
+                    runner.stop(new_id, force=True)
                     break
                 if time.time() - last_beat > 30:
                     last_beat = time.time()
@@ -2813,6 +2841,8 @@ async def _shutdown_runs():
 # ----- restart reconciliation + engine watchdog ------------------------------
 
 _WATCHDOG_INTERVAL = 10
+# Warn when a not-yet-ready engine has produced no output for this long.
+_STALL_AFTER = int(os.environ.get("SPARK_STUDIO_STALL_AFTER", "300"))
 # Never-ready deadline for sparkrun runs where no container liveness signal is
 # available (remote tp>1 heads). Local containers are judged by `docker top`
 # instead, which stays positive during long AWQ loads.
@@ -3052,6 +3082,21 @@ async def _watchdog_tick(tick: int) -> None:
             if not run.ready and age > _SPARKRUN_GRACE and not run.meta.get("serve_seen"):
                 runner.finalize(run, exit_code=1, reason=f"engine never became ready within {_SPARKRUN_GRACE}s (set SPARK_STUDIO_SPARKRUN_GRACE to extend)", teardown=True)
                 continue
+
+        # Stall detection for LOADING engines (any engine, not just sparkrun):
+        # a healthy load streams log lines and gobbles RAM; a hung one — the
+        # classic GB10 NVFP4/FlashInfer or fastsafetensors wedge — sits silent
+        # at ~idle CPU forever while status stays "running". Say so.
+        if not run.ready and run.status == "running":
+            silent = time.time() - max(run.last_line_at, run.started_at)
+            if silent > _STALL_AFTER and time.time() - run.stall_warned_at > _STALL_AFTER:
+                run.stall_warned_at = time.time()
+                run.publish(
+                    f"[watchdog] ⚠ no engine output for {int(silent // 60)}m while loading — it may be hung. "
+                    "Known GB10 culprits: NVFP4 models via FlashInfer (prefer an FP8/AWQ quant), and "
+                    "fastsafetensors stalls (drop page caches, or remove --load-format fastsafetensors). "
+                    "Auto-Fix & Retry can relaunch with changes, or Stop and pick another recipe."
+                )
 
         # Readiness probe + server-side 'working' tag.
         if run.url:

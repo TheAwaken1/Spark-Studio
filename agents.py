@@ -82,6 +82,11 @@ CRASH FIXES:
 - --max-model-len <lower>  (OOM)
 - --kv-cache-dtype fp8     (memory pressure)
 - --gpu-memory-utilization 0.85  (OOM)
+- SILENT HANG during load (logs stop right after backend/kernel selection, near-idle CPU):
+  the classic signature is an NVFP4 model whose GEMMs select FlashInfer NVFP4 kernels
+  ("FlashInferCutlassNvFp4LinearKernel") — not fully working on sm_121. The reliable fix
+  is switching to an FP8/AWQ quantization of the same model; do NOT just retry the NVFP4.
+  If the hang is mid-weight-load instead, drop --load-format fastsafetensors.
 
 PERFORMANCE / OPTIMIZATION (use when goal is to maximize tok/s):
 - --attention-backend FLASHINFER  (the fast default on GB10; every fast community recipe uses it)
