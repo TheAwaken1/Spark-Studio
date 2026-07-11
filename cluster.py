@@ -39,10 +39,21 @@ def _local_ips() -> set[str]:
 
 
 def clusters() -> list[dict[str, Any]]:
-    """Saved sparkrun cluster definitions ([{name, hosts, default}])."""
+    """Saved sparkrun cluster definitions ([{name, hosts, default}]).
+    Uses `cluster list --json` (supported since 0.3.0-alpha) with a text-table
+    fallback for older sparkrun builds."""
     exe = sparkrun_service.sparkrun_bin()
     if not exe:
         return []
+    try:
+        res = subprocess.run([exe, "cluster", "list", "--json"],
+                             capture_output=True, text=True, timeout=20)
+        if res.returncode == 0 and (res.stdout or "").lstrip().startswith("["):
+            import json
+            return [{"name": c.get("name"), "hosts": list(c.get("hosts") or []),
+                     "default": bool(c.get("default"))} for c in json.loads(res.stdout)]
+    except Exception:  # noqa: BLE001
+        pass  # fall through to the text parser
     try:
         res = subprocess.run([exe, "cluster", "list"], capture_output=True, text=True, timeout=20)
     except Exception:  # noqa: BLE001

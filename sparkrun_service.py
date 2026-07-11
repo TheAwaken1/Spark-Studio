@@ -136,10 +136,35 @@ def start_update(channel: str | None, timeout: int = 900) -> dict[str, Any]:
 
 def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
     """Parse `sparkrun status` into
-    [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}]."""
+    [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}].
+
+    Tries `--json` first (per spark-arena guidance, most commands are growing
+    it — status doesn't have it as of 0.3.0-alpha) and falls back to parsing
+    the human output, so we upgrade automatically when sparkrun ships it."""
     exe = sparkrun_bin()
     if not exe:
         return []
+    try:
+        res = subprocess.run([exe, "status", "--json"], capture_output=True, text=True, timeout=timeout)
+        if res.returncode == 0 and (res.stdout or "").lstrip().startswith(("[", "{")):
+            doc = json.loads(res.stdout)
+            jobs = doc if isinstance(doc, list) else doc.get("jobs") or []
+            out: list[dict[str, Any]] = []
+            for j in jobs:
+                jobid = j.get("jobid") or j.get("job_id") or j.get("id") or ""
+                hosts = [{"role": h.get("role") or "solo", "ip": h.get("ip") or h.get("host") or "",
+                          "status": h.get("status") or ""} for h in (j.get("hosts") or [])]
+                out.append({
+                    "ref": j.get("ref") or j.get("recipe") or "",
+                    "tp": int(j.get("tp") or 1),
+                    "jobid": jobid,
+                    "hosts": hosts,
+                    "containers": j.get("containers")
+                                  or [f"sparkrun_{jobid}_{h['role']}" for h in hosts],
+                })
+            return out
+    except Exception:  # noqa: BLE001
+        pass  # fall through to the text parser
     try:
         res = subprocess.run([exe, "status"], capture_output=True, text=True, timeout=timeout)
     except Exception:  # noqa: BLE001

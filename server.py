@@ -2922,6 +2922,28 @@ async def _watchdog_loop() -> None:
 async def _watchdog_tick(tick: int) -> None:
     import httpx
 
+    # Adopt terminal-launched sparkrun jobs MID-SESSION, not just at boot —
+    # stop a model in the dashboard, relaunch it with plain `sparkrun run` in
+    # a terminal, and the dashboard should pick it right back up (~30 s).
+    if tick % 3 == 0 and engine_available("sparkrun"):
+        try:
+            jobs = await asyncio.to_thread(sparkrun_service.parse_status)
+        except Exception:  # noqa: BLE001
+            jobs = []
+        if jobs:
+            known_jobids = {(r.meta or {}).get("jobid") for r in runner.runs.values()}
+            # An app-launched sparkrun run that hasn't learned its jobid yet
+            # could be ANY of these jobs — adopting now would duplicate it.
+            starting = any(
+                r.engine == "sparkrun" and r.status == "running" and not (r.meta or {}).get("jobid")
+                for r in runner.runs.values()
+            )
+            if not starting:
+                for job in jobs:
+                    if job["jobid"] in known_jobids:
+                        continue
+                    await asyncio.to_thread(_adopt_sparkrun_job, job, None)
+
     for run in list(runner.runs.values()):
         if run.status != "running":
             continue
