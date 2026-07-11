@@ -530,12 +530,15 @@ def list_recipes():
 
 
 async def _native_context_for(model: str | None) -> int | None:
-    """Best-effort native max context of an HF model (for the max_model_len
-    cap). None when it can't be resolved — callers must fall back safely."""
+    """Native max context of an HF model (for the max_model_len cap). None
+    when it can't be TRULY resolved — hf_check's 4096 fallback for gated or
+    unfetchable configs must never masquerade as a real limit."""
     if not model or "/" not in model:
         return None
     try:
         report = await hf_check.check(model)
+        if not report.get("context_known"):
+            return None
         ctx = report.get("context")
         return int(ctx) if ctx else None
     except Exception:  # noqa: BLE001

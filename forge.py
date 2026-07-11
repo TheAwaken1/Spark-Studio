@@ -326,8 +326,10 @@ def _heuristic(report: dict[str, Any]) -> list[dict[str, Any]]:
 def _finalize(out: list[dict[str, Any]], report: dict[str, Any]) -> list[dict[str, Any]]:
     """Give every forged vLLM recipe the full native context (capped at 262144),
     a healthy prefill batch, and auto-detected tool/reasoning parsers, then attach
-    the hardware fit verdict."""
-    native = report.get("context") if isinstance(report, dict) else None
+    the hardware fit verdict. A context the HF check merely GUESSED (gated repo,
+    fetch failure) is treated as unknown — never stamped into recipes."""
+    native = (report.get("context")
+              if isinstance(report, dict) and report.get("context_known") else None)
     for r in out:
         recipe_brain.apply_perf_defaults(r, native_context=native, add_capabilities=True)
     _attach_fit(out, report)

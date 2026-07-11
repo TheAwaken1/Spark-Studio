@@ -18,14 +18,28 @@ HF_FILE = "https://huggingface.co/{repo}/resolve/main/{file}"
 SPARK_USABLE_GB = 115.0
 
 
+def _auth_headers() -> dict[str, str]:
+    """Use the user's stored HF token (hf auth login / HF_TOKEN) — without it,
+    every gated repo (meta-llama, …) 401s and the report degrades badly."""
+    try:
+        from huggingface_hub import get_token
+        tok = get_token()
+        if tok:
+            return {"Authorization": f"Bearer {tok}"}
+    except Exception:  # noqa: BLE001
+        pass
+    return {}
+
+
 async def fetch_config(repo: str) -> dict[str, Any]:
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.get(f"{HF_API}/{repo}")
+    headers = _auth_headers()
+    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+        r = await client.get(f"{HF_API}/{repo}", headers=headers)
         r.raise_for_status()
         meta = r.json()
         cfg = {}
         try:
-            r = await client.get(HF_FILE.format(repo=repo, file="config.json"))
+            r = await client.get(HF_FILE.format(repo=repo, file="config.json"), headers=headers)
             if r.status_code == 200:
                 cfg = r.json()
         except Exception:
@@ -83,12 +97,16 @@ def analyze(meta: dict, config: dict) -> dict[str, Any]:
     bpp = _bytes_per_param(dtype or "bf16")
     weight_gb = (params * bpp / 1e9) if params else None
 
-    ctx = (
+    # context_known distinguishes "the config says so" from "we guessed":
+    # consumers must NEVER treat the 4096 fallback as a real context limit —
+    # stamping it into recipes turns every gated/unfetchable model useless.
+    raw_ctx = (
         config.get("max_position_embeddings")
         or config.get("max_seq_len")
         or config.get("seq_length")
-        or 4096
     )
+    context_known = bool(raw_ctx)
+    ctx = raw_ctx or 4096
     # KV cache per 1k tokens (rough, fp16): 2 * num_layers * num_heads_kv * head_dim * 2 bytes * 1000
     nl = config.get("num_hidden_layers") or 32
     nh = config.get("num_key_value_heads") or config.get("num_attention_heads") or 32
@@ -124,6 +142,7 @@ def analyze(meta: dict, config: dict) -> dict[str, Any]:
         "bytes_per_param": bpp,
         "weight_gb": weight_gb,
         "context": ctx,
+        "context_known": context_known,
         "kv_gb_per_1k": kv_per_1k,
         "max_tokens_at_full_ctx": _estimate_max_tokens(weight_gb, kv_per_1k),
         "architecture": arch,

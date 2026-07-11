@@ -332,13 +332,19 @@ def _match_mods(hints: list[str]) -> list[str]:
 # ----------------------------- defaults sizing ----------------------------
 
 def _suggested_max_model_len(report: dict[str, Any], weight_gb: float | None,
-                             host_memory_gb: float | None) -> int:
+                             host_memory_gb: float | None) -> int | None:
     """Default ``max_model_len``: the model's full native context, capped at
     TARGET_MAX_MODEL_LEN. vLLM allocates KV to the memory budget rather than to
     max_model_len, so serving the full context is safe — a smaller ceiling just
-    needlessly truncates what the model can do. (weight_gb / host_memory_gb are
+    needlessly truncates what the model can do.
+
+    Returns None when the HF check couldn't actually read the config
+    (context_known False) — the caller then omits the flag entirely and vLLM
+    derives the true native context itself. (weight_gb / host_memory_gb are
     unused now but kept for signature stability.)
     """
+    if not report.get("context_known"):
+        return None
     native = int(report.get("context") or TARGET_MAX_MODEL_LEN)
     return max(2048, min(native, TARGET_MAX_MODEL_LEN))
 
@@ -405,9 +411,10 @@ def synthesize_recipe(
         "host": "0.0.0.0",
         "tensor_parallel": tp,
         "gpu_memory_utilization": 0.7,
-        "max_model_len": max_model_len,
         "max_num_batched_tokens": TARGET_MAX_NUM_BATCHED_TOKENS,
     }
+    if max_model_len is not None:
+        defaults["max_model_len"] = max_model_len
 
     env = dict(qprof.get("extra_env") or {})
 
@@ -444,9 +451,12 @@ def synthesize_recipe(
     for f in fprof.get("extra_flags") or []:
         add(f)
 
-    # Sizing flags.
+    # Sizing flags. When the native context is unknown (gated config we
+    # couldn't read), OMIT --max-model-len so vLLM derives the model's real
+    # limit — a guessed cap is how gated models ended up stuck at 4096.
     add("--gpu-memory-utilization {gpu_memory_utilization}")
-    add("--max-model-len {max_model_len}")
+    if max_model_len is not None:
+        add("--max-model-len {max_model_len}")
     add("--max-num-batched-tokens {max_num_batched_tokens}")
     add("--host {host}")
     add("--port {port}")
@@ -576,8 +586,13 @@ def apply_perf_defaults(
         args = {}
         recipe["args"] = args
 
-    max_len = min(int(native_context), TARGET_MAX_MODEL_LEN) if native_context else TARGET_MAX_MODEL_LEN
-    max_len = max(2048, max_len)
+    # native_context=None means "genuinely unknown" (gated repo, HF hiccup).
+    # In that case we DO NOT stamp a value: omitting --max-model-len lets vLLM
+    # derive the model's real native context from its own config — always
+    # better than a guess, and infinitely better than a 4096 poison pill.
+    max_len = None
+    if native_context:
+        max_len = max(2048, min(int(native_context), TARGET_MAX_MODEL_LEN))
 
     # Registry / docker-shaped recipe: values live in the _registry defaults and
     # reach vLLM via run-recipe.sh (max_model_len as a CLI override, batch via
@@ -588,12 +603,16 @@ def apply_perf_defaults(
         if not isinstance(defaults, dict):
             defaults = {}
             reg["defaults"] = defaults
-        defaults["max_model_len"] = max_len
+        if max_len is not None:
+            defaults["max_model_len"] = max_len
+        # Unknown native: keep whatever the curated recipe shipped — the
+        # community value is real; our guess would not be.
         defaults["max_num_batched_tokens"] = TARGET_MAX_NUM_BATCHED_TOKENS
         return recipe
 
     # Flat vLLM recipe: kebab-case flag keys the runner turns into --flags.
-    args["max-model-len"] = max_len
+    if max_len is not None:
+        args["max-model-len"] = max_len
     args["max-num-batched-tokens"] = TARGET_MAX_NUM_BATCHED_TOKENS
 
     if add_capabilities:
