@@ -818,7 +818,13 @@ class Runner:
                 run.publish(f"[cleanup] docker rm -f {name} failed: {e}")
 
     def list(self) -> list[dict[str, Any]]:
-        return [r.summary() for r in self.runs.values()]
+        # Running runs first, then newest-first — so the Overview and engine
+        # tabs always show what's live/recent at the top of the list.
+        ordered = sorted(
+            self.runs.values(),
+            key=lambda r: (r.status != "running", -(r.started_at or 0)),
+        )
+        return [r.summary() for r in ordered]
 
     def get(self, run_id: str) -> Run | None:
         return self.runs.get(run_id)

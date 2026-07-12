@@ -316,6 +316,12 @@ label input, label select, label textarea { margin-top: 2px; }
   border-color: rgba(74, 208, 138, 0.65);
   box-shadow: inset 0 0 0 1px rgba(74, 208, 138, 0.2);
 }
+.recipe-card.is-fav {
+  border-color: rgba(255, 200, 87, 0.55);
+  box-shadow: inset 0 0 0 1px rgba(255, 200, 87, 0.15);
+}
+.fav-btn { padding: 2px 7px; font-size: 14px; line-height: 1; color: var(--muted); flex-shrink: 0; }
+.fav-btn.active, .fav-btn:hover { color: #ffc857; }
 .recipe-card .rc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex-wrap: wrap; }
 .recipe-card .rc-name { font-weight: 600; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
 .recipe-card .rc-engine {

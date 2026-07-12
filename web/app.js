@@ -863,6 +863,28 @@ function enrichRecipe(recipe = {}) {
 }
 
 // ---------- recipes -------------------------------------------------------
+// Favorites: starred recipes float to the top of My Recipes and Community.
+// Stored per-browser in localStorage — keyed by recipe id (mine) or @ref (community).
+function getFavs(key) {
+  try { return new Set(JSON.parse(localStorage.getItem(key) || '[]')); } catch { return new Set(); }
+}
+function toggleFav(key, id) {
+  const favs = getFavs(key);
+  favs.has(id) ? favs.delete(id) : favs.add(id);
+  localStorage.setItem(key, JSON.stringify([...favs]));
+  return favs.has(id);
+}
+function favBtn(key, id, isFav) {
+  return `<button class="btn fav-btn${isFav ? ' active' : ''}" data-fav-key="${key}" data-fav-id="${escapeHtml(String(id))}" title="${isFav ? 'Unfavorite' : 'Favorite — pins it to the top'}">${isFav ? '★' : '☆'}</button>`;
+}
+function bindFavButtons(listSel, refresh) {
+  $$(`${listSel} [data-fav-key]`).forEach((b) => b.addEventListener('click', (ev) => {
+    ev.stopPropagation();
+    toggleFav(b.dataset.favKey, b.dataset.favId);
+    refresh();
+  }));
+}
+
 async function refreshRecipes() {
   const [recipes, runs] = await Promise.all([
     api('/recipes').catch(() => []),
@@ -874,9 +896,13 @@ async function refreshRecipes() {
       .map((run) => [Number(run.recipe_id), run])
   );
   const search = $('#recSearch').value.toLowerCase();
+  const favs = getFavs('recipeFavs');
   const enriched = recipes.map((r) => enrichRecipe(r));
   const filtered = enriched.filter((r) => !search || (r.name + ' ' + (r.model || '') + ' ' + r.tags + ' ' + (r._details || []).join(' ')).toLowerCase().includes(search));
+  // Favorites first, preserving the server's order within each group.
+  filtered.sort((a, b) => Number(favs.has(String(b.id))) - Number(favs.has(String(a.id))));
   const html = filtered.map((r) => {
+    const isFav = favs.has(String(r.id));
     const isDocker = !!(r.args && r.args._registry);
     const tagList = (r.tags || '').split(',').map((t) => t.trim()).filter(Boolean);
     const isWorking = tagList.includes('working');
@@ -888,10 +914,11 @@ async function refreshRecipes() {
         ? '<span class="rc-status-badge failed" title="Last run failed">✗ failed</span>'
         : '';
     return `
-    <div class="recipe-card${activeByRecipe.has(Number(r.id)) ? ' is-running' : ''}">
+    <div class="recipe-card${activeByRecipe.has(Number(r.id)) ? ' is-running' : ''}${isFav ? ' is-fav' : ''}">
       <div class="rc-head">
         <div class="rc-name">${escapeHtml(r.name)}</div>
         <div style="display:flex;gap:4px;align-items:center">
+          ${favBtn('recipeFavs', r.id, isFav)}
           ${statusBadge}
           ${isDocker ? '<span class="rc-source registry" title="Runs via spark-vllm-docker pipeline">Docker</span>' : ''}
           <div class="rc-engine">${r.engine}</div>
@@ -911,6 +938,7 @@ async function refreshRecipes() {
     </div>
   `}).join('');
   $('#recipesList').innerHTML = html || '<div class="muted">No recipes yet. Create one or Forge from an HF model.</div>';
+  bindFavButtons('#recipesList', refreshRecipes);
   $$('#recipesList [data-run]').forEach((b) => b.addEventListener('click', async () => {
     try {
       const r = await api(`/recipes/${b.dataset.run}`);
@@ -1000,16 +1028,19 @@ async function refreshSparkrun() {
     // Only recipes that can actually run on the selected node count.
     const runnable = recipes.filter((r) => (r.min_nodes || 1) <= tp && (!r.max_nodes || tp <= r.max_nodes));
     const filtered = runnable.filter((r) => !q || `${r.ref} ${r.model || ''} ${r.engine} ${r.description || ''}`.toLowerCase().includes(q));
+    const favs = getFavs('communityFavs');
+    filtered.sort((a, b) => Number(favs.has(b.ref)) - Number(favs.has(a.ref)));
     state.textContent = status.installed
       ? `sparkrun ${status.version || '?'} · ${runnable.length} of ${recipes.length} recipes fit ${tp} node${tp > 1 ? 's' : ''}`
       : `sparkrun not installed — ${status.hint}`;
     $('#sparkrunUpdate').disabled = !status.installed || status.update?.running;
     if (status.update?.running && !_sparkrunUpdatePoll) watchSparkrunUpdate();
     list.innerHTML = filtered.map((r) => `
-      <div class="recipe-card">
+      <div class="recipe-card${favs.has(r.ref) ? ' is-fav' : ''}">
         <div class="rc-head">
           <div class="rc-name mono">${escapeHtml(r.ref)}</div>
           <div style="display:flex;gap:4px;align-items:center">
+            ${favBtn('communityFavs', r.ref, favs.has(r.ref))}
             ${(r.min_nodes || 1) > 1 ? `<span class="badge" title="Requires ${r.min_nodes} DGX Sparks (tensor parallelism)">${r.min_nodes}× Spark</span>` : ''}
             <span class="rc-source registry" title="Runs on your Spark mesh via sparkrun">${escapeHtml(r.namespace)}</span>
             <div class="rc-engine">${escapeHtml(r.engine || '')}</div>
@@ -1021,6 +1052,7 @@ async function refreshSparkrun() {
           <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Install sparkrun first"'}>▶ Run via sparkrun</button>
         </div>
       </div>`).join('') || `<div class="muted">No recipes fit ${tp} node${tp > 1 ? 's' : ''}${q ? ' matching your search' : ''}. Raise Nodes (TP) to see multi-Spark recipes.</div>`;
+    bindFavButtons('#sparkrunList', refreshSparkrun);
     $$('#sparkrunList [data-sparkrun]').forEach((btn) => btn.addEventListener('click', async () => {
       try {
         const tp = Number($('#sparkrunTp').value) || 1;
@@ -3184,7 +3216,10 @@ async function streamChat(messages, onDelta, opts = {}) {
 // ---------- Chat (against active engine) ----------
 $('#chatSend').addEventListener('click', sendChat);
 $('#chatStop').addEventListener('click', stopChat);
-$('#chatInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendChat(); });
+// Enter sends; Shift+Enter inserts a newline (Ctrl/Cmd+Enter still sends too).
+$('#chatInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendChat(); }
+});
 
 const chatAttachments = [];
 bindAttachmentUI({ btnId: 'chatAttachBtn', inputId: 'chatAttachInput', listId: 'chatAttachments', store: chatAttachments });
@@ -3891,7 +3926,7 @@ $('#wgSearchToggle').addEventListener('click', () => {
   wgSearch.enabled = !wgSearch.enabled;
   _applySearchPillState();
   const ta = $('#wgInput');
-  ta.placeholder = wgSearch.enabled ? 'Ask with web search… (Ctrl+Enter)' : 'Ask…';
+  ta.placeholder = wgSearch.enabled ? 'Ask with web search… (Enter to send)' : 'Ask… (Enter to send, Shift+Enter for newline)';
 });
 
 async function refreshWgSearchStatus() {
@@ -4050,7 +4085,10 @@ $('#wgClear').addEventListener('click', () => {
   renderAttachments($('#wgAttachments'), wgAttachments);
   $('#wgMessages').innerHTML = '';
 });
-$('#wgInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) sendWg(); });
+// Enter sends; Shift+Enter inserts a newline (Ctrl/Cmd+Enter still sends too).
+$('#wgInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendWg(); }
+});
 
 let wgStream = null;
 function setWgBusy(busy) {
