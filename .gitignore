@@ -16,3 +16,7 @@ tooleval-results/
 nohup.out
 .ruff_cache/
 .claude/
+# Local-only AI session log + agent instructions — never push these
+SESSIONS.md
+CLAUDE.md
+AGENTS.md
