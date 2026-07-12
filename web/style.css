@@ -905,6 +905,12 @@ body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
 .qr-urls { font-size: 11px; opacity: 0.75; line-height: 1.7; }
 .cluster-node { padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .node-vitals { font-size: 11px; margin-top: 2px; min-height: 14px; }
+.img-row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+  padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.img-row:last-child { border-bottom: 0; }
+.img-row.is-node { background: rgba(96, 165, 250, 0.06); border-radius: 6px; padding: 6px 8px; }
+.img-vers { margin-left: auto; }
+.img-vers .btn { font-size: 10px; padding: 2px 7px; }
 .cluster-node:last-child { border-bottom: 0; }
 .cluster-job { padding: 8px 0; font-size: 13px; }
 .cluster-job .btn { font-size: 11px; padding: 3px 8px; margin-top: 4px; }

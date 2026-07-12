@@ -564,6 +564,8 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |
 | `GET` | `/metrics` | Prometheus exposition: GPU/CPU/memory + run gauges (scrape each Spark for Grafana history) |
+| `GET` | `/api/images` `/api/images/probe?ref=` | Spark-vLLM runner images / vLLM+FlashInfer versions inside one |
+| `GET` | `/api/images/build?mode=` | SSE: run build-and-copy.sh (nightly / wheels / allowlisted advanced flags) |
 
 ## Platform
 

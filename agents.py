@@ -82,6 +82,10 @@ CRASH FIXES:
 - --max-model-len <lower>  (OOM)
 - --kv-cache-dtype fp8     (memory pressure)
 - --gpu-memory-utilization 0.85  (OOM)
+- "Unknown architecture" / "model type … not supported" / "no model executor": the RUNNER IMAGE
+  is stale, not the recipe — new architectures land in vLLM nightlies. Do NOT flag-tweak around it;
+  tell the user to update the engine image (vLLM tab → Engine images → "Update to tested nightly",
+  i.e. build-and-copy.sh) and relaunch.
 - SILENT HANG during load (logs stop right after backend/kernel selection, near-idle CPU):
   the classic signature is an NVFP4 model whose GEMMs select FlashInfer NVFP4 kernels
   ("FlashInferCutlassNvFp4LinearKernel") — not fully working on sm_121. The reliable fix

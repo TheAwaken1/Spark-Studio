@@ -31,6 +31,7 @@ import cluster as cluster_mod
 import db
 import docker_recipe
 import doctor
+import engine_images
 import forge
 import hf_check
 import hostinfo
@@ -2445,6 +2446,96 @@ async def benchy_run(req: BenchyReq, request: Request):
         finally:
             if not task.done():
                 task.cancel()
+
+    return EventSourceResponse(gen())
+
+
+# ----- Engine images (spark-vllm-docker runner) --------------------------------
+
+_image_build_running = False
+
+
+@app.get("/api/images")
+def images_list():
+    """Local Spark-vLLM ecosystem images + which one vllm-node points at."""
+    return engine_images.list_images()
+
+
+@app.get("/api/images/probe")
+async def images_probe(ref: str):
+    """vLLM + FlashInfer versions inside one image (runs python in it; cached)."""
+    return await asyncio.to_thread(engine_images.probe_image, ref)
+
+
+@app.get("/api/images/build")
+async def images_build(request: Request, mode: str = "nightly", flags: str = ""):
+    """Run build-and-copy.sh, streaming output as SSE.
+    mode: nightly (pull tested nightly, retag vllm-node) · wheels (--use-wheels)
+    · advanced (allowlisted flags string). Survives client disconnects; one
+    build at a time; a running model keeps its old image until relaunched."""
+    global _image_build_running
+    script = engine_images.SPARK_VLLM_DOCKER / "build-and-copy.sh"
+    if not script.exists():
+        raise HTTPException(400, "spark-vllm-docker mirror not synced — refresh the registry first")
+    if mode == "nightly":
+        args: list[str] = []
+    elif mode == "wheels":
+        args = ["--use-wheels"]
+    elif mode == "advanced":
+        args, err = engine_images.validate_build_flags(flags)
+        if err:
+            raise HTTPException(400, err)
+    else:
+        raise HTTPException(400, f"unknown mode {mode!r}")
+
+    async def gen():
+        global _image_build_running
+        if _image_build_running:
+            yield {"event": "log", "data": "an image build is already running — one at a time"}
+            yield {"event": "done", "data": "-2"}
+            return
+        _image_build_running = True
+        env = os.environ.copy()
+        cuda_home = Path("/usr/local/cuda")
+        if not env.get("CUDA_HOME") and (cuda_home / "include" / "cuda_runtime_api.h").exists():
+            env["CUDA_HOME"] = str(cuda_home)
+            env["PATH"] = f"{cuda_home}/bin:{env.get('PATH', '')}"
+        proc = await asyncio.create_subprocess_exec(
+            "bash", str(script), *args,
+            cwd=str(engine_images.SPARK_VLLM_DOCKER),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+            env=env,
+            start_new_session=True,
+        )
+        yield {"event": "log", "data": f"$ build-and-copy.sh {' '.join(args)} (in {engine_images.SPARK_VLLM_DOCKER})"}
+        handed_off = False
+        try:
+            assert proc.stdout is not None
+            async for raw in proc.stdout:
+                yield {"event": "log", "data": raw.decode("utf-8", "replace").rstrip("\n")}
+            await proc.wait()
+            engine_images._probe_cache.clear()  # versions may have changed
+            yield {"event": "done", "data": str(proc.returncode)}
+        except asyncio.CancelledError:
+            # Tab closed mid-build: let the build finish (it's expensive) and
+            # drain output so it can't block; guard released when it ends.
+            handed_off = True
+
+            async def _drain():
+                global _image_build_running
+                try:
+                    async for _ in proc.stdout:
+                        pass
+                    await proc.wait()
+                finally:
+                    engine_images._probe_cache.clear()
+                    _image_build_running = False
+            asyncio.create_task(_drain())
+            raise
+        finally:
+            if not handed_off:
+                _image_build_running = False
 
     return EventSourceResponse(gen())
 

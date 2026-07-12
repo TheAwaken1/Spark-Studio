@@ -69,6 +69,7 @@ $$('.tab').forEach((t) =>
     if (panel) panel.classList.add('active');
     if (t.dataset.tab === 'overview') refreshOverview();
     if (['vllm', 'sglang', 'llamacpp'].includes(t.dataset.tab)) refreshEnginePanel(t.dataset.tab);
+    if (t.dataset.tab === 'vllm') refreshEngineImages();
     if (t.dataset.tab === 'recipes') { refreshRecipes(); refreshSparkrun(); }
     if (t.dataset.tab === 'models') refreshLocalModels();
     if (t.dataset.tab === 'logs') refreshRuns();
@@ -4647,6 +4648,76 @@ setTimeout(async () => {
     }
   } catch { /* offline or not a git checkout — fine */ }
 }, 6000);
+
+// ---------- engine images (spark-vllm-docker runner) -------------------------
+const _imgBuild = { active: false, lines: [] };
+async function refreshEngineImages() {
+  const box = $('#imagesList');
+  if (!box) return;
+  try {
+    const d = await api('/images');
+    if (d.error) { box.textContent = d.error; return; }
+    box.innerHTML = d.images.map((im) => `
+      <div class="img-row ${im.is_vllm_node ? 'is-node' : ''}" data-imgref="${escapeHtml(im.ref)}">
+        <span class="mono">${escapeHtml(im.ref)}</span>
+        ${im.is_vllm_node ? '<span class="badge ok" title="This is what docker recipes launch">← vllm-node</span>' : ''}
+        <span class="muted">${escapeHtml(im.created)} · ${escapeHtml(im.size)}</span>
+        <span class="img-vers muted mono">${im.versions
+          ? (im.versions.error ? escapeHtml(im.versions.error)
+             : `vLLM ${escapeHtml(im.versions.vllm)} · FlashInfer ${escapeHtml(im.versions.flashinfer)}`)
+          : '<button class="btn" data-imgprobe>🔍 versions</button>'}</span>
+      </div>`).join('') || '<span class="muted">No Spark vLLM images yet — run "Update to tested nightly".</span>';
+    // Auto-probe the image recipes actually run.
+    const node = d.images.find((im) => im.is_vllm_node);
+    if (node && !node.versions) probeImage(node.ref);
+    $$('#imagesList [data-imgprobe]').forEach((b) =>
+      b.addEventListener('click', () => probeImage(b.closest('.img-row').dataset.imgref)));
+  } catch (e) { box.textContent = e.message; }
+  // Restore an in-flight/finished build log across tab switches.
+  const log = $('#imgBuildLog');
+  if (log && _imgBuild.lines.length) { log.hidden = false; log.textContent = _imgBuild.lines.join('\n'); log.scrollTop = log.scrollHeight; }
+  $$('#engineImagesCard [data-imgbuild]').forEach((b) => (b.disabled = _imgBuild.active));
+}
+async function probeImage(ref) {
+  const row = document.querySelector(`.img-row[data-imgref="${CSS.escape(ref)}"] .img-vers`);
+  if (row) row.textContent = 'probing…';
+  try {
+    const v = await api(`/images/probe?ref=${encodeURIComponent(ref)}`);
+    if (row) row.textContent = v.error ? v.error : `vLLM ${v.vllm} · FlashInfer ${v.flashinfer}`;
+  } catch (e) { if (row) row.textContent = e.message; }
+}
+$$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click', () => {
+  if (_imgBuild.active) return;
+  const mode = b.dataset.imgbuild;
+  const flags = mode === 'advanced' ? ($('#imgFlags').value || '').trim() : '';
+  if (mode === 'advanced' && !flags) { toast('Enter build flags first (e.g. --vllm-ref v0.24.0)', 'danger'); return; }
+  if (!confirm(mode === 'nightly'
+    ? 'Pull the tested nightly and retag vllm-node?\n\nUsually a few minutes. Running models keep serving their old image until relaunched.'
+    : 'Start an image build?\n\nSource builds can take 30–60+ minutes. It keeps running even if you close this page.')) return;
+  _imgBuild.active = true; _imgBuild.lines = [];
+  refreshEngineImages();
+  const log = $('#imgBuildLog'); log.hidden = false; log.textContent = '';
+  const es = new EventSource(`/api/images/build?mode=${mode}&flags=${encodeURIComponent(flags)}`);
+  es.addEventListener('log', (ev) => {
+    _imgBuild.lines.push(ev.data);
+    if (_imgBuild.lines.length > 800) _imgBuild.lines.shift();
+    const l = $('#imgBuildLog');
+    if (l) { l.hidden = false; l.textContent = _imgBuild.lines.join('\n'); l.scrollTop = l.scrollHeight; }
+  });
+  es.addEventListener('done', (ev) => {
+    es.close();
+    _imgBuild.active = false;
+    const code = Number(ev.data);
+    toast(code === 0 ? 'Image updated — relaunch recipes to use it' : `Image build exited ${code} — see the log`, code === 0 ? undefined : 'danger');
+    refreshEngineImages();
+  });
+  es.addEventListener('error', () => {
+    es.close();
+    _imgBuild.active = false;
+    _imgBuild.lines.push('[stream disconnected — the build continues server-side; revisit this tab to check]');
+    refreshEngineImages();
+  });
+}));
 
 // ---------- recovery page ---------------------------------------------------
 function recoveryReport(html) { $('#recoveryResult').innerHTML = html; }

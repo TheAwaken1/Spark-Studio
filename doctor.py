@@ -170,11 +170,31 @@ def _probe_docker() -> dict[str, Any]:
         return {"status": "warn", "detail": f"daemon check failed: {e}"}
 
 
+def _vllm_image_age_suffix() -> tuple[str, bool]:
+    """(detail suffix, stale?) for the vllm-node runner image — docker recipes
+    run it regardless of whether native vLLM is installed."""
+    try:
+        import engine_images
+        age = engine_images.vllm_node_age_days()
+        if age is not None:
+            return f" · vllm-node image is {age:g} days old", age > 14
+    except Exception:  # noqa: BLE001
+        pass
+    return "", False
+
+
 def _probe_engine(engine: str, hint: str):
     def fn() -> dict[str, Any]:
         from runners import engine_available
+        stale_fix = "Stale runner images break new models — vLLM tab → Engine images → Update to tested nightly."
         if engine_available(engine):
-            return {"status": "ok", "detail": "installed (native)"}
+            detail = "installed (native)"
+            if engine == "vllm":
+                suffix, stale = _vllm_image_age_suffix()
+                detail += suffix
+                if stale:
+                    return {"status": "warn", "detail": detail, "fix": stale_fix}
+            return {"status": "ok", "detail": detail}
         # On DGX Spark the native pip builds of vLLM/SGLang don't support
         # CUDA 13 / aarch64 — the Docker pipeline is the intended path, so a
         # missing native install is NOT a problem when Docker is available.
@@ -183,8 +203,13 @@ def _probe_engine(engine: str, hint: str):
             via = ("spark-vllm-docker containers" if engine == "vllm"
                    else "sparkrun container recipes")
             if engine == "sglang" or mirror.exists():
-                return {"status": "ok",
-                        "detail": f"via {via} (recommended on GB10 — native pip install not needed)"}
+                detail = f"via {via} (recommended on GB10 — native pip install not needed)"
+                if engine == "vllm":
+                    suffix, stale = _vllm_image_age_suffix()
+                    detail += suffix
+                    if stale:
+                        return {"status": "warn", "detail": detail, "fix": stale_fix}
+                return {"status": "ok", "detail": detail}
         return {"status": "warn", "detail": "not installed — engine unavailable", "fix": hint}
     return fn
 

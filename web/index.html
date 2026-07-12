@@ -123,6 +123,20 @@
     <section class="panel" data-panel="vllm" data-engine="vllm">
       <header class="panel-header"><h1>vLLM</h1><p>Throughput-first OpenAI-compatible server.</p></header>
       <div class="engine-ui"></div>
+      <div class="card" id="engineImagesCard" style="margin-top:14px">
+        <h3><i class="fa-solid fa-layer-group"></i> Engine images <span class="muted" style="font-size:12px">(spark-vllm-docker runner)</span></h3>
+        <p class="muted">Docker recipes run whatever is tagged <code>vllm-node</code>. New models usually need a <b>newer vLLM nightly</b> — update here, then relaunch the recipe. Running models keep their old image until relaunched.</p>
+        <div id="imagesList" class="muted">Loading…</div>
+        <div class="toolbar" style="margin-top:10px;flex-wrap:wrap">
+          <button class="btn primary" data-imgbuild="nightly" title="build-and-copy.sh with no flags: pulls the tested nightly eugr/spark-vllm:latest and retags vllm-node (~minutes)">⬇ Update to tested nightly</button>
+          <button class="btn" data-imgbuild="wheels" title="build-and-copy.sh --use-wheels: build from precompiled vLLM + FlashInfer wheels">🛞 Build from wheels</button>
+          <label style="display:flex;gap:6px;align-items:center;flex:1;min-width:260px">Advanced
+            <input id="imgFlags" type="text" class="mono" placeholder="--vllm-ref v0.24.0 --rebuild-flashinfer …" style="flex:1" />
+          </label>
+          <button class="btn" data-imgbuild="advanced" title="Allowed: --use-wheels --rebuild-vllm --vllm-ref --rebuild-flashinfer --flashinfer-ref --apply-flashinfer-pr --apply-vllm-pr --apply-preset-vllm-prs --pre-tf --exp-mxfp4 --tag --build-jobs --cleanup">Build</button>
+        </div>
+        <pre class="login-log" id="imgBuildLog" hidden></pre>
+      </div>
     </section>
     <section class="panel" data-panel="sglang" data-engine="sglang">
       <header class="panel-header"><h1>SGLang</h1><p>Structured generation runtime with RadixAttention.</p></header>
