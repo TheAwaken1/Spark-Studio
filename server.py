@@ -2792,6 +2792,25 @@ def host_info(refresh: bool = False):
     return hostinfo.probe_host(force=refresh)
 
 
+# Set once at import: lets /api/system report when the code on disk is newer
+# than this process (git pull without a restart) — the recurring trap where
+# the UI looks updated (static files serve fresh from disk) but API routes
+# are stale.
+_PROCESS_STARTED_AT = time.time()
+
+
+def _restart_needed() -> bool:
+    try:
+        newest = max(
+            p.stat().st_mtime
+            for p in list(APP_DIR.glob("*.py")) + [WEB_DIR / "app.js", WEB_DIR / "index.html"]
+            if p.exists()
+        )
+        return newest > _PROCESS_STARTED_AT + 1
+    except Exception:  # noqa: BLE001
+        return False
+
+
 @app.get("/api/system")
 def system_info(request: Request):
     import platform
@@ -2801,6 +2820,8 @@ def system_info(request: Request):
         "platform": platform.platform(),
         "python": platform.python_version(),
         "version": doctor.app_version(),
+        "restart_needed": _restart_needed(),
+        "started_at": _PROCESS_STARTED_AT,
         "urls": {
             "local": f"http://127.0.0.1:{port}",
             "lan": [f"http://{ip}:{port}" for ip in doctor._lan_ips()],

@@ -135,6 +135,15 @@ async function refreshSystem() {
       meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}${upd}`;
       meta.style.cursor = 'pointer';
     }
+    // Code on disk is newer than the running process (git pull without a
+    // restart): the UI serves fresh but API routes are stale — every new
+    // feature 404s. Impossible to miss, once per changed state.
+    const rn = $('#restartNeeded');
+    if (rn) rn.hidden = !sys.restart_needed;
+    if (sys.restart_needed && !window._restartNagged) {
+      window._restartNagged = true;
+      toast('Update applied on disk — restart Spark Studio to finish (new features will 404 until then)', 'danger');
+    }
   } catch (e) { console.error(e); }
   try {
     const a = await api('/agents/status');
@@ -4714,7 +4723,15 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
   es.addEventListener('error', () => {
     es.close();
     _imgBuild.active = false;
-    _imgBuild.lines.push('[stream disconnected — the build continues server-side; revisit this tab to check]');
+    // No log line ever arrived → the endpoint didn't answer (404 on a stale
+    // server process being the classic) — nothing is building.
+    if (_imgBuild.lines.length === 0) {
+      _imgBuild.lines.push('[could not start — the server did not accept the request.'
+        + ' If you just updated, the running process is still on the old code: restart Spark Studio and retry.]');
+      toast('Build did not start — restart Spark Studio after an update, then retry', 'danger');
+    } else {
+      _imgBuild.lines.push('[stream disconnected — the build continues server-side; revisit this tab to check]');
+    }
     refreshEngineImages();
   });
 }));

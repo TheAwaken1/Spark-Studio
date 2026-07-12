@@ -48,6 +48,10 @@
         <button class="ui-mode-btn" id="modeAdvanced" data-mode="advanced">Advanced</button>
       </div>
 
+      <!-- code-updated-but-process-stale warning -->
+      <div class="restart-needed" id="restartNeeded" hidden title="git pull updated the files, but this server process still runs the old code — new endpoints 404 until restarted">
+        ⟳ restart needed — <span class="mono">Ctrl+C → ./start.sh</span>
+      </div>
       <!-- version + LAN access line -->
       <div class="sidebar-meta" id="sidebarMeta" title="Open Spark Studio from any machine on your network"></div>
 
