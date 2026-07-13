@@ -191,6 +191,61 @@ def _parse_mem_fraction(raw_cmd: str | None, args: dict[str, Any] | None) -> flo
     return None
 
 
+# Engines whose workloads occupy unified/GPU memory — the ones worth a
+# reclaim pass after teardown.
+_MODEL_ENGINES = ("vllm", "sglang", "llamacpp", "sparkrun")
+
+# Passwordless sudo rule that lets the app flush caches without a prompt:
+#   echo 'USER ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches' \
+#     | sudo tee /etc/sudoers.d/spark-studio-reclaim && \
+#     sudo chmod 0440 /etc/sudoers.d/spark-studio-reclaim
+_RECLAIM_SUDO_HINT = (
+    "add a sudoers rule so Spark Studio can reclaim automatically: "
+    "echo \"$USER ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches\" "
+    "| sudo tee /etc/sudoers.d/spark-studio-reclaim && "
+    "sudo chmod 0440 /etc/sudoers.d/spark-studio-reclaim"
+)
+
+
+def _drop_caches() -> tuple[bool, str]:
+    """Release unified memory the GB10 driver leaves pinned after a CUDA
+    process exits. Known DGX Spark behavior: a stopped model's ~100 GB stays
+    'used' (held by nothing) until `sync; echo 3 > /proc/sys/vm/drop_caches`.
+    Tries a direct write (root), then passwordless sudo (see hint above)."""
+    try:
+        subprocess.run(["sync"], timeout=60)
+    except Exception:  # noqa: BLE001
+        pass
+    try:
+        with open("/proc/sys/vm/drop_caches", "w") as f:
+            f.write("3\n")
+        return True, "flushed caches (drop_caches=3)"
+    except PermissionError:
+        pass
+    except OSError as e:
+        return False, f"drop_caches write failed: {e}"
+    sudo = shutil.which("sudo")
+    if not sudo:
+        return False, "no privilege to drop caches (no sudo) — " + _RECLAIM_SUDO_HINT
+    try:
+        res = subprocess.run(
+            [sudo, "-n", "/usr/bin/tee", "/proc/sys/vm/drop_caches"],
+            input="3\n",
+            text=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=60,
+        )
+    except Exception as e:  # noqa: BLE001
+        return False, f"drop_caches via sudo failed: {e}"
+    if res.returncode == 0:
+        return True, "flushed caches (drop_caches=3 via sudo)"
+    return False, (
+        "memory freed by the model may stay pinned (GB10 unified-memory quirk) — "
+        + _RECLAIM_SUDO_HINT
+    )
+
+
 @dataclass
 class Run:
     id: str
@@ -435,6 +490,14 @@ class Runner:
         # 3) Final fit check for pool-filling engines.
         if need is not None:
             avail = _mem_available_gb() or 0.0
+            if avail < need * 0.92:
+                # GB10 pins a dead model's memory until caches drop — reclaim
+                # once and re-measure before refusing the launch.
+                ok, msg = _drop_caches()
+                msgs.append(f"[guard] {msg}")
+                if ok:
+                    time.sleep(1.0)
+                    avail = _mem_available_gb() or 0.0
             if avail < need * 0.92:  # small tolerance for measurement jitter
                 raise MemoryTooTight(
                     f"Not enough unified memory to launch this model: it needs about "
@@ -582,6 +645,7 @@ class Runner:
                 run.exit_code = run.proc.returncode
                 self._capture_managed_container_logs(run)
                 self._cleanup_run(run)
+                self._reclaim_after_teardown(run)
                 run.ended_at = time.time()
                 run.status = "exited"
                 db.runs_update(run.id, status="exited", ended_at=db.now(), exit_code=run.exit_code)
@@ -625,6 +689,7 @@ class Runner:
                 except ProcessLookupError:
                     pass
             self.finalize(run, exit_code=-int(sig), reason="stopped by user (adopted run)")
+            self._reclaim_after_teardown(run)
             return True
         if not run.proc:
             return False
@@ -692,6 +757,8 @@ class Runner:
             "[stop] workload stopped" if ok
             else "[stop] could not confirm teardown — workload may still be running (check `sparkrun status`)"
         )
+        if ok:
+            self._reclaim_after_teardown(run)
 
     def _force_remove_workload_containers(self, run: Run) -> bool:
         """Last-resort teardown when the workload's own stop command failed:
@@ -739,6 +806,58 @@ class Runner:
                 ok = False
                 run.publish(f"[stop] docker rm -f {name} failed: {e}")
         return ok
+
+    def _reclaim_after_teardown(self, run: Run) -> None:
+        """GB10 leaves a stopped model's unified memory pinned after the CUDA
+        process dies — `free` shows ~100 GB used with nothing running until
+        caches are dropped. Wait (in a daemon thread) for the run's containers
+        and process to actually be gone, then flush. Once per run."""
+        if run.engine not in _MODEL_ENGINES:
+            return
+        if run.meta.get("_reclaimed"):
+            return
+        run.meta["_reclaimed"] = True
+
+        def work() -> None:
+            deadline = time.time() + 90
+            docker = shutil.which("docker")
+            names = set(run.managed_containers)
+            jobid = run.meta.get("jobid")
+            while time.time() < deadline:
+                busy = False
+                if run.proc is not None and run.proc.poll() is None:
+                    busy = True
+                elif run.adopted_pid:
+                    try:
+                        os.kill(run.adopted_pid, 0)
+                        busy = True
+                    except OSError:
+                        pass
+                if not busy and docker and (names or jobid):
+                    try:
+                        res = subprocess.run(
+                            [docker, "ps", "--format", "{{.Names}}"],
+                            capture_output=True, text=True, timeout=20,
+                        )
+                        live = {n.strip() for n in (res.stdout or "").splitlines() if n.strip()}
+                    except Exception:  # noqa: BLE001
+                        live = set()
+                    if names & live:
+                        busy = True
+                    elif jobid and any(n.startswith("sparkrun_") and jobid in n for n in live):
+                        busy = True
+                if not busy:
+                    break
+                time.sleep(2)
+            before = _mem_available_gb()
+            ok, msg = _drop_caches()
+            after = _mem_available_gb()
+            if ok and before is not None and after is not None:
+                msg = f"{msg} — available {before:.0f} → {after:.0f} GB"
+            run.publish(f"[reclaim] {msg}")
+            print(f"[reclaim] {run.id}: {msg}", flush=True)
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _stop_docker_containers(self, run: Run, force: bool = False) -> None:
         """Fire-and-forget docker stop/kill; stop() must return immediately."""
@@ -967,6 +1086,7 @@ class Runner:
                 self._stop_docker_containers(run, force=False)
             if run.stop_cmd:
                 threading.Thread(target=self._run_stop_cmd, args=(run,), daemon=True).start()
+            self._reclaim_after_teardown(run)
         try:
             db.runs_update(run.id, status="exited", ended_at=db.now(), exit_code=exit_code)
         except Exception:  # noqa: BLE001

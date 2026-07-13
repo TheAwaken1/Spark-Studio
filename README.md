@@ -321,6 +321,23 @@ Spark Studio mitigates this from its side automatically:
   `mem-fraction-static` (× the 128 GB pool); llama.cpp isn't pool-filling so
   it's exempt from the hard fit-check. Override with the `force` flag on a
   launch, or globally with `SPARK_STUDIO_NO_MEMORY_GUARD=1`.
+- **Post-stop memory reclaim.** On the GB10 a stopped model's unified memory
+  stays pinned after the CUDA process exits — `free` keeps showing ~100 GB
+  used with nothing running (a known DGX Spark quirk; the manual fix is
+  `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`). After every model
+  stop/exit the app waits for the run's containers/process to actually be
+  gone and flushes caches automatically; the pre-launch guard also flushes
+  before refusing a launch for lack of memory. Flushing needs root, so grant
+  this one narrow passwordless command (writing to `drop_caches` only evicts
+  reclaimable caches — it can't harm running workloads):
+
+  ```bash
+  echo "$USER ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
+    | sudo tee /etc/sudoers.d/spark-studio-reclaim
+  sudo chmod 0440 /etc/sudoers.d/spark-studio-reclaim
+  ```
+
+  Without the rule, the run log shows a `[reclaim]` line with this exact hint.
 - **OOM priority.** At startup the app tries to lower its own OOM priority (only
   possible with privilege, e.g. a systemd unit with `OOMScoreAdjust=-500`), and
   — the part that always works — it **raises the OOM priority of every engine
