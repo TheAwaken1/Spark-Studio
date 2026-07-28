@@ -301,17 +301,19 @@ The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
 are shared with `sparkstudio hermes`, so both entry points behave consistently.
 
 Because Hermes can run terminal commands and edit files, the WebSocket terminal
-accepts local-browser connections only by default, even when the rest of Spark
-Studio is open on the LAN. To deliberately enable the terminal for trusted LAN
-clients, start Spark Studio with:
+accepts loopback browsers and same-origin private-LAN browsers using HTTPS/WSS.
+Plain HTTP connections from another device and public remote addresses are
+rejected. The bundled Caddy setup (`https://<Spark-IP>:8443`) meets the encrypted
+private-LAN requirement automatically. To deliberately bypass that boundary
+when another trusted transport already protects Spark Studio, start it with:
 
 ```bash
 SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 ./start.sh
 ```
 
-Do not enable remote terminal access on an untrusted network. WebSocket Origin
-validation remains enforced in both modes, and closing the page or pressing
-**Stop** terminates and reaps the Hermes TUI and its helper processes.
+Do not enable unrestricted remote terminal access on an untrusted network.
+WebSocket Origin validation remains enforced in every mode, and closing the
+page or pressing **Stop** terminates and reaps the Hermes TUI and its helpers.
 
 Run the deterministic coding smoke suite through Hermes:
 

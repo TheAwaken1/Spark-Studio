@@ -4012,12 +4012,18 @@ async function refreshHermesTui(autoStart = false) {
     if (!$('#hermesWorkspace').value) $('#hermesWorkspace').value = status.workspace || '';
     const active = status.active;
     $('#hermesTuiModel').textContent = active?.model || 'No loaded model';
-    $('#hermesTuiSecurity').innerHTML = status.remote_allowed
-      ? '<i class="fa-solid fa-triangle-exclamation"></i> LAN terminal access enabled'
-      : '<i class="fa-solid fa-shield-halved"></i> Local browser only';
-    const ready = status.installed && status.pty && active?.ready;
+    const accessLabels = {
+      local: '<i class="fa-solid fa-shield-halved"></i> Local browser',
+      private_https: '<i class="fa-solid fa-lock"></i> Encrypted private LAN',
+      explicit_remote: '<i class="fa-solid fa-triangle-exclamation"></i> Remote access explicitly enabled',
+    };
+    $('#hermesTuiSecurity').innerHTML = accessLabels[status.access_mode]
+      || '<i class="fa-solid fa-lock"></i> Terminal access restricted';
+    const accessAllowed = status.access_allowed !== false;
+    const ready = status.installed && status.pty && active?.ready && accessAllowed;
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
+    else if (!accessAllowed) setHermesTuiState(status.access_reason || 'Terminal access denied', 'error');
     else if (!active) setHermesTuiState('Load a model to start Hermes', 'error');
     else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
     else if (!hermesTui.socket) setHermesTuiState('Ready to start');
@@ -4066,7 +4072,11 @@ function startHermesTui() {
     hermesTui.socket = null;
     setHermesControls(false);
     const expected = event.code === 1000 || event.code === 4410;
-    const reason = event.reason || (expected ? 'Hermes exited' : `connection closed (${event.code})`);
+    const reason = event.reason || (expected
+      ? 'Hermes exited'
+      : (event.code === 1006
+        ? 'Terminal connection was rejected — reload this tab and check its access status'
+        : `connection closed (${event.code})`));
     hermesTui.terminal.write(`\r\n\x1b[${expected ? '33' : '31'}m${reason}\x1b[0m\r\n`);
     setHermesTuiState(reason, expected ? '' : 'error');
     refreshHermesTui(false);

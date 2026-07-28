@@ -16,6 +16,48 @@ import server
 
 
 class HermesBrowserTerminalTests(unittest.TestCase):
+    def test_terminal_access_policy_allows_encrypted_private_lan(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
+            self.assertEqual(
+                server._terminal_access_policy("192.168.0.158", "wss")[:2],
+                (True, "private_https"),
+            )
+            self.assertEqual(
+                server._terminal_access_policy("192.168.0.158", "https")[:2],
+                (True, "private_https"),
+            )
+
+    def test_terminal_access_policy_rejects_plain_lan_and_public_remote(self):
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
+            self.assertEqual(
+                server._terminal_access_policy("192.168.0.158", "ws")[:2],
+                (False, "private_http_denied"),
+            )
+            self.assertEqual(
+                server._terminal_access_policy("8.8.8.8", "wss")[:2],
+                (False, "remote_denied"),
+            )
+
+    def test_terminal_access_override_is_explicit(self):
+        with mock.patch.dict(
+            os.environ, {"SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE": "1"}
+        ):
+            self.assertEqual(
+                server._terminal_access_policy("8.8.8.8", "ws")[:2],
+                (True, "explicit_remote"),
+            )
+
+    def test_internal_studio_url_stays_http_behind_wss_proxy(self):
+        websocket = SimpleNamespace(scope={"server": ("0.0.0.0", 7860)})
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SPARK_STUDIO_INTERNAL_URL", None)
+            self.assertEqual(
+                server._studio_url_for_websocket(websocket),
+                "http://127.0.0.1:7860",
+            )
+
     def test_browser_command_launches_real_tui_with_agent_tools(self):
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
         self.assertEqual(command[:2], ["/opt/hermes", "--tui"])

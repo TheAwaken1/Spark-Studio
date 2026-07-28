@@ -2337,10 +2337,14 @@ def agentlab_status():
 
 
 @app.get("/api/agentlab/terminal/status")
-def agentlab_terminal_status():
+def agentlab_terminal_status(request: Request):
     """Readiness for the embedded, real Hermes TUI."""
     status = agentlab.hermes_status()
     active = runner.active()
+    access_allowed, access_mode, access_reason = _terminal_access_policy(
+        request.client.host if request.client else "",
+        request.url.scheme,
+    )
     active_model = active.label if active else None
     if active and active.ready and active.url and not active_model:
         try:
@@ -2350,10 +2354,10 @@ def agentlab_terminal_status():
     status.update(
         {
             "pty": hermes_terminal.PtyBridge.available(),
-            "remote_allowed": os.environ.get(
-                "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", ""
-            ).strip().lower()
-            in {"1", "true", "yes", "on"},
+            "remote_allowed": _hermes_remote_override(),
+            "access_allowed": access_allowed,
+            "access_mode": access_mode,
+            "access_reason": access_reason,
             "workspace": str(APP_DIR),
             "active": {
                 "id": active.id,
@@ -2368,21 +2372,52 @@ def agentlab_terminal_status():
     return status
 
 
-def _websocket_peer_is_local(ws: WebSocket) -> bool:
-    peer = ws.client.host if ws.client else ""
+def _hermes_remote_override() -> bool:
+    return os.environ.get(
+        "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _terminal_access_policy(peer: str, scheme: str) -> tuple[bool, str, str]:
+    """Decide whether a browser terminal request crosses a safe boundary.
+
+    Loopback always works. Private-LAN peers work only through HTTPS/WSS,
+    which is the normal Caddy setup. The explicit environment override keeps
+    the previous escape hatch for operators with another trusted transport.
+    """
     if peer in {"localhost", "testclient"}:
-        return True
+        return True, "local", "Local browser"
     try:
-        return ipaddress.ip_address(peer).is_loopback
+        address = ipaddress.ip_address(peer)
     except ValueError:
-        return False
+        address = None
+    if address and address.is_loopback:
+        return True, "local", "Local browser"
+    if _hermes_remote_override():
+        return True, "explicit_remote", "Remote terminal access explicitly enabled"
+    if address and (address.is_private or address.is_link_local):
+        if scheme in {"https", "wss"}:
+            return True, "private_https", "Encrypted private-LAN browser"
+        return (
+            False,
+            "private_http_denied",
+            "Hermes Chat requires HTTPS when opened from another LAN device",
+        )
+    return False, "remote_denied", "Hermes Chat is unavailable to public remote clients"
+
+
+def _websocket_peer_is_local(ws: WebSocket) -> bool:
+    allowed, mode, _ = _terminal_access_policy(
+        ws.client.host if ws.client else "", ws.url.scheme
+    )
+    return allowed and mode == "local"
 
 
 def _websocket_same_origin(ws: WebSocket) -> bool:
     """WebSocket routes do not pass through the HTTP CORS middleware."""
     origin = ws.headers.get("origin", "")
     if not origin:
-        return True
+        return _websocket_peer_is_local(ws)
     parsed = urllib.parse.urlparse(origin)
     return parsed.scheme in {"http", "https"} and parsed.netloc == ws.headers.get(
         "host", ""
@@ -2390,10 +2425,15 @@ def _websocket_same_origin(ws: WebSocket) -> bool:
 
 
 def _studio_url_for_websocket(ws: WebSocket) -> str:
+    override = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
+    if override:
+        return override.rstrip("/")
     server = ws.scope.get("server") or ("127.0.0.1", 7860)
     port = int(server[1] or 7860)
-    scheme = "https" if ws.url.scheme == "wss" else "http"
-    return f"{scheme}://127.0.0.1:{port}"
+    # Caddy terminates HTTPS/WSS and forwards to this loopback HTTP port. The
+    # Hermes MCP child runs beside Spark Studio, so it must dial the backend,
+    # not try TLS against uvicorn just because the browser used HTTPS.
+    return f"http://127.0.0.1:{port}"
 
 
 @app.websocket("/api/agentlab/terminal")
@@ -2402,14 +2442,13 @@ async def agentlab_terminal(ws: WebSocket):
     if not _websocket_same_origin(ws):
         await ws.close(code=4403, reason="origin does not match Spark Studio")
         return
-    remote_allowed = os.environ.get(
-        "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", ""
-    ).strip().lower() in {"1", "true", "yes", "on"}
-    if not remote_allowed and not _websocket_peer_is_local(ws):
+    access_allowed, _, access_reason = _terminal_access_policy(
+        ws.client.host if ws.client else "", ws.url.scheme
+    )
+    if not access_allowed:
         await ws.close(
             code=4408,
-            reason="Hermes terminal is local-only; set "
-            "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 to opt in",
+            reason=access_reason,
         )
         return
 
