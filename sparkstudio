@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+SOURCE="$(readlink -f "${BASH_SOURCE[0]}")"
+APP_DIR="$(cd "$(dirname "$SOURCE")" && pwd)"
+PYTHON="$APP_DIR/env/bin/python"
+if [[ ! -x "$PYTHON" ]]; then
+    PYTHON="$(command -v python3 || true)"
+fi
+if [[ -z "$PYTHON" ]]; then
+    echo "error: Spark Studio's Python environment is not installed; run ./start.sh once" >&2
+    exit 1
+fi
+exec "$PYTHON" "$APP_DIR/sparkstudio_cli.py" "$@"

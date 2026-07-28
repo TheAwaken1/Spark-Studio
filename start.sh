@@ -12,7 +12,7 @@ NO_SPARKRUN_UPDATE="${SPARK_STUDIO_NO_SPARKRUN_UPDATE:-0}"
 NO_OPEN="${SPARK_STUDIO_NO_OPEN:-0}"
 DOCTOR=0
 UPDATE=0
-MODE=serve   # serve | desktop | install-launcher | install-service
+MODE=serve   # serve | desktop | install-launcher | install-service | install-cli
 EXTRA_ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -26,11 +26,24 @@ while [[ $# -gt 0 ]]; do
         --desktop) MODE=desktop; shift ;;
         --install-launcher) MODE=install-launcher; shift ;;
         --install-service) MODE=install-service; shift ;;
+        --install-cli) MODE=install-cli; shift ;;
         *) EXTRA_ARGS+=("$1"); shift ;;
     esac
 done
 
 APP_DIR="$(pwd)"
+
+# ----- command-line launcher -------------------------------------------------
+if [[ "$MODE" == "install-cli" ]]; then
+    mkdir -p "$HOME/.local/bin"
+    ln -sfn "$APP_DIR/sparkstudio" "$HOME/.local/bin/sparkstudio"
+    echo "CLI installed: $HOME/.local/bin/sparkstudio"
+    if [[ ":$PATH:" != *":$HOME/.local/bin:"* ]]; then
+        echo "Add ~/.local/bin to PATH, or open a new shell if your profile already does so."
+    fi
+    echo "Try: sparkstudio agent doctor"
+    exit 0
+fi
 
 # ----- desktop launcher (.desktop file) --------------------------------------
 if [[ "$MODE" == "install-launcher" ]]; then

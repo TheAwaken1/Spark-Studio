@@ -67,6 +67,7 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 - **Chat & Canvas / Engine Chat** — Monaco editor + chat, auto-targets whichever engine is running; renders Chart.js charts, Word/Excel export cards, and web-grounded answers. Auto-fits `max_tokens` to the engine's real context window every turn
 - **Benchmarks** — quick tokens/s + TTFT sanity bench, plus full [llama-benchy](https://github.com/eugr/llama-benchy) sweeps (pp/tg at depth, concurrency, prefix caching). Every result records the engine version; compare any two runs side-by-side, and copy a shareable markdown report (hardware + engine + recipe + results) for the community
 - **Tool Eval Bench** — answers "how *useful* is this model?", not just how fast. 12 deterministic cases score five skills 0–100: **tool selection** (pick the right tool among five), **argument extraction** (exact dates/amounts/names into tool args), **restraint** (answer directly instead of spurious tool calls), **using tool results** in the final answer, and **strict JSON** output. Each case shows what the model actually did (`called get_weather({"city": "Tokyo"})`); thinking models get a fair token budget and `<think>` blocks are stripped before checking. Every eval saves a markdown + JSON report to `tooleval-results/` and scores are kept in history per model. If the engine was launched without tool calling, the bench says so instead of silently scoring zero
+- **`sparkstudio` CLI + Hermes Agent Lab** — chat with the loaded model, run speed/tool benches, hand a real repository task to [Hermes Agent](https://github.com/NousResearch/hermes-agent), or score models on disposable coding fixtures. It follows the [NVIDIA DGX Spark Hermes playbook](https://build.nvidia.com/spark/hermes-agent/instructions): the active local OpenAI-compatible endpoint is configured as Hermes' custom provider, while reports, diffs, test output, and Spark telemetry are retained for comparison
 - **Load telemetry on every run** — run cards show how long the model took to become ready and how much unified RAM it claimed (`loaded in 3m42s · +38.2 GB RAM`), stamped the moment the engine first answers. Stats persist in run history and survive app restarts; adopted/external endpoints (already loaded) honestly show nothing instead of a bogus number
 - **Pre-launch memory guard** — on DGX Spark's 128 GB unified pool each model fills most of the pool, so only one fits at a time. Before launching, Spark Studio stops any other resident model, waits for its memory to actually free, and blocks a launch that still won't fit (with a one-click "launch anyway") — so swapping models doesn't OOM the box or take the dashboard down with it. See [Memory / OOM protection](#memory--oom-protection)
 - **WebGPU tab** — in-browser inference via MLC WebLLM, with PDF/CSV/XLSX attachment extraction and built-in web search (bundled SearXNG, auto-started)
@@ -92,6 +93,7 @@ Your inference engine(s) installed separately:
 Optional extras:
 - [llama-benchy](https://github.com/eugr/llama-benchy) for full benchmark sweeps — `uv pip install --python env/bin/python llama-benchy`
 - [sparkrun](https://github.com/spark-arena/sparkrun) for multi-node community recipes — `uvx sparkrun setup` (guided cluster wizard)
+- [Hermes Agent](https://hermes-agent.nousresearch.com/) for the local-model Agent Lab — `curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash`
 - **Docker** for spark-vllm-docker recipes and the bundled SearXNG web search
 
 ## Installation
@@ -110,7 +112,7 @@ install optional pieces per profile:
 |---|---|
 | `--basic` | dashboard + recipes + local runs |
 | `--recommended` *(default)* | + sparkrun CLI (community recipes, kernel tuning) |
-| `--full` | + llama-benchy + Claude/Codex agent CLIs |
+| `--full` | + llama-benchy + Claude/Codex agent CLIs + Hermes Agent |
 
 Piped installs (`curl … \| bash`) can't prompt, so they run fully
 non-interactive with the defaults above; use the `bash <(curl …)` form for
@@ -154,16 +156,65 @@ git clone --depth 1 https://github.com/eugr/spark-vllm-docker.git    data/regist
 git clone --depth 1 https://github.com/spark-arena/sparkrun.git        data/registry/sparkrun
 ```
 
-### 3. (Optional) Install agent CLIs
+### 3. (Optional) Install agent CLIs and Hermes
 
 For the **Ask Claude** and **Ask Codex** buttons:
 
 ```bash
 npm install -g @anthropic-ai/claude-code @openai/codex
-
 ```
 
 After installing, log in from the **Agents** tab inside Spark Studio — no API keys needed, just your browser OAuth flow.
+
+For Agent Lab, install the Hermes CLI used by NVIDIA's DGX Spark playbook:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+./start.sh --install-cli
+```
+
+#### Hermes setup sequence (DGX Spark local model)
+
+Load the model in Spark Studio **before** running the Hermes setup wizard.
+Open **Engine Chat** and copy the endpoint shown for the loaded model. A
+confirmed working endpoint from Spark Studio is:
+
+```text
+http://127.0.0.1:41293/v1
+```
+
+The engine port is assigned per run and can change after reloading a model, so
+always prefer the current URL shown in Engine Chat. When the Hermes installer
+asks questions, choose:
+
+| Installer prompt | Answer |
+|---|---|
+| Install ripgrep and ffmpeg? | **Yes** |
+| Import or migrate OpenClaw configuration? | **No** |
+| How would you like to set up Hermes? | **Blank Slate** |
+| Select provider | **Custom endpoint (enter URL manually)** |
+| API base URL | **`http://127.0.0.1:41293/v1`** (or the current Engine Chat URL plus `/v1`) |
+| API key | **Leave blank** |
+| Model | Select the model reported by the loaded endpoint |
+| Context length | **Leave blank for auto-detection** |
+| Display name | Accept the default, or use **Spark Studio Local** |
+| Terminal backend | **Local** |
+| What next? | **Start with everything disabled — finish now** |
+
+Reload the shell and verify the integration:
+
+```bash
+source ~/.bashrc
+export PATH="$HOME/.local/bin:$PATH"
+which hermes
+sparkstudio agent doctor
+sparkstudio agent cases
+sparkstudio agent eval --suite coding-smoke
+```
+
+Spark Studio rewrites its isolated Hermes profile with the currently active
+engine URL before each Agent Lab run, so a later port change does not require
+editing your personal Hermes configuration.
 
 ## Running
 
@@ -178,6 +229,7 @@ After installing, log in from the **Agents** tab inside Spark Studio — no API 
 ```bash
 ./start.sh --install-launcher   # "Spark Studio" in your application menu
 ./start.sh --install-service    # systemd user service (auto-start, self-updating)
+./start.sh --install-cli        # ~/.local/bin/sparkstudio
 ```
 
 The **desktop launcher** starts the server if needed and opens the dashboard —
@@ -203,6 +255,59 @@ engine (vLLM/SGLang/llama.cpp), sparkrun, Claude/Codex agents, llama-benchy,
 SearXNG, and your dashboard URLs — with a one-line fix for anything missing.
 Exit code is non-zero when a core check fails, so it's scriptable. The same
 report is served at `GET /api/doctor` for the UI and bug reports.
+
+## `sparkstudio` CLI + Hermes Agent Lab
+
+Start Spark Studio, launch a tool-capable model, and check the full path:
+
+```bash
+sparkstudio status
+sparkstudio models
+sparkstudio chat "Write a Python function that validates a recipe"
+sparkstudio bench speed
+sparkstudio bench tools
+sparkstudio agent doctor
+```
+
+Run the deterministic coding smoke suite through Hermes:
+
+```bash
+sparkstudio agent cases
+sparkstudio agent eval --suite coding-smoke
+
+# More confidence, and parallel workers if the loaded model can handle them
+sparkstudio agent eval --trials 3 --jobs 2 --fail-below 70
+```
+
+Each case starts as a tiny Git repository with known failing tests. Hermes gets
+the `file,terminal` toolset, edits the repository, runs its tests, and is scored
+only by a clean post-run test command. Markdown and JSON reports land under
+`data/agent-lab/results/`; `sparkstudio agent history` and
+`sparkstudio agent show <run-id>` retrieve the SQLite-backed history.
+
+Use the same harness on your own repository:
+
+```bash
+sparkstudio agent run \
+  "Find the cause of the failing tests, implement the smallest fix, and rerun them" \
+  --repo /path/to/project
+```
+
+By default this creates a detached worktree from the repository's current
+`HEAD`, preserving the original checkout and any uncommitted work. The result
+prints the retained workspace and diff. Pass `--in-place` only when you want
+Hermes to edit the original checkout.
+
+Agent Lab uses a dedicated profile at `data/agent-lab/hermes` so it never
+rewrites your personal Hermes settings. The default enables smart approvals,
+restricts the advertised tools to file and terminal, adds denials for common
+high-risk commands, and keeps Hermes checkpoints. This is process guidance,
+not an OS sandbox: review generated changes before using them and avoid
+`--unsafe-yolo` unless the workspace is disposable.
+
+For an external OpenAI-compatible server, place global overrides before the
+command: `sparkstudio --base-url http://127.0.0.1:41293/v1 --model MODEL agent eval`.
+Add `--json` in the same position for automation.
 
 or manually:
 
@@ -579,6 +684,9 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `POST` | `/api/tooleval/run` | Start the Tool Eval Bench against a run (defaults to the active engine) |
 | `GET` | `/api/tooleval/status` | Live progress, per-case results, and scores of the current/last eval |
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
+| `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
+| `GET` | `/api/agentlab/history` | Saved free-form and deterministic Agent Lab runs |
+| `GET` | `/api/agentlab/{run-id}` | One Agent Lab result, including report and workspace metadata |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |
 | `GET` | `/metrics` | Prometheus exposition: GPU/CPU/memory + run gauges (scrape each Spark for Grafana history) |
 | `GET` | `/api/images` `/api/images/probe?ref=` | Spark-vLLM runner images / vLLM+FlashInfer versions inside one |

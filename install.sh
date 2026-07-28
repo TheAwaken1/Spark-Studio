@@ -18,7 +18,7 @@
 # Profiles:
 #   basic        dashboard + recipes + local runs (Python env only)
 #   recommended  basic + sparkrun CLI (community recipes, kernel tuning)
-#   full         recommended + llama-benchy + Claude/Codex CLIs (needs npm)
+#   full         recommended + llama-benchy + Claude/Codex CLIs + Hermes Agent
 
 set -euo pipefail
 
@@ -123,6 +123,8 @@ bash start.sh --doctor || true   # non-zero just means a core check warned — r
 # must have worked: the venv exists and the app's core deps import.
 env/bin/python -c "import fastapi, uvicorn, httpx" 2>/dev/null \
     || fail "Python environment setup failed — scroll up for the dependency error, then re-run this installer."
+bash start.sh --install-cli
+ok "sparkstudio CLI installed"
 
 # ----- profile extras ---------------------------------------------------------
 if [[ "$PROFILE" == "recommended" || "$PROFILE" == "full" ]]; then
@@ -146,6 +148,16 @@ if [[ "$PROFILE" == "full" ]]; then
                 && ok "agent CLIs installed (log in from the Agents tab)" \
                 || warn "npm install failed — install the agent CLIs later"
         fi
+    fi
+    if ! command -v hermes >/dev/null 2>&1; then
+        if [[ "$INTERACTIVE" != "1" ]] \
+                || ask "Install Hermes Agent for the local-model Agent Lab? [Y/n]" y; then
+            curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash \
+                && ok "Hermes Agent installed" \
+                || warn "Hermes install did not finish — run 'sparkstudio agent doctor' for the supported command"
+        fi
+    else
+        ok "Hermes Agent already installed"
     fi
 fi
 

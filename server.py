@@ -25,6 +25,7 @@ from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
 
 import agents
+import agentlab
 import bench
 import benchy
 import cluster as cluster_mod
@@ -2314,6 +2315,27 @@ def tooleval_history(limit: int = 50):
         except Exception:  # noqa: BLE001
             r["results"] = {}
     return rows
+
+
+# ----- Hermes Agent Lab -----------------------------------------------------
+
+@app.get("/api/agentlab/status")
+def agentlab_status():
+    """Hermes install state plus the isolated profile used by Spark Studio."""
+    return agentlab.hermes_status()
+
+
+@app.get("/api/agentlab/history")
+def agentlab_history(limit: int = 50):
+    return agentlab.history(limit=max(1, min(limit, 200)))
+
+
+@app.get("/api/agentlab/{agent_run_id}")
+def agentlab_result(agent_run_id: str):
+    result = agentlab.get_result(agent_run_id)
+    if not result:
+        raise HTTPException(404, "Agent Lab run not found")
+    return result
 
 
 @app.post("/api/benchy/run")

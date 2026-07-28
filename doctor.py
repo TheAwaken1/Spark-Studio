@@ -241,6 +241,19 @@ def _probe_agent(which: str) -> dict[str, Any]:
             "fix": "Log in from the Agents tab (browser OAuth, no API key)."}
 
 
+def _probe_hermes() -> dict[str, Any]:
+    import agentlab
+    status = agentlab.hermes_status()
+    if not status["installed"]:
+        return {
+            "status": "warn",
+            "detail": "not installed — Agent Lab disabled",
+            "fix": agentlab.HERMES_INSTALL,
+        }
+    detail = status.get("version") or status.get("binary") or "installed"
+    return {"status": "ok", "detail": detail}
+
+
 def _probe_benchy() -> dict[str, Any]:
     import benchy
     if benchy.available():
@@ -298,6 +311,7 @@ def run_checks(port: int = DEFAULT_PORT) -> dict[str, Any]:
         _check("sparkrun", "sparkrun", _probe_sparkrun),
         _check("claude", "Claude Code agent", lambda: _probe_agent("claude")),
         _check("codex", "Codex agent", lambda: _probe_agent("codex")),
+        _check("hermes", "Hermes Agent Lab", _probe_hermes),
         _check("benchy", "llama-benchy", _probe_benchy),
         _check("searxng", "Web search (SearXNG)", _probe_searxng),
         _check("port", "Dashboard", _probe_port(port)),

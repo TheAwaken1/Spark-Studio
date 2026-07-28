@@ -92,6 +92,25 @@ def init():
             created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_tooleval_model ON tooleval_runs(model);
+        CREATE TABLE IF NOT EXISTS agentlab_runs (
+            id TEXT PRIMARY KEY,
+            mode TEXT NOT NULL,
+            harness TEXT NOT NULL,
+            run_id TEXT,
+            model TEXT,
+            base_url TEXT,
+            repo_path TEXT,
+            task TEXT,
+            suite TEXT,
+            status TEXT NOT NULL,
+            score REAL,
+            passed INTEGER,
+            total INTEGER,
+            duration_seconds REAL,
+            result_json TEXT NOT NULL DEFAULT '{}',
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_agentlab_created ON agentlab_runs(created_at);
         """
     )
 
@@ -338,6 +357,51 @@ def tooleval_list(limit=50):
         c.execute("SELECT * FROM tooleval_runs ORDER BY created_at DESC LIMIT ?", (limit,))
         return [dict(r) for r in c.fetchall()]
 
+
+def agentlab_upsert(row):
+    """Persist an immutable-id Hermes Agent Lab run."""
+    with cur() as c:
+        c.execute(
+            """
+            INSERT OR REPLACE INTO agentlab_runs
+              (id, mode, harness, run_id, model, base_url, repo_path, task,
+               suite, status, score, passed, total, duration_seconds,
+               result_json, created_at)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            """,
+            (
+                row["id"],
+                row.get("mode") or "run",
+                row.get("harness") or "hermes",
+                row.get("run_id"),
+                row.get("model"),
+                row.get("base_url"),
+                row.get("repo_path"),
+                row.get("task"),
+                row.get("suite"),
+                row.get("status") or "running",
+                row.get("score"),
+                row.get("passed"),
+                row.get("total"),
+                row.get("duration_seconds"),
+                row.get("result_json") or "{}",
+                row.get("created_at") or now(),
+            ),
+        )
+    return agentlab_get(row["id"])
+
+
+def agentlab_list(limit=50):
+    with cur() as c:
+        c.execute("SELECT * FROM agentlab_runs ORDER BY created_at DESC LIMIT ?", (limit,))
+        return [dict(r) for r in c.fetchall()]
+
+
+def agentlab_get(run_id):
+    with cur() as c:
+        c.execute("SELECT * FROM agentlab_runs WHERE id=?", (run_id,))
+        row = c.fetchone()
+        return dict(row) if row else None
 
 init()
 _add_col_if_missing("recipes", "raw_cmd", "TEXT")
