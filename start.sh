@@ -102,6 +102,10 @@ ExecStart=/bin/bash "$APP_DIR/start.sh" --no-sparkrun-update
 # and systemd brings the new version up. 'systemctl --user stop' still stops.
 Restart=always
 RestartSec=5
+# systemd otherwise kills every engine child in this service's cgroup during a
+# dashboard restart. Only stop the dashboard's main process; models have their
+# own process groups and Spark Studio re-adopts healthy survivors on boot.
+KillMode=process
 # Models keep serving across service restarts; the next boot re-adopts them.
 Environment=SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1
 # Tells the app it may self-restart after an in-app update.

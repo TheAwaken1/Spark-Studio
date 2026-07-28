@@ -1,3 +1,4 @@
+import asyncio
 import os
 import tempfile
 import time
@@ -12,6 +13,7 @@ from starlette.websockets import WebSocketDisconnect
 
 import agentlab
 import hermes_terminal
+import runners
 import server
 
 
@@ -171,6 +173,106 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         output = b"".join(chunks)
         self.assertIn(b"ready", output)
         self.assertIn(b"got-hello", output)
+
+
+class RestartRecoveryTests(unittest.TestCase):
+    def test_adopted_run_restores_ownership_metadata_and_pid(self):
+        run = runners.Run(
+            id="retained",
+            engine="vllm",
+            recipe_id=7,
+            cmd=["vllm", "serve", "repo/model"],
+            env={},
+            managed_containers=["spark-vllm-test"],
+            stop_cmd=["docker", "stop", "spark-vllm-test"],
+            adopted_pid=4321,
+            label="repo/model",
+            meta={"load_secs": 12.3, "pump_cmd": ["tail"], "_reclaimed": True},
+        )
+        persisted = run.persisted_meta()
+        self.assertEqual(persisted["_label"], "repo/model")
+        self.assertEqual(persisted["_managed_containers"], ["spark-vllm-test"])
+        self.assertEqual(persisted["_stop_cmd"], ["docker", "stop", "spark-vllm-test"])
+        self.assertNotIn("pump_cmd", persisted)
+        self.assertNotIn("_reclaimed", persisted)
+        self.assertEqual(run.summary()["pid"], 4321)
+
+    def test_stop_adopted_run_tears_down_restored_container(self):
+        manager = runners.Runner()
+        run = runners.Run(
+            id="retained", engine="vllm", recipe_id=None, cmd=["adopted"], env={},
+            managed_containers=["spark-vllm-test"], adopted_pid=4321, status="running",
+        )
+        manager.runs[run.id] = run
+        with mock.patch.object(manager, "_stop_docker_containers") as stop_containers, \
+             mock.patch.object(manager, "finalize"), \
+             mock.patch.object(manager, "_reclaim_after_teardown"), \
+             mock.patch.object(runners.os, "getpgid", return_value=4321), \
+             mock.patch.object(runners.os, "killpg"):
+            self.assertTrue(manager.stop(run.id))
+        stop_containers.assert_called_once_with(run, force=False)
+
+    def test_keep_runs_uses_child_owned_durable_log(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.dict(
+            os.environ, {"SPARK_STUDIO_KEEP_RUNS_ON_EXIT": "1"}
+        ), mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), mock.patch.object(
+            runners.db, "runs_insert"
+        ), mock.patch.object(runners.db, "runs_update"), mock.patch.object(
+            runners, "_mem_used_gb", return_value=0.0
+        ):
+            manager = runners.Runner()
+            run = manager.start(
+                "test",
+                {},
+                raw_cmd="printf durable-output; sleep 0.1",
+                skip_memory_guard=True,
+            )
+            run.proc.wait(timeout=3)
+            deadline = time.time() + 2
+            while run.status != "exited" and time.time() < deadline:
+                time.sleep(0.02)
+            log_path = Path(run.meta["_log_path"])
+            self.assertEqual(log_path.parent, Path(tmp))
+            self.assertEqual(log_path.read_text(), "durable-output")
+            self.assertIn("durable-output", run.ring)
+
+    def test_historical_log_replay_does_not_fake_readiness(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log_path = Path(tmp) / "retained.log"
+            log_path.write_text("Uvicorn running on http://127.0.0.1:9999\n")
+            run = runners.Run(
+                id="retained", engine="vllm", recipe_id=None, cmd=["adopted"], env={},
+                adopted_pid=os.getpid(), meta={"_log_path": str(log_path)},
+            )
+            run.status = "running"
+            runners.Runner()._attach_log_file(run)
+            deadline = time.time() + 1
+            while not run.ring and time.time() < deadline:
+                time.sleep(0.02)
+            self.assertFalse(run.ready)
+            run.status = "exited"
+
+    def test_retained_endpoint_is_ready_immediately_after_health_probe(self):
+        run = runners.Run(
+            id="retained", engine="vllm", recipe_id=None, cmd=["adopted"], env={}
+        )
+        run.status = "running"
+        run.url = "http://127.0.0.1:9999"
+        run.ready_at = run.started_at
+        response = SimpleNamespace(
+            status_code=200, json=lambda: {"data": [{"id": "repo/model"}]}
+        )
+        client = mock.AsyncMock()
+        client.get.return_value = response
+        context = mock.MagicMock()
+        context.__aenter__ = mock.AsyncMock(return_value=client)
+        context.__aexit__ = mock.AsyncMock(return_value=None)
+        with mock.patch("httpx.AsyncClient", return_value=context), mock.patch.object(
+            server.db, "runs_update"
+        ):
+            asyncio.run(server._mark_adopted_ready(run))
+        self.assertTrue(run.ready)
+        self.assertEqual(run.label, "repo/model")
 
 
 if __name__ == "__main__":

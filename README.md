@@ -62,7 +62,7 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 - **sparkrun kept up to date** — `start.sh` runs `sparkrun update` on every launch (skip with `--no-sparkrun-update` or `SPARK_STUDIO_NO_SPARKRUN_UPDATE=1`), and the Community recipes toolbar has an **Update sparkrun** button with a channel picker: Stable (PyPI), Beta (develop), Alpha (bleeding edge), or YOLO (`--yolo`, alias for alpha). The chosen channel is remembered by sparkrun for future updates — including the automatic one at launch — and the toolbar shows the installed version
 - **Community recipes via sparkrun** — browse the mirrored `@official`/`@experimental` registry and launch on your Spark mesh with one click. The Nodes (TP) selector filters to recipes that actually fit your node count (multi-Spark recipes are badged and hidden at 1 node); Stop wires through `sparkrun stop`, and if that fails (stale job id, sparkrun error) Spark Studio force-removes the job's containers itself — Stop always means stopped. Every launch auto-saves a recipe in My Recipes (deduped per ref) so it's always one click away. Saved sparkrun recipes can carry launch options (`args._sparkrun.max_model_len` and arbitrary `-o key=value` `overrides`) that apply on every relaunch — handy for pinning workarounds to a model
 - **Server-side ✓ working / ✗ failed badges** — a watchdog probes each engine's `/v1/models` and tags the recipe the moment it starts serving (or fails), even with every browser tab closed. It also catches sparkrun's nastiest failure mode: the engine crashing inside a container that stays "Up" — the run is marked failed, the real traceback is pulled from the in-container serve log for Ask Claude, and the zombie container is torn down. Slow multi-node loads can extend the never-ready deadline via `SPARK_STUDIO_SPARKRUN_GRACE` (seconds, default 1200)
-- **Restart-proof runs** — on boot Spark Studio reconciles its run database with reality: still-live sparkrun workloads (even ones launched from a terminal, or left serving via `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1`) are re-adopted with logs, Stop, and chat intact; orphaned rows are marked exited. On normal exit (Ctrl+C) all launched workloads are unloaded automatically
+- **Restart-proof runs** — the systemd service preserves engine process groups and child-owned logs while only the dashboard restarts. On boot Spark Studio reconciles its run database with reality, health-checks each retained `/v1/models` endpoint, and restores **Ready**, logs, Stop, chat, model label, and recipe linkage automatically; orphaned rows are marked exited. Direct `./start.sh` sessions still unload their engines on normal Ctrl+C unless `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1` is set
 - **Registry auto-sync** — the three upstream repos are refreshed on every start; a ✨ badge shows recipes that arrived since last sync
 - **Local models** — scans every HF cache (env vars *and* caches referenced by your recipes), shows true on-disk sizes, one-click "Serve with vLLM", "Forge", or **Delete** to free disk space
 - **Chat & Canvas / Engine Chat** — Monaco editor + chat, auto-targets whichever engine is running; renders Chart.js charts, Word/Excel export cards, and web-grounded answers. Auto-fits `max_tokens` to the engine's real context window every turn
@@ -243,6 +243,8 @@ to run without being logged in), keeps models serving across restarts
 (`KEEP_RUNS_ON_EXIT` baked into the unit), and enables one-click in-app
 updates: when a new version is on GitHub, the sidebar version badge lights up —
 click it and the service pulls, refreshes dependencies, and restarts itself.
+If your service was installed before this behavior was added, run
+`./start.sh --install-service` once to install the model-preserving restart policy.
 Without the service the badge still appears; the update applies and you restart
 `./start.sh` yourself.
 
@@ -398,7 +400,7 @@ sudo ufw allow from 192.168.0.0/24 to any port 7860 proto tcp
 | `SEARXNG_URL` | Point web search at a specific SearXNG instance (overrides the bundled container) | auto-detected |
 | `SPARK_STUDIO_NO_SPARKRUN_UPDATE` | Set to `1` to skip the automatic `sparkrun update` that `start.sh` runs on launch (same as `./start.sh --no-sparkrun-update`) | unset (auto-update) |
 | `SPARK_STUDIO_SPARKRUN_GRACE` | Seconds a sparkrun run may stay not-ready before the watchdog fails it (only applies when no local container signal is available, e.g. remote multi-node heads) | `1200` |
-| `SPARK_STUDIO_KEEP_RUNS_ON_EXIT` | Set to `1` to leave models serving when the app exits (Ctrl+C); the next boot re-adopts them | unset (models unload) |
+| `SPARK_STUDIO_KEEP_RUNS_ON_EXIT` | Set to `1` to give engine output a durable log, leave models serving when the app exits, and re-adopt healthy endpoints as Ready on next boot | unset (models unload) |
 | `SPARK_STUDIO_NO_MEMORY_GUARD` | Set to `1` to disable the pre-launch unified-memory guard (stop-and-wait + fit check before launching a model) | unset (guard on) |
 | `SPARK_STUDIO_MEM_GUARD_TIMEOUT` | Max seconds the guard waits for a stopped model's memory to be reclaimed before proceeding | `120` |
 | `SPARK_STUDIO_AGENT_TIMEOUT` | Seconds to wait for a Claude/Codex answer before giving up | `420` |

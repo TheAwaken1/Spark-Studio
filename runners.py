@@ -30,6 +30,8 @@ import oomguard
 import sparkrun_service
 
 
+APP_DIR = Path(__file__).resolve().parent
+RUN_LOG_DIR = APP_DIR / "data" / "run-logs"
 VENV_BIN = Path(sys.executable).parent
 
 # Model-name extraction from shell commands, for run labels.
@@ -299,6 +301,21 @@ class Run:
     mem_at_start_gb: float | None = None
     mem_at_ready_gb: float | None = None
 
+    def persisted_meta(self) -> dict[str, Any]:
+        """Metadata required to faithfully re-adopt this run after restart."""
+        meta = {
+            k: v
+            for k, v in self.meta.items()
+            if k not in {"pump_cmd", "_reclaimed"}
+        }
+        if self.label:
+            meta["_label"] = self.label
+        if self.managed_containers:
+            meta["_managed_containers"] = list(self.managed_containers)
+        if self.stop_cmd:
+            meta["_stop_cmd"] = list(self.stop_cmd)
+        return meta
+
     def mark_ready(self) -> None:
         """Flip to ready; on the FIRST readiness stamp load time + RAM delta.
         (The watchdog may clear and re-grant `ready` later — those don't
@@ -314,7 +331,7 @@ class Run:
         if self.mem_at_start_gb is not None and self.mem_at_ready_gb is not None:
             self.meta["ram_delta_gb"] = round(self.mem_at_ready_gb - self.mem_at_start_gb, 1)
         try:
-            db.runs_update(self.id, meta_json=json.dumps({k: v for k, v in self.meta.items() if k != "pump_cmd"}))
+            db.runs_update(self.id, meta_json=json.dumps(self.persisted_meta()))
         except Exception:  # noqa: BLE001
             pass
         delta = self.meta.get("ram_delta_gb")
@@ -371,7 +388,7 @@ class Run:
             if name not in self.managed_containers:
                 self.managed_containers.append(name)
         try:
-            db.runs_update(self.id, meta_json=json.dumps(self.meta))
+            db.runs_update(self.id, meta_json=json.dumps(self.persisted_meta()))
         except Exception:  # noqa: BLE001
             pass
 
@@ -396,7 +413,7 @@ class Run:
             "port": self.port,
             "url": self.url,
             "ready": self.ready,
-            "pid": self.proc.pid if self.proc else None,
+            "pid": self.proc.pid if self.proc else self.adopted_pid,
             "started_at": self.started_at,
             "ended_at": self.ended_at,
             "exit_code": self.exit_code,
@@ -577,6 +594,13 @@ class Runner:
             meta=meta or {},
         )
         run.label = _guess_label(args, raw_cmd) or (meta or {}).get("ref")
+        durable_output = os.environ.get("SPARK_STUDIO_KEEP_RUNS_ON_EXIT") == "1"
+        log_writer = None
+        if durable_output:
+            RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            log_path = RUN_LOG_DIR / f"{run_id}.log"
+            run.meta["_log_path"] = str(log_path)
+            log_writer = log_path.open("a", encoding="utf-8", buffering=1)
         for m in guard_msgs:
             run.publish(m)
         run.mem_at_start_gb = _mem_used_gb()
@@ -586,7 +610,7 @@ class Runner:
         try:
             proc = subprocess.Popen(
                 cmd,
-                stdout=subprocess.PIPE,
+                stdout=log_writer if log_writer is not None else subprocess.PIPE,
                 stderr=subprocess.STDOUT,
                 env=env,
                 text=True,
@@ -597,6 +621,9 @@ class Runner:
             )
         except FileNotFoundError as e:
             raise EngineMissing(engine) from e
+        finally:
+            if log_writer is not None:
+                log_writer.close()
         run.proc = proc
         # A directly-spawned engine is the model process itself: mark it a
         # preferred OOM victim so memory pressure kills the (relaunchable)
@@ -616,11 +643,12 @@ class Runner:
                 "pid": proc.pid,
                 "port": port,
                 "cmd": run.summary()["cmd"],
-                "meta_json": json.dumps(run.meta) if run.meta else None,
+                "meta_json": json.dumps(run.persisted_meta()),
             }
         )
 
-        threading.Thread(target=self._pump, args=(run,), daemon=True).start()
+        pump = self._pump_file if durable_output else self._pump
+        threading.Thread(target=pump, args=(run,), daemon=True).start()
         return run
 
     def _pump(self, run: Run) -> None:
@@ -631,31 +659,49 @@ class Runner:
         except Exception as e:  # noqa: BLE001
             run.publish(f"[runner error] {e}")
         finally:
-            run.proc.wait()
-            if run.status == "exited":
-                # Already finalized elsewhere (watchdog / finalize()).
+            self._finish_process(run)
+
+    def _pump_file(self, run: Run) -> None:
+        """Tail a child-owned log file so output survives dashboard restarts."""
+        assert run.proc is not None
+        log_path = Path(run.meta["_log_path"])
+        try:
+            with log_path.open("r", encoding="utf-8", errors="replace") as stream:
+                while True:
+                    line = stream.readline()
+                    if line:
+                        run.publish(line.rstrip("\n"))
+                        continue
+                    if run.proc.poll() is not None:
+                        break
+                    time.sleep(0.1)
+        except Exception as e:  # noqa: BLE001
+            run.publish(f"[runner error] durable log tail failed: {e}")
+        finally:
+            self._finish_process(run)
+
+    def _finish_process(self, run: Run) -> None:
+        assert run.proc is not None
+        run.proc.wait()
+        if run.status == "exited":
+            return
+        if run.detached and not run.stop_requested:
+            run.publish("[launcher] log stream ended — workload may still be running; watchdog keeps monitoring")
+            return
+        run.exit_code = run.proc.returncode
+        self._capture_managed_container_logs(run)
+        self._cleanup_run(run)
+        self._reclaim_after_teardown(run)
+        run.ended_at = time.time()
+        run.status = "exited"
+        db.runs_update(run.id, status="exited", ended_at=db.now(), exit_code=run.exit_code)
+        run.publish(f"[exit] code={run.exit_code}")
+        self._tag_recipe_from_outcome(run)
+        for q in list(run.subscribers):
+            try:
+                q.put_nowait("__EOF__")
+            except Exception:
                 pass
-            elif run.detached and not run.stop_requested:
-                # sparkrun workloads outlive their launcher/log tail: the
-                # pumped process dying says nothing about the engine. Leave
-                # the run running — the watchdog owns lifecycle from here
-                # (and respawns the tail).
-                run.publish("[launcher] log stream ended — workload may still be running; watchdog keeps monitoring")
-            else:
-                run.exit_code = run.proc.returncode
-                self._capture_managed_container_logs(run)
-                self._cleanup_run(run)
-                self._reclaim_after_teardown(run)
-                run.ended_at = time.time()
-                run.status = "exited"
-                db.runs_update(run.id, status="exited", ended_at=db.now(), exit_code=run.exit_code)
-                run.publish(f"[exit] code={run.exit_code}")
-                self._tag_recipe_from_outcome(run)
-                for q in list(run.subscribers):
-                    try:
-                        q.put_nowait("__EOF__")
-                    except Exception:
-                        pass
 
     def _tag_recipe_from_outcome(self, run: Run) -> None:
         """Server-side failure tagging: mark the recipe broken when its run
@@ -677,9 +723,13 @@ class Runner:
         # source traceable when a workload disappears unexpectedly.
         print(f"[stop] requested for {run_id} ({run.label or run.engine}, force={force})", flush=True)
         if not run.proc and run.adopted_pid:
-            # Re-adopted plain-process run from a previous session: no Popen
-            # handle, but we know the pid (verified alive at adoption).
+            # Re-adopted run from a previous session: restore the same scoped
+            # teardown guarantees as a run owned by this process.
             run.stop_requested = True
+            if run.managed_containers:
+                self._stop_docker_containers(run, force=force)
+            if run.stop_cmd:
+                threading.Thread(target=self._run_stop_cmd, args=(run,), daemon=True).start()
             sig = signal.SIGKILL if force else signal.SIGTERM
             try:
                 os.killpg(os.getpgid(run.adopted_pid), sig)
@@ -1021,7 +1071,7 @@ class Runner:
         )
         run.url = url
         run.status = "running"
-        run.label = label or _guess_label(None, cmd_desc) or ref
+        run.label = label or run.meta.get("_label") or _guess_label(None, cmd_desc) or ref
         if started_at:
             run.started_at = started_at
         # The engine was already up when we re-attached: there is no load to
@@ -1032,9 +1082,46 @@ class Runner:
             run.meta["pump_cmd"] = pump_cmd
         run.publish(f"[adopted] re-attached to {ref or run_id} after restart")
         self.runs[run_id] = run
+        if run.meta.get("_log_path"):
+            self._attach_log_file(run)
         if pump_cmd:
             self._spawn_tail(run, pump_cmd)
         return run
+
+    def _attach_log_file(self, run: Run) -> None:
+        """Restore recent logs and follow new output from an adopted process."""
+        log_path = Path(run.meta["_log_path"])
+
+        def follow() -> None:
+            try:
+                with log_path.open("r", encoding="utf-8", errors="replace") as stream:
+                    history_end = log_path.stat().st_size
+                    if history_end > 512 * 1024:
+                        stream.seek(history_end - 512 * 1024)
+                        stream.readline()
+                    while stream.tell() < history_end:
+                        line = stream.readline()
+                        if not line:
+                            break
+                        # Historical output is display-only: stale readiness
+                        # markers must not declare a dead endpoint healthy.
+                        run.ring.append(line.rstrip("\n"))
+                    stream.seek(history_end)
+                    while run.status == "running":
+                        line = stream.readline()
+                        if line:
+                            run.publish(line.rstrip("\n"))
+                            continue
+                        if run.adopted_pid:
+                            try:
+                                os.kill(run.adopted_pid, 0)
+                            except OSError:
+                                return
+                        time.sleep(0.2)
+            except OSError as exc:
+                run.publish(f"[adopted] could not follow durable log: {exc}")
+
+        threading.Thread(target=follow, daemon=True).start()
 
     def _spawn_tail(self, run: Run, pump_cmd: list[str]) -> None:
         try:

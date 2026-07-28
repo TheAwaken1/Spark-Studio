@@ -3324,13 +3324,35 @@ def _adopt_sparkrun_job(job: dict, row: dict | None) -> None:
             "status": "running",
             "port": port,
             "cmd": f"[adopted] sparkrun run {ref}",
-            "meta_json": json.dumps(run.meta),
+            "meta_json": json.dumps(run.persisted_meta()),
         })
     else:
-        updates: dict[str, Any] = {"meta_json": json.dumps({k: v for k, v in run.meta.items() if k != "pump_cmd"}), "port": port}
+        updates: dict[str, Any] = {"meta_json": json.dumps(run.persisted_meta()), "port": port}
         if recipe_id and not row.get("recipe_id"):
             updates["recipe_id"] = recipe_id
         db.runs_update(run_id, **updates)
+
+
+async def _mark_adopted_ready(run) -> None:
+    """Immediately restore Ready when a retained OpenAI endpoint is healthy."""
+    if not run.url or run.status != "running":
+        return
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{run.url.rstrip('/')}/v1/models")
+        if response.status_code != 200:
+            return
+        payload = response.json()
+        models = payload.get("data") or []
+        if models and not run.label:
+            run.label = models[0].get("id")
+        run.publish(f"[adopted] retained engine is healthy at {run.url}")
+        run.mark_ready()
+        db.runs_update(run.id, meta_json=json.dumps(run.persisted_meta()))
+    except Exception:  # noqa: BLE001
+        return
 
 
 async def _reconcile_on_boot() -> None:
@@ -3375,13 +3397,16 @@ async def _reconcile_on_boot() -> None:
             run = runner.adopt(
                 rid,
                 engine=row.get("engine") or "unknown",
+                containers=list(meta.get("_managed_containers") or []),
+                stop_cmd=meta.get("_stop_cmd"),
                 recipe_id=row.get("recipe_id"),
                 url=f"http://127.0.0.1:{row['port']}" if row.get("port") else None,
                 port=row.get("port"),
                 started_at=row.get("started_at"),
                 adopted_pid=row.get("pid"),
                 cmd_desc=row.get("cmd"),
-                meta={k: meta[k] for k in ("load_secs", "ram_delta_gb") if meta.get(k) is not None},
+                meta=meta,
+                label=meta.get("_label"),
             )
             if run:
                 run.publish(f"[adopted] engine process pid={row['pid']} survived the restart")
@@ -3394,6 +3419,10 @@ async def _reconcile_on_boot() -> None:
         if any((r.meta or {}).get("jobid") == job["jobid"] for r in runner.runs.values()):
             continue
         await asyncio.to_thread(_adopt_sparkrun_job, job, None)
+
+    await asyncio.gather(
+        *(_mark_adopted_ready(run) for run in list(runner.runs.values()))
+    )
 
 
 async def _watchdog_loop() -> None:
@@ -3453,7 +3482,7 @@ async def _watchdog_tick(tick: int) -> None:
                     run.port = run.port or 8000
                     run.url = run.url or sparkrun_service.guess_url(job, run.port)
                     try:
-                        db.runs_update(run.id, meta_json=json.dumps({k: v for k, v in run.meta.items() if k != "pump_cmd"}))
+                        db.runs_update(run.id, meta_json=json.dumps(run.persisted_meta()))
                     except Exception:  # noqa: BLE001
                         pass
                     break
