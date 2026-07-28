@@ -869,6 +869,92 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
   scrollbar-gutter: stable both-edges;
 }
 
+/* Embedded Hermes TUI ------------------------------------------------ */
+.hermes-panel.active {
+  height: calc(100vh - 48px);
+  min-height: 620px;
+  display: flex;
+  flex-direction: column;
+}
+.hermes-terminal-card {
+  min-height: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  overflow: hidden;
+}
+.hermes-terminal-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 9px;
+}
+.hermes-terminal-state {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 190px;
+  align-self: center;
+}
+.hermes-terminal-state .status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--muted);
+  box-shadow: 0 0 0 3px rgba(133, 146, 166, 0.12);
+}
+.hermes-terminal-state .status-dot.ready {
+  background: var(--success);
+  box-shadow: 0 0 0 3px rgba(74, 208, 138, 0.14);
+}
+.hermes-terminal-state .status-dot.error {
+  background: var(--danger);
+  box-shadow: 0 0 0 3px rgba(255, 98, 114, 0.14);
+}
+.hermes-workspace-label {
+  flex: 1;
+  min-width: 280px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.hermes-workspace-label input {
+  display: block;
+  width: 100%;
+  margin-top: 3px;
+}
+.hermes-terminal-hints {
+  display: flex;
+  gap: 14px;
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 0 3px 9px;
+  color: var(--muted);
+  font-size: 11px;
+}
+#hermesTuiModel { color: var(--accent); overflow-wrap: anywhere; }
+#hermesTuiSecurity { margin-left: auto; }
+.hermes-terminal {
+  min-width: 0;
+  min-height: 420px;
+  flex: 1;
+  overflow: hidden;
+  background: #05080d;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 8px;
+}
+.hermes-terminal .xterm { height: 100%; }
+.hermes-terminal .xterm-viewport { background: transparent !important; }
+@media (max-width: 900px) {
+  .content { padding: 68px 12px 12px; }
+  .hermes-panel.active { height: calc(100vh - 80px); min-height: 560px; }
+  .hermes-workspace-label { min-width: 100%; }
+  .hermes-terminal-hints { gap: 7px; }
+  #hermesTuiSecurity { margin-left: 0; }
+}
+
 /* Modals ------------------------------------------------------------- */
 .modal { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.6); display: grid; place-items: center; z-index: 100; }
 .modal[hidden] { display: none; }
@@ -896,7 +982,8 @@ body[data-uimode="beginner"] .tab[data-tab="llamacpp"],
 body[data-uimode="beginner"] .tab[data-tab="webgpu"],
 body[data-uimode="beginner"] .tab[data-tab="forge"],
 body[data-uimode="beginner"] .tab[data-tab="bench"],
-body[data-uimode="beginner"] .tab[data-tab="agents"] { display: none; }
+body[data-uimode="beginner"] .tab[data-tab="agents"],
+body[data-uimode="beginner"] .tab[data-tab="hermes"] { display: none; }
 .ui-mode { display: flex; gap: 0; margin-bottom: 10px; border: 1px solid var(--border);
   border-radius: 8px; overflow: hidden; }
 .ui-mode-btn { flex: 1; padding: 6px 4px; font-size: 11px; background: transparent;

@@ -8,16 +8,26 @@ from __future__ import annotations
 import asyncio
 import csv
 import io
+import ipaddress
 import json
 import os
 import re
 import shlex
 import sys
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import (
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -36,6 +46,7 @@ import engine_images
 import forge
 import hf_check
 import hostinfo
+import hermes_terminal
 import models
 import vitals as _vitals
 import recipe_brain
@@ -2323,6 +2334,173 @@ def tooleval_history(limit: int = 50):
 def agentlab_status():
     """Hermes install state plus the isolated profile used by Spark Studio."""
     return agentlab.hermes_status()
+
+
+@app.get("/api/agentlab/terminal/status")
+def agentlab_terminal_status():
+    """Readiness for the embedded, real Hermes TUI."""
+    status = agentlab.hermes_status()
+    active = runner.active()
+    active_model = active.label if active else None
+    if active and active.ready and active.url and not active_model:
+        try:
+            active_model = agentlab.discover_endpoint(base_url=active.url)["model"]
+        except Exception:  # noqa: BLE001
+            active_model = active.ref or active.engine
+    status.update(
+        {
+            "pty": hermes_terminal.PtyBridge.available(),
+            "remote_allowed": os.environ.get(
+                "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", ""
+            ).strip().lower()
+            in {"1", "true", "yes", "on"},
+            "workspace": str(APP_DIR),
+            "active": {
+                "id": active.id,
+                "model": active_model,
+                "url": active.url,
+                "ready": active.ready,
+            }
+            if active
+            else None,
+        }
+    )
+    return status
+
+
+def _websocket_peer_is_local(ws: WebSocket) -> bool:
+    peer = ws.client.host if ws.client else ""
+    if peer in {"localhost", "testclient"}:
+        return True
+    try:
+        return ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        return False
+
+
+def _websocket_same_origin(ws: WebSocket) -> bool:
+    """WebSocket routes do not pass through the HTTP CORS middleware."""
+    origin = ws.headers.get("origin", "")
+    if not origin:
+        return True
+    parsed = urllib.parse.urlparse(origin)
+    return parsed.scheme in {"http", "https"} and parsed.netloc == ws.headers.get(
+        "host", ""
+    )
+
+
+def _studio_url_for_websocket(ws: WebSocket) -> str:
+    server = ws.scope.get("server") or ("127.0.0.1", 7860)
+    port = int(server[1] or 7860)
+    scheme = "https" if ws.url.scheme == "wss" else "http"
+    return f"{scheme}://127.0.0.1:{port}"
+
+
+@app.websocket("/api/agentlab/terminal")
+async def agentlab_terminal(ws: WebSocket):
+    """Run Spark Studio's isolated Hermes profile behind a browser PTY."""
+    if not _websocket_same_origin(ws):
+        await ws.close(code=4403, reason="origin does not match Spark Studio")
+        return
+    remote_allowed = os.environ.get(
+        "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", ""
+    ).strip().lower() in {"1", "true", "yes", "on"}
+    if not remote_allowed and not _websocket_peer_is_local(ws):
+        await ws.close(
+            code=4408,
+            reason="Hermes terminal is local-only; set "
+            "SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 to opt in",
+        )
+        return
+
+    await ws.accept()
+    bridge: hermes_terminal.PtyBridge | None = None
+    reader_task: asyncio.Task | None = None
+    try:
+        active = runner.active()
+        if not active or not active.url:
+            raise RuntimeError("No model is loaded. Start an engine first.")
+        if not active.ready:
+            raise RuntimeError("The active model is still loading.")
+
+        raw_workspace = ws.query_params.get("workspace") or str(APP_DIR)
+        workspace = Path(raw_workspace).expanduser().resolve()
+        try:
+            max_turns = max(
+                1, min(int(ws.query_params.get("max_turns") or "90"), 1000)
+            )
+        except ValueError:
+            max_turns = 90
+        endpoint = await asyncio.to_thread(
+            agentlab.discover_endpoint,
+            base_url=active.url,
+        )
+        endpoint["studio_url"] = _studio_url_for_websocket(ws)
+        command, env = await asyncio.to_thread(
+            hermes_terminal.prepare_browser_tui,
+            endpoint,
+            workspace,
+            max_turns=max_turns,
+        )
+        bridge = await asyncio.to_thread(
+            hermes_terminal.PtyBridge.spawn,
+            command,
+            cwd=workspace,
+            env=env,
+        )
+
+        async def pump_output() -> None:
+            assert bridge is not None
+            try:
+                while True:
+                    payload = await asyncio.to_thread(bridge.read, 0.2)
+                    if payload is None:
+                        return
+                    if payload:
+                        await ws.send_bytes(payload)
+                    else:
+                        await asyncio.sleep(0)
+            finally:
+                try:
+                    await ws.close(code=4410, reason="Hermes exited")
+                except Exception:  # noqa: BLE001
+                    pass
+
+        reader_task = asyncio.create_task(pump_output())
+        while True:
+            message = await ws.receive()
+            if message.get("type") == "websocket.disconnect":
+                break
+            if message.get("bytes") is not None:
+                bridge.write(message["bytes"])
+                continue
+            text = message.get("text") or ""
+            if not text:
+                continue
+            try:
+                control = json.loads(text)
+            except json.JSONDecodeError:
+                bridge.write(text.encode())
+                continue
+            if control.get("type") == "resize":
+                bridge.resize(control.get("cols", 120), control.get("rows", 36))
+    except WebSocketDisconnect:
+        pass
+    except Exception as exc:  # noqa: BLE001
+        try:
+            await ws.send_text(f"\r\n\x1b[31mHermes TUI unavailable: {exc}\x1b[0m\r\n")
+            await ws.close(code=1011, reason="Hermes TUI failed to start")
+        except Exception:  # noqa: BLE001
+            pass
+    finally:
+        if reader_task:
+            reader_task.cancel()
+            try:
+                await reader_task
+            except (asyncio.CancelledError, Exception):
+                pass
+        if bridge:
+            await asyncio.to_thread(bridge.close)
 
 
 @app.get("/api/agentlab/history")

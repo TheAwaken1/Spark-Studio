@@ -69,6 +69,7 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 - **Benchmarks** — quick tokens/s + TTFT sanity bench, plus full [llama-benchy](https://github.com/eugr/llama-benchy) sweeps (pp/tg at depth, concurrency, prefix caching). Every result records the engine version; compare any two runs side-by-side, and copy a shareable markdown report (hardware + engine + recipe + results) for the community
 - **Tool Eval Bench** — answers "how *useful* is this model?", not just how fast. 12 deterministic cases score five skills 0–100: **tool selection** (pick the right tool among five), **argument extraction** (exact dates/amounts/names into tool args), **restraint** (answer directly instead of spurious tool calls), **using tool results** in the final answer, and **strict JSON** output. Each case shows what the model actually did (`called get_weather({"city": "Tokyo"})`); thinking models get a fair token budget and `<think>` blocks are stripped before checking. Every eval saves a markdown + JSON report to `tooleval-results/` and scores are kept in history per model. If the engine was launched without tool calling, the bench says so instead of silently scoring zero
 - **`sparkstudio` CLI + Hermes Agent Lab** — chat with the loaded model, run speed/tool benches, hand a real repository task to [Hermes Agent](https://github.com/NousResearch/hermes-agent), or score models on disposable coding fixtures. It follows the [NVIDIA DGX Spark Hermes playbook](https://build.nvidia.com/spark/hermes-agent/instructions): the active local OpenAI-compatible endpoint is configured as Hermes' custom provider, while reports, diffs, test output, and Spark telemetry are retained for comparison
+- **Hermes Chat in the dashboard** — the complete Hermes Ink TUI runs inside an xterm.js tab through a real POSIX PTY/WebSocket bridge. Slash commands, `/model`, approvals, tool activity, local/Claude/Codex switching, and Spark Studio web search work exactly as they do in the terminal
 - **Load telemetry on every run** — run cards show how long the model took to become ready and how much unified RAM it claimed (`loaded in 3m42s · +38.2 GB RAM`), stamped the moment the engine first answers. Stats persist in run history and survive app restarts; adopted/external endpoints (already loaded) honestly show nothing instead of a bogus number
 - **Pre-launch memory guard** — on DGX Spark's 128 GB unified pool each model fills most of the pool, so only one fits at a time. Before launching, Spark Studio stops any other resident model, waits for its memory to actually free, and blocks a launch that still won't fit (with a one-click "launch anyway") — so swapping models doesn't OOM the box or take the dashboard down with it. See [Memory / OOM protection](#memory--oom-protection)
 - **WebGPU tab** — in-browser inference via MLC WebLLM, with PDF/CSV/XLSX attachment extraction and built-in web search (bundled SearXNG, auto-started)
@@ -290,6 +291,27 @@ Interactive Spark Studio sessions also receive one read-only MCP tool,
 SearXNG/DDG pipeline. The MCP server exposes no generic browser, shell,
 credential, or write API. Search results are treated as untrusted source
 material and include their URLs for citation.
+
+The dashboard's **Hermes Chat** tab is the same real Hermes TUI, not a second
+chat implementation. Open the tab after a model is ready and it starts against
+that loaded model automatically. Choose a workspace before starting, use
+**Stop** or **Restart** for the PTY lifecycle, and type `/model` inside Hermes
+to move between the local model and any authenticated Claude or Codex provider.
+The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
+are shared with `sparkstudio hermes`, so both entry points behave consistently.
+
+Because Hermes can run terminal commands and edit files, the WebSocket terminal
+accepts local-browser connections only by default, even when the rest of Spark
+Studio is open on the LAN. To deliberately enable the terminal for trusted LAN
+clients, start Spark Studio with:
+
+```bash
+SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 ./start.sh
+```
+
+Do not enable remote terminal access on an untrusted network. WebSocket Origin
+validation remains enforced in both modes, and closing the page or pressing
+**Stop** terminates and reaps the Hermes TUI and its helper processes.
 
 Run the deterministic coding smoke suite through Hermes:
 
@@ -709,6 +731,8 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/tooleval/status` | Live progress, per-case results, and scores of the current/last eval |
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
+| `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |
+| `WS` | `/api/agentlab/terminal` | Byte-safe PTY bridge for the dashboard Hermes Chat tab (same-origin; local-only by default) |
 | `GET` | `/api/agentlab/history` | Saved free-form and deterministic Agent Lab runs |
 | `GET` | `/api/agentlab/{run-id}` | One Agent Lab result, including report and workspace metadata |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |

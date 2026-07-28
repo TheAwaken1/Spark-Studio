@@ -75,6 +75,7 @@ $$('.tab').forEach((t) =>
     if (t.dataset.tab === 'logs') refreshRuns();
     if (t.dataset.tab === 'bench') refreshBenchTab();
     if (t.dataset.tab === 'agents') refreshAgents();
+    if (t.dataset.tab === 'hermes') refreshHermesTui(true);
     if (t.dataset.tab === 'cluster') refreshCluster();
     if (t.dataset.tab !== 'cluster') stopClusterMonitor(); // one ssh-fanout stream only while watching
     if (t.dataset.tab === 'forge') refreshForgeSuggest();
@@ -3918,6 +3919,174 @@ function streamLogin(which) {
   es.addEventListener('done', finish);
   es.addEventListener('error', finish);
 }
+
+// ---------- embedded Hermes TUI ------------------------------------------
+const hermesTui = {
+  terminal: null,
+  fit: null,
+  socket: null,
+  observer: null,
+  autoStarted: false,
+};
+
+function setHermesTuiState(message, state = '') {
+  const dot = $('#hermesTuiDot');
+  $('#hermesTuiStatus').textContent = message;
+  dot.classList.toggle('ready', state === 'ready');
+  dot.classList.toggle('error', state === 'error');
+}
+
+function ensureHermesTerminal() {
+  if (hermesTui.terminal) return true;
+  if (!window.Terminal || !window.FitAddon?.FitAddon) {
+    setHermesTuiState('Browser terminal assets are missing', 'error');
+    return false;
+  }
+  const terminal = new window.Terminal({
+    allowProposedApi: false,
+    convertEol: false,
+    cursorBlink: true,
+    cursorStyle: 'bar',
+    fontFamily: '"JetBrains Mono", ui-monospace, monospace',
+    fontSize: 13,
+    lineHeight: 1.15,
+    scrollback: 10000,
+    theme: {
+      background: '#05080d',
+      foreground: '#e6edf7',
+      cursor: '#76c7ff',
+      selectionBackground: '#31506c',
+      black: '#0b0f17',
+      red: '#ff6272',
+      green: '#4ad08a',
+      yellow: '#ffb74a',
+      blue: '#76c7ff',
+      magenta: '#b084ff',
+      cyan: '#67e8f9',
+      white: '#e6edf7',
+      brightBlack: '#64748b',
+      brightRed: '#ff8793',
+      brightGreen: '#79e3aa',
+      brightYellow: '#ffd08a',
+      brightBlue: '#a4dbff',
+      brightMagenta: '#cab0ff',
+      brightCyan: '#a5f3fc',
+      brightWhite: '#ffffff',
+    },
+  });
+  const fit = new window.FitAddon.FitAddon();
+  terminal.loadAddon(fit);
+  terminal.open($('#hermesTerminal'));
+  hermesTui.terminal = terminal;
+  hermesTui.fit = fit;
+  terminal.onData((data) => {
+    if (hermesTui.socket?.readyState === WebSocket.OPEN) {
+      hermesTui.socket.send(new TextEncoder().encode(data));
+    }
+  });
+  terminal.onResize(({ cols, rows }) => {
+    if (hermesTui.socket?.readyState === WebSocket.OPEN) {
+      hermesTui.socket.send(JSON.stringify({ type: 'resize', cols, rows }));
+    }
+  });
+  hermesTui.observer = new ResizeObserver(() => {
+    if ($('.tab.active')?.dataset.tab !== 'hermes') return;
+    try { fit.fit(); } catch { /* hidden or not laid out yet */ }
+  });
+  hermesTui.observer.observe($('#hermesTerminal'));
+  setTimeout(() => { try { fit.fit(); } catch { /* wait for layout */ } }, 20);
+  return true;
+}
+
+function setHermesControls(running) {
+  $('#hermesTuiStart').disabled = running;
+  $('#hermesTuiRestart').disabled = !running;
+  $('#hermesTuiStop').disabled = !running;
+  $('#hermesWorkspace').disabled = running;
+}
+
+async function refreshHermesTui(autoStart = false) {
+  if (!ensureHermesTerminal()) return;
+  try {
+    const status = await api('/agentlab/terminal/status');
+    if (!$('#hermesWorkspace').value) $('#hermesWorkspace').value = status.workspace || '';
+    const active = status.active;
+    $('#hermesTuiModel').textContent = active?.model || 'No loaded model';
+    $('#hermesTuiSecurity').innerHTML = status.remote_allowed
+      ? '<i class="fa-solid fa-triangle-exclamation"></i> LAN terminal access enabled'
+      : '<i class="fa-solid fa-shield-halved"></i> Local browser only';
+    const ready = status.installed && status.pty && active?.ready;
+    if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
+    else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
+    else if (!active) setHermesTuiState('Load a model to start Hermes', 'error');
+    else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
+    else if (!hermesTui.socket) setHermesTuiState('Ready to start');
+    $('#hermesTuiStart').disabled = !ready || Boolean(hermesTui.socket);
+    if (autoStart && ready && !hermesTui.socket && !hermesTui.autoStarted) {
+      hermesTui.autoStarted = true;
+      startHermesTui();
+    }
+  } catch (error) {
+    setHermesTuiState(`Status unavailable: ${error.message}`, 'error');
+  }
+}
+
+function startHermesTui() {
+  if (!ensureHermesTerminal()) return;
+  if (hermesTui.socket) hermesTui.socket.close(1000, 'restart');
+  hermesTui.terminal.reset();
+  hermesTui.terminal.write('\x1b[38;2;118;199;255mStarting Hermes TUI…\x1b[0m\r\n');
+  try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
+  const workspace = $('#hermesWorkspace').value.trim();
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const params = new URLSearchParams({ workspace, max_turns: '90' });
+  const socket = new WebSocket(`${protocol}//${window.location.host}/api/agentlab/terminal?${params}`);
+  socket.binaryType = 'arraybuffer';
+  hermesTui.socket = socket;
+  setHermesControls(true);
+  setHermesTuiState('Connecting…');
+  socket.addEventListener('open', () => {
+    if (hermesTui.socket !== socket) return;
+    setHermesTuiState('Hermes is running', 'ready');
+    socket.send(JSON.stringify({
+      type: 'resize',
+      cols: hermesTui.terminal.cols,
+      rows: hermesTui.terminal.rows,
+    }));
+    hermesTui.terminal.focus();
+  });
+  socket.addEventListener('message', async (event) => {
+    if (hermesTui.socket !== socket) return;
+    if (event.data instanceof ArrayBuffer) hermesTui.terminal.write(new Uint8Array(event.data));
+    else if (event.data instanceof Blob) hermesTui.terminal.write(new Uint8Array(await event.data.arrayBuffer()));
+    else hermesTui.terminal.write(event.data);
+  });
+  socket.addEventListener('close', (event) => {
+    if (hermesTui.socket !== socket) return;
+    hermesTui.socket = null;
+    setHermesControls(false);
+    const expected = event.code === 1000 || event.code === 4410;
+    const reason = event.reason || (expected ? 'Hermes exited' : `connection closed (${event.code})`);
+    hermesTui.terminal.write(`\r\n\x1b[${expected ? '33' : '31'}m${reason}\x1b[0m\r\n`);
+    setHermesTuiState(reason, expected ? '' : 'error');
+    refreshHermesTui(false);
+  });
+  socket.addEventListener('error', () => {
+    if (hermesTui.socket === socket) setHermesTuiState('Terminal connection failed', 'error');
+  });
+}
+
+function stopHermesTui() {
+  hermesTui.socket?.close(1000, 'Stopped from Spark Studio');
+}
+
+$('#hermesTuiStart').addEventListener('click', startHermesTui);
+$('#hermesTuiRestart').addEventListener('click', () => {
+  stopHermesTui();
+  setTimeout(startHermesTui, 250);
+});
+$('#hermesTuiStop').addEventListener('click', stopHermesTui);
+window.addEventListener('beforeunload', stopHermesTui);
 
 // ---------- Engine chat tab ----------------------------------------------
 const wgAttachments = [];

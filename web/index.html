@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="/static/style.css" />
   <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css" />
   <link rel="stylesheet" href="/static/vendor/highlight/atom-one-dark.min.css" />
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.css" />
 </head>
 <body>
   <button id="navToggle" class="nav-toggle" aria-label="Open menu"><i class="fa-solid fa-bars"></i></button>
@@ -36,6 +37,7 @@
       <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
       <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
       <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
+      <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> Hermes Chat</a>
       <a class="tab" data-tab="cluster"><i class="fa-solid fa-circle-nodes"></i> Cluster</a>
       <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> Recovery</a>
     </nav>
@@ -487,6 +489,34 @@
       </div>
     </section>
 
+    <!-- HERMES TUI -->
+    <section class="panel hermes-panel" data-panel="hermes">
+      <header class="panel-header">
+        <h1>Hermes Chat</h1>
+        <p>The complete Hermes TUI, connected to Spark Studio's loaded model and agent tools.</p>
+      </header>
+      <div class="card hermes-terminal-card">
+        <div class="hermes-terminal-toolbar">
+          <div class="hermes-terminal-state">
+            <span id="hermesTuiDot" class="status-dot"></span>
+            <span id="hermesTuiStatus">Checking Hermes…</span>
+          </div>
+          <label class="hermes-workspace-label">Workspace
+            <input id="hermesWorkspace" class="mono" type="text" spellcheck="false" />
+          </label>
+          <button id="hermesTuiStart" class="btn primary"><i class="fa-solid fa-play"></i> Start</button>
+          <button id="hermesTuiRestart" class="btn" disabled><i class="fa-solid fa-rotate"></i> Restart</button>
+          <button id="hermesTuiStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+        </div>
+        <div class="hermes-terminal-hints">
+          <span id="hermesTuiModel" class="mono">No loaded model</span>
+          <span>Use <code>/model</code> inside Hermes to switch between local, Claude, and Codex.</span>
+          <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
+        </div>
+        <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
+      </div>
+    </section>
+
     <section class="panel" data-panel="cluster">
       <header class="panel-header"><h1>Cluster</h1><p>Your Spark mesh, powered by sparkrun. Spark Studio reads what sparkrun reports — it never SSHes into your nodes.</p></header>
       <div class="grid grid-2">
@@ -741,6 +771,8 @@ rm -rf env && ./start.sh       # rebuild Python env
   <script src="/static/vendor/marked.min.js"></script>
   <script src="/static/vendor/purify.min.js"></script>
   <script src="/static/vendor/highlight/highlight.min.js"></script>
+  <script src="/static/vendor/xterm/xterm.js"></script>
+  <script src="/static/vendor/xterm/addon-fit.js"></script>
   <script>
     // Absolute URLs: Monaco's language workers resolve modules relative to the
     // worker script, so a relative 'vs' path breaks fetches inside workers.
