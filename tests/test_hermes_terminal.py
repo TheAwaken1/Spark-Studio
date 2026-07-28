@@ -60,6 +60,43 @@ class HermesBrowserTerminalTests(unittest.TestCase):
                 "http://127.0.0.1:7860",
             )
 
+    def test_websocket_origin_accepts_forwarded_proxy_host(self):
+        websocket = SimpleNamespace(
+            headers={
+                "origin": "https://spark.local:8443",
+                "host": "127.0.0.1:7860",
+                "x-forwarded-host": "spark.local:8443",
+            }
+        )
+        self.assertTrue(server._websocket_same_origin(websocket))
+
+    def test_websocket_origin_rejection_returns_visible_close_reason(self):
+        client = TestClient(server.app)
+        with client.websocket_connect(
+            "/api/agentlab/terminal",
+            headers={"origin": "https://not-spark.example"},
+        ) as websocket:
+            with self.assertRaises(WebSocketDisconnect) as rejected:
+                websocket.receive_bytes()
+        self.assertEqual(rejected.exception.code, 4403)
+        self.assertEqual(rejected.exception.reason, "origin does not match Spark Studio")
+
+    def test_missing_model_returns_visible_terminal_error(self):
+        client = TestClient(server.app)
+        with (
+            mock.patch.object(server.runner, "active", return_value=None),
+            client.websocket_connect(
+                "/api/agentlab/terminal",
+                headers={"origin": "http://testserver"},
+            ) as websocket,
+        ):
+            message = websocket.receive_text()
+            self.assertIn("No model is loaded", message)
+            with self.assertRaises(WebSocketDisconnect) as failed:
+                websocket.receive_bytes()
+        self.assertEqual(failed.exception.code, 1011)
+        self.assertEqual(failed.exception.reason, "Hermes TUI failed to start")
+
     def test_browser_command_launches_real_tui_with_agent_tools(self):
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
         self.assertEqual(command[:2], ["/opt/hermes", "--tui"])

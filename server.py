@@ -2420,9 +2420,13 @@ def _websocket_same_origin(ws: WebSocket) -> bool:
     if not origin:
         return _websocket_peer_is_local(ws)
     parsed = urllib.parse.urlparse(origin)
-    return parsed.scheme in {"http", "https"} and parsed.netloc == ws.headers.get(
-        "host", ""
-    )
+    forwarded_host = ws.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    valid_hosts = {
+        ws.headers.get("host", "").strip(),
+        forwarded_host,
+    }
+    valid_hosts.discard("")
+    return parsed.scheme in {"http", "https"} and parsed.netloc in valid_hosts
 
 
 def _studio_url_for_websocket(ws: WebSocket) -> str:
@@ -2555,20 +2559,20 @@ async def hermes_mod_proxy(request: Request, path: str = ""):
 @app.websocket("/api/agentlab/terminal")
 async def agentlab_terminal(ws: WebSocket):
     """Run Spark Studio's isolated Hermes profile behind a browser PTY."""
-    if not _websocket_same_origin(ws):
-        await ws.close(code=4403, reason="origin does not match Spark Studio")
-        return
+    same_origin = _websocket_same_origin(ws)
     access_allowed, _, access_reason = _terminal_access_policy(
         ws.client.host if ws.client else "", ws.url.scheme
     )
+    await ws.accept()
+    if not same_origin:
+        await ws.close(code=4403, reason="origin does not match Spark Studio")
+        return
     if not access_allowed:
         await ws.close(
             code=4408,
             reason=access_reason,
         )
         return
-
-    await ws.accept()
     bridge: hermes_terminal.PtyBridge | None = None
     reader_task: asyncio.Task | None = None
     try:

@@ -3926,6 +3926,7 @@ const hermesTui = {
   fit: null,
   socket: null,
   observer: null,
+  retryTimer: null,
   autoStarted: false,
 };
 
@@ -4045,7 +4046,12 @@ async function refreshHermesTui(autoStart = false) {
   }
 }
 
-function startHermesTui() {
+function startHermesTui({ retryCount = 0 } = {}) {
+  retryCount = Math.max(0, Number(retryCount) || 0);
+  if (hermesTui.retryTimer) {
+    clearTimeout(hermesTui.retryTimer);
+    hermesTui.retryTimer = null;
+  }
   if (!ensureHermesTerminal()) return;
   if (hermesTui.socket) hermesTui.socket.close(1000, 'restart');
   hermesTui.terminal.reset();
@@ -4055,12 +4061,14 @@ function startHermesTui() {
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const params = new URLSearchParams({ workspace, max_turns: '90' });
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/agentlab/terminal?${params}`);
+  let opened = false;
   socket.binaryType = 'arraybuffer';
   hermesTui.socket = socket;
   setHermesControls(true);
   setHermesTuiState('Connecting…');
   socket.addEventListener('open', () => {
     if (hermesTui.socket !== socket) return;
+    opened = true;
     setHermesTuiState('Hermes is running', 'ready');
     socket.send(JSON.stringify({
       type: 'resize',
@@ -4079,11 +4087,27 @@ function startHermesTui() {
     if (hermesTui.socket !== socket) return;
     hermesTui.socket = null;
     setHermesControls(false);
+    const retryable = event.code === 1006 && retryCount < 3;
+    if (retryable) {
+      const delayMs = Math.min(1500 * (2 ** retryCount), 6000);
+      const phase = opened ? 'connection dropped' : 'dashboard is still starting';
+      const message = `Hermes ${phase} — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
+      hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
+      setHermesTuiState(message);
+      refreshHermesTui(false);
+      hermesTui.retryTimer = setTimeout(() => {
+        hermesTui.retryTimer = null;
+        if (!hermesTui.socket && hermesMod.activeView === 'chat') {
+          startHermesTui({ retryCount: retryCount + 1 });
+        }
+      }, delayMs);
+      return;
+    }
     const expected = event.code === 1000 || event.code === 4410;
     const reason = event.reason || (expected
       ? 'Hermes exited'
       : (event.code === 1006
-        ? 'Terminal connection was rejected — reload this tab and check its access status'
+        ? 'Terminal WebSocket is unavailable after automatic retries — reload this tab and check its access status'
         : `connection closed (${event.code})`));
     hermesTui.terminal.write(`\r\n\x1b[${expected ? '33' : '31'}m${reason}\x1b[0m\r\n`);
     setHermesTuiState(reason, expected ? '' : 'error');
@@ -4095,6 +4119,10 @@ function startHermesTui() {
 }
 
 function stopHermesTui() {
+  if (hermesTui.retryTimer) {
+    clearTimeout(hermesTui.retryTimer);
+    hermesTui.retryTimer = null;
+  }
   hermesTui.socket?.close(1000, 'Stopped from Spark Studio');
 }
 
