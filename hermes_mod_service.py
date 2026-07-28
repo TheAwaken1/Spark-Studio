@@ -15,11 +15,13 @@ import secrets
 import shutil
 import signal
 import socket
+import threading
 from collections import deque
 from pathlib import Path
 from typing import Any
 
 import httpx
+import yaml
 
 import agentlab
 
@@ -69,6 +71,208 @@ def _installed_version() -> str | None:
 
 def installed() -> bool:
     return SERVER_PATH.is_file() and _installed_version() == PACKAGE_VERSION
+
+_RICH_OPEN_RE = re.compile(
+    r"\[(?P<style>(?:(?:bold|dim)\s+)*#[0-9a-fA-F]{3,8})\]"
+)
+_SKIN_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_skin_lock = threading.RLock()
+
+
+class _SkinDumper(yaml.SafeDumper):
+    pass
+
+
+def _represent_skin_string(dumper: yaml.SafeDumper, value: str):
+    style = "|" if "\n" in value else None
+    return dumper.represent_scalar("tag:yaml.org,2002:str", value, style=style)
+
+
+_SkinDumper.add_representer(str, _represent_skin_string)
+
+
+def normalize_tui_art_markup(value: str) -> str:
+    """Make Rich art markup compatible with Hermes' line-oriented Ink TUI.
+
+    Hermes Mod wraps a whole multi-line block in one color tag. Rich accepts
+    that, but the Ink renderer parses each line separately. Repeating the same
+    tag per art row preserves the exact chosen color on both surfaces.
+    """
+    active_style: str | None = None
+    normalized: list[str] = []
+    for raw_line in str(value or "").replace("\r\n", "\n").split("\n"):
+        line = raw_line.rstrip()
+        matches = list(_RICH_OPEN_RE.finditer(line))
+        if len(matches) > 1 or line.count("[/]") > 1:
+            normalized.append(line)
+            continue
+        if matches:
+            match = matches[0]
+            style = match.group("style")
+            remainder = line[match.end() :]
+            closes = remainder.endswith("[/]")
+            content = line[: match.start()] + (remainder[:-3] if closes else remainder)
+            if content:
+                normalized.append(f"[{style}]{content}[/]")
+            active_style = None if closes else style
+            continue
+        closes = line.endswith("[/]")
+        content = line[:-3] if closes else line
+        if active_style:
+            if content:
+                normalized.append(f"[{active_style}]{content}[/]")
+            elif not closes:
+                normalized.append("")
+            if closes:
+                active_style = None
+        else:
+            normalized.append(content if closes else line)
+    return "\n".join(normalized).rstrip()
+
+
+def normalize_skin_payload(payload: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+    changed = False
+    repaired = dict(payload)
+    for key in ("banner_logo", "banner_hero"):
+        value = repaired.get(key)
+        if not isinstance(value, str) or not value:
+            continue
+        normalized = normalize_tui_art_markup(value)
+        if normalized != value:
+            repaired[key] = normalized
+            changed = True
+    return repaired, changed
+
+
+def normalize_skin_request(method: str, path: str, body: bytes) -> bytes:
+    clean = path.strip("/")
+    saves_skin = (method == "POST" and clean == "api/skins") or (
+        method == "PUT" and clean.startswith("api/skins/")
+    )
+    if not saves_skin or not body:
+        return body
+    try:
+        payload = json.loads(body)
+    except (TypeError, ValueError):
+        return body
+    if not isinstance(payload, dict):
+        return body
+    repaired, changed = normalize_skin_payload(payload)
+    return json.dumps(repaired, ensure_ascii=False).encode("utf-8") if changed else body
+
+
+def _skins_dir() -> Path:
+    return agentlab.HERMES_HOME / "skins"
+
+
+def list_user_skins() -> list[dict[str, str]]:
+    skins: list[dict[str, str]] = []
+    with _skin_lock:
+        for path in sorted(_skins_dir().glob("*.yaml")):
+            description = ""
+            try:
+                payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+                if isinstance(payload, dict):
+                    description = str(payload.get("description") or "")
+            except (OSError, yaml.YAMLError):
+                description = "Unreadable skin file"
+            skins.append({"name": path.stem, "description": description})
+    return skins
+
+
+def _write_skin_yaml(path: Path, payload: dict[str, Any]) -> None:
+    rendered = yaml.dump(
+        payload,
+        Dumper=_SkinDumper,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+    temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    temporary.write_text(rendered, encoding="utf-8")
+    temporary.replace(path)
+
+
+def repair_saved_skins() -> list[str]:
+    """Repair existing Spark Studio skins created by older Hermes Mod builds."""
+    repaired_names: list[str] = []
+    with _skin_lock:
+        for path in sorted(_skins_dir().glob("*.yaml")):
+            try:
+                payload = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            repaired, changed = normalize_skin_payload(payload)
+            if changed:
+                _write_skin_yaml(path, repaired)
+                repaired_names.append(path.stem)
+    return repaired_names
+
+
+def delete_user_skin(name: str) -> dict[str, Any]:
+    """Delete one custom skin from the isolated profile, never ~/.hermes."""
+    if not _SKIN_NAME_RE.fullmatch(name):
+        raise ValueError("invalid skin name")
+    path = _skins_dir() / f"{name}.yaml"
+    with _skin_lock:
+        if not path.is_file():
+            raise FileNotFoundError(name)
+        if agentlab.active_hermes_skin() == name:
+            config_path = agentlab.HERMES_HOME / "config.yaml"
+            with agentlab._CONFIG_LOCK:
+                try:
+                    config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+                except (OSError, yaml.YAMLError):
+                    config = {}
+                if not isinstance(config, dict):
+                    config = {}
+                display = config.setdefault("display", {})
+                if not isinstance(display, dict):
+                    display = {}
+                    config["display"] = display
+                display["skin"] = "default"
+                temporary = config_path.with_name(f".{config_path.name}.{os.getpid()}.tmp")
+                temporary.write_text(
+                    yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+                    encoding="utf-8",
+                )
+                temporary.replace(config_path)
+        path.unlink()
+    return {
+        "deleted": name,
+        "active_skin": agentlab.active_hermes_skin(),
+        "user_skins": list_user_skins(),
+    }
+
+
+def use_original_skin() -> dict[str, Any]:
+    """Select Hermes' built-in default without deleting custom skins."""
+    config_path = agentlab.HERMES_HOME / "config.yaml"
+    with _skin_lock:
+        with agentlab._CONFIG_LOCK:
+            try:
+                config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+            except (OSError, yaml.YAMLError):
+                config = {}
+            if not isinstance(config, dict):
+                config = {}
+            display = config.setdefault("display", {})
+            if not isinstance(display, dict):
+                display = {}
+                config["display"] = display
+            display["skin"] = "default"
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            temporary = config_path.with_name(f".{config_path.name}.{os.getpid()}.tmp")
+            temporary.write_text(
+                yaml.safe_dump(config, sort_keys=False, allow_unicode=True),
+                encoding="utf-8",
+            )
+            temporary.replace(config_path)
+    return {
+        "active_skin": agentlab.active_hermes_skin(),
+        "user_skins": list_user_skins(),
+    }
 
 
 def _hermes_runtime() -> tuple[Path | None, Path | None]:
@@ -140,7 +344,6 @@ async def install() -> dict[str, Any]:
     global _state, _error
     async with _lock:
         if installed():
-            _state, _error = "stopped", None
             return await status()
         npm = _npm_executable()
         if not npm:
@@ -194,6 +397,7 @@ async def start(timeout: float = 30.0) -> dict[str, Any]:
     """Start the installed editor on an unadvertised loopback port."""
     global _state, _error, _port, _process, _log_task
     async with _lock:
+        repair_saved_skins()
         if _process and _process.returncode is None and await _healthy():
             _state, _error = "ready", None
             return await status()
@@ -310,6 +514,7 @@ async def status() -> dict[str, Any]:
         "error": _error,
         "profile": str(agentlab.HERMES_HOME),
         "active_skin": agentlab.active_hermes_skin(),
+        "user_skins": list_user_skins(),
         "hermes_agent_root": str(root) if root else None,
         "hermes_python": str(python) if python else None,
         "skin_engine_found": bool(root),
@@ -443,6 +648,7 @@ async def proxy_request(
     clean = path.lstrip("/")
     if ".." in Path(clean).parts:
         raise ValueError("invalid Skin Studio path")
+    body = normalize_skin_request(method, clean, body)
     target = f"{url}/{clean}"
     if query:
         target = f"{target}?{query}"

@@ -309,6 +309,12 @@ stores it under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
 and embeds it through a sandboxed same-origin bridge. It always targets
 `data/agent-lab/hermes`, never your personal `~/.hermes`. Create or load a skin,
 click **Activate** inside Skin Studio, then choose **Restart Chat to apply**.
+Spark Studio automatically converts multi-line logo and hero color markup to
+the line-oriented form required by the Ink TUI. Use the **Saved skin** picker
+and **Delete skin** to remove a custom skin; deleting the active skin safely
+returns Hermes to the default skin. **Use original Hermes** selects the built-in
+default design without deleting any saved skins; choose **Restart Chat to apply**
+after switching designs.
 Only the Hermes PTY restarts—the loaded inference engine stays running. Image
 selection uses the browser picker, so it also works over Spark Studio's private
 HTTPS/LAN dashboard.
@@ -747,6 +753,8 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
 | `GET` | `/api/hermes-mod/status` | Pinned Skin Studio install/runtime state, active skin, and isolated profile |
 | `POST` | `/api/hermes-mod/{install\|start\|stop}` | Manage the optional loopback Hermes Mod sidecar |
+| `POST` | `/api/hermes-mod/skins/default` | Select the built-in original Hermes skin without deleting custom skins |
+| `DELETE` | `/api/hermes-mod/skins/{name}` | Delete one custom skin from the isolated Spark Studio Hermes profile |
 | `GET` `POST` `PUT` `DELETE` | `/api/hermes-mod/ui/...` | Sandboxed, token-protected iframe bridge to Hermes Mod |
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
 | `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |

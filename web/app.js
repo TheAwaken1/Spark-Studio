@@ -4142,12 +4142,35 @@ function unloadHermesModFrame(message = '') {
   if (message) placeholder.querySelector('span').textContent = message;
 }
 
+function renderHermesModSkinOptions(status) {
+  const select = $('#hermesModSkinSelect');
+  const previous = select.value;
+  const skins = Array.isArray(status.user_skins) ? status.user_skins : [];
+  select.innerHTML = '';
+  if (!skins.length) {
+    select.appendChild(new Option('No custom skins', ''));
+  } else {
+    skins.forEach((skin) => {
+      const label = skin.name === status.active_skin ? `${skin.name} (active)` : skin.name;
+      select.appendChild(new Option(label, skin.name));
+    });
+    const preferred = skins.some((skin) => skin.name === previous)
+      ? previous
+      : (skins.some((skin) => skin.name === status.active_skin) ? status.active_skin : skins[0].name);
+    select.value = preferred;
+  }
+  select.disabled = !skins.length;
+  $('#hermesModDelete').disabled = !skins.length;
+}
+
 function renderHermesModStatus(status) {
   $('#hermesModProfile').textContent = status.profile || 'data/agent-lab/hermes';
   $('#hermesModActiveSkin').textContent = status.active_skin || 'default';
+  renderHermesModSkinOptions(status);
   $('#hermesModInstall').hidden = status.installed;
   $('#hermesModStart').hidden = !status.installed || status.running;
   $('#hermesModStop').hidden = !status.running;
+  $('#hermesModOriginal').disabled = status.active_skin === 'default';
   $('#hermesModApply').disabled = !status.healthy;
 
   if (!status.node || !status.npm) {
@@ -4219,6 +4242,43 @@ async function runHermesModAction(action) {
   }
 }
 
+async function useOriginalHermesSkin() {
+  if (!window.confirm("Switch back to the original Hermes design? Your saved custom skins will be kept.")) return;
+  document.getElementById("hermesModOriginal").disabled = true;
+  setHermesModState("Selecting original Hermes design…");
+  try {
+    await api("/hermes-mod/skins/default", { method: "POST" });
+    unloadHermesModFrame("Refreshing Skin Studio with the original design…");
+    await refreshHermesMod(false);
+    setHermesModState("Original Hermes selected — Restart Chat to apply", "ready");
+  } catch (error) {
+    setHermesModState("Could not restore original Hermes: " + error.message, "error");
+  } finally {
+    document.getElementById("hermesModOriginal").disabled =
+      document.getElementById("hermesModActiveSkin").textContent === "default";
+  }
+}
+
+async function deleteSelectedHermesSkin() {
+  const select = $('#hermesModSkinSelect');
+  const name = select.value;
+  if (!name) return;
+  if (!window.confirm(`Delete custom skin "${name}" from Spark Studio's isolated Hermes profile?`)) return;
+  $('#hermesModDelete').disabled = true;
+  setHermesModState(`Deleting ${name}…`);
+  try {
+    const result = await api(`/hermes-mod/skins/${encodeURIComponent(name)}`, { method: 'DELETE' });
+    unloadHermesModFrame('Refreshing Skin Studio after deletion…');
+    await refreshHermesMod(false);
+    const suffix = result.active_skin === 'default' ? ' Active skin reset to default.' : '';
+    setHermesModState(`Deleted ${name}.${suffix}`, 'ready');
+  } catch (error) {
+    setHermesModState(`Could not delete ${name}: ${error.message}`, 'error');
+  } finally {
+    $('#hermesModDelete').disabled = !$('#hermesModSkinSelect').value;
+  }
+}
+
 function setHermesView(view) {
   hermesMod.activeView = view === 'skins' ? 'skins' : 'chat';
   $$('[data-hermes-target]').forEach((button) => {
@@ -4257,6 +4317,8 @@ $$('[data-hermes-target]').forEach((button) => {
 $('#hermesModInstall').addEventListener('click', () => runHermesModAction('install'));
 $('#hermesModStart').addEventListener('click', () => runHermesModAction('start'));
 $('#hermesModStop').addEventListener('click', () => runHermesModAction('stop'));
+$('#hermesModOriginal').addEventListener('click', useOriginalHermesSkin);
+$('#hermesModDelete').addEventListener('click', deleteSelectedHermesSkin);
 $('#hermesModOpenChat').addEventListener('click', () => setHermesView('chat'));
 $('#hermesModApply').addEventListener('click', () => {
   setHermesView('chat');

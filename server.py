@@ -2477,6 +2477,22 @@ async def hermes_mod_stop(request: Request):
     return await hermes_mod_service.stop()
 
 
+@app.post("/api/hermes-mod/skins/default")
+async def hermes_mod_use_original_skin(request: Request):
+    _require_hermes_addon_access(request)
+    return await asyncio.to_thread(hermes_mod_service.use_original_skin)
+
+
+@app.delete("/api/hermes-mod/skins/{skin_name}")
+async def hermes_mod_delete_skin(skin_name: str, request: Request):
+    _require_hermes_addon_access(request)
+    try:
+        return await asyncio.to_thread(hermes_mod_service.delete_user_skin, skin_name)
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"custom skin not found: {skin_name}") from exc
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
 def _hermes_mod_cors_headers() -> dict[str, str]:
     # The iframe intentionally omits allow-same-origin. Its opaque Origin is
     # granted access only to this token-protected bridge, not to Spark Studio's

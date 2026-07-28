@@ -1018,6 +1018,19 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
 }
 .hermes-skin-meta .mono { color: var(--accent); overflow-wrap: anywhere; }
 .hermes-skin-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+.hermes-skin-actions .btn[hidden] { display: none !important; }
+.hermes-skin-delete-picker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.hermes-skin-delete-picker select {
+  max-width: 180px;
+  min-width: 120px;
+  padding: 7px 9px;
+}
 .hermes-skin-notice {
   padding: 0 3px 9px;
   font-size: 11px;
