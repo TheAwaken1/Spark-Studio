@@ -1,11 +1,12 @@
-"""Bridge to Claude Code CLI and OpenAI Codex CLI.
+"""Bridge to the Claude Code, OpenAI Codex, and Hugging Face CLIs.
 
 We delegate all OAuth to the official CLIs:
   - `claude` (@anthropic-ai/claude-code) — Pro/Max subscription login via `claude /login`
   - `codex`  (@openai/codex)             — ChatGPT login via `codex login`
+  - `hf`     (huggingface_hub)            — browser/device login via `hf auth login`
 
-Both store creds in the user's home dir after login; afterward we just shell
-out with a --print/exec flag to ask them questions. No API keys in this app.
+The CLIs store their own credentials after login. Spark Studio never reads or
+stores the underlying tokens; it only invokes login and checks public identity.
 """
 
 from __future__ import annotations
@@ -289,9 +290,11 @@ def _which(cmd: str) -> str | None:
     found = shutil.which(cmd)
     if found:
         return found
-    # npm global prefix may not be on PATH when server starts without sourcing .bashrc
+    # The project venv / npm global prefix may not be on PATH when the server
+    # starts without sourcing .bashrc.
     home = os.path.expanduser("~")
     for extra in [
+        os.path.join(os.path.dirname(__file__), "env", "bin", cmd),
         os.path.join(home, ".npm-global", "bin", cmd),
         os.path.join(home, ".local", "bin", cmd),
         "/usr/local/bin/" + cmd,
@@ -326,6 +329,10 @@ def codex_available() -> bool:
     return _codex_probe
 
 
+def huggingface_available() -> bool:
+    return _which("hf") is not None
+
+
 async def _spawn(cmd: list[str], stdin: str | None = None) -> tuple[int, str, str]:
     proc = await asyncio.create_subprocess_exec(
         *cmd,
@@ -336,6 +343,48 @@ async def _spawn(cmd: list[str], stdin: str | None = None) -> tuple[int, str, st
     )
     out, err = await proc.communicate(stdin.encode() if stdin is not None else None)
     return proc.returncode or 0, out.decode("utf-8", "replace"), err.decode("utf-8", "replace")
+
+
+def _identity_name(value) -> str | None:
+    """Find a public username in `hf auth whoami --format json` output."""
+    if isinstance(value, dict):
+        for key in ("name", "username", "user"):
+            candidate = value.get(key)
+            if isinstance(candidate, str) and candidate.strip():
+                return candidate.strip()
+        for key in ("user", "account"):
+            nested = _identity_name(value.get(key))
+            if nested:
+                return nested
+    elif isinstance(value, list):
+        for candidate in value:
+            nested = _identity_name(candidate)
+            if nested:
+                return nested
+    return None
+
+
+def huggingface_status() -> dict:
+    """Return HF CLI login state without reading or returning an access token."""
+    path = _which("hf")
+    if path is None:
+        return {"installed": False, "logged_in": False, "username": None}
+    try:
+        result = _subprocess.run(
+            [path, "auth", "whoami", "--format", "json"],
+            capture_output=True,
+            text=True,
+            timeout=12,
+        )
+    except Exception:
+        return {"installed": True, "logged_in": False, "username": None}
+    if result.returncode != 0:
+        return {"installed": True, "logged_in": False, "username": None}
+    try:
+        username = _identity_name(json.loads(result.stdout))
+    except (json.JSONDecodeError, TypeError):
+        username = None
+    return {"installed": True, "logged_in": True, "username": username}
 
 
 async def ask_claude(prompt: str) -> str:
@@ -416,6 +465,7 @@ async def login_status() -> dict:
     """Detect whether each CLI has cached credentials (best effort)."""
     claude_home = os.path.expanduser("~/.claude")
     codex_home = os.path.expanduser("~/.codex")
+    huggingface = await asyncio.to_thread(huggingface_status)
     return {
         "claude": {
             "installed": claude_available(),
@@ -426,16 +476,18 @@ async def login_status() -> dict:
             "installed": codex_available(),
             "logged_in": os.path.exists(os.path.join(codex_home, "auth.json")),
         },
+        "huggingface": huggingface,
     }
 
 
 async def login_stream(which: str) -> AsyncIterator[str]:
-    """Stream the login flow for `claude` or `codex`. Yields each stdout line.
+    """Stream an official CLI login flow. Yields each stdout line.
 
     Codex supports a one-shot `codex login` that prints a URL for the user to
     visit. Claude Code's subscription OAuth is only available inside the
     interactive REPL (via `/login`), so for Claude we surface instructions
-    instead of trying to pipe the REPL.
+    instead of trying to pipe the REPL. Hugging Face uses an RFC 8628 browser
+    device flow and owns the resulting token storage.
     """
     if which == "claude":
         yield "Claude Code OAuth is handled by the CLI itself — open any terminal and run:"
@@ -447,6 +499,16 @@ async def login_stream(which: str) -> AsyncIterator[str]:
         return
     if which == "codex":
         cmd = ["codex", "login"]
+    elif which in {"huggingface", "hf"}:
+        path = _which("hf")
+        if path is None:
+            raise RuntimeError(
+                "`hf` CLI not installed. Run "
+                '`uv pip install --python env/bin/python -U "huggingface_hub>=1.25.1"`.'
+            )
+        yield "Starting Hugging Face browser login…"
+        yield "Open the URL below and confirm the one-time code. Spark Studio never sees your token."
+        cmd = [path, "auth", "login", "--force"]
     else:
         raise ValueError(f"unknown agent: {which}")
     proc = await asyncio.create_subprocess_exec(

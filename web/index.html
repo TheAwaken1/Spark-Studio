@@ -85,6 +85,7 @@
         <div class="row"><span>llama.cpp</span><span id="sysLlama">—</span></div>
         <div class="row"><span>Claude</span><span id="sysClaude">—</span></div>
         <div class="row"><span>Codex</span><span id="sysCodex">—</span></div>
+        <div class="row"><span>Hugging Face</span><span id="sysHuggingface">—</span></div>
       </div>
     </div>
   </aside>
@@ -463,8 +464,8 @@
 
     <!-- AGENTS -->
     <section class="panel" data-panel="agents">
-      <header class="panel-header"><h1>Agents</h1><p>Use your Claude Pro / Max or ChatGPT subscription to fix recipes. No API keys needed.</p></header>
-      <div class="grid grid-2">
+      <header class="panel-header"><h1>Agents &amp; Identities</h1><p>Connect official CLIs for recipe agents and private or gated Hugging Face models. Spark Studio never stores their tokens.</p></header>
+      <div class="grid grid-3">
         <div class="card">
           <h3><i class="fa-solid fa-brain"></i> Claude Code</h3>
           <div id="claudeStatus" class="muted">Checking…</div>
@@ -476,6 +477,12 @@
           <div id="codexStatus" class="muted">Checking…</div>
           <button class="btn primary" id="codexLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
           <pre id="codexLog" class="login-log"></pre>
+        </div>
+        <div class="card">
+          <h3><i class="fa-solid fa-face-smile"></i> Hugging Face</h3>
+          <div id="huggingfaceStatus" class="muted">Checking…</div>
+          <button class="btn primary" id="huggingfaceLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
+          <pre id="huggingfaceLog" class="login-log"></pre>
         </div>
       </div>
     </section>

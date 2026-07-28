@@ -52,6 +52,7 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 - **Drop-zone recipe runner** — paste or drop a JSON recipe, click Run, stream logs live
 - **Run anything** — one box on the Recipes tab accepts a [spark-arena.com](https://spark-arena.com/leaderboard) benchmark link (or the whole share blurb), a recipe YAML/JSON, a HuggingFace model id, or a `@community/ref`, and just runs it. Arena imports are saved to My Recipes automatically
 - **Ask Claude / Ask Codex** button on every failing run — reads the recipe + last 300 log lines, inlines the sparkrun recipe-schema reference (RECIPES.md), matching curated recipes, and fix patches from the local registry mirror, and returns a patched recipe with diagnosis
+- **Hugging Face browser login** — connect the official `hf` CLI from **Agents & Identities** using its device-code OAuth flow. Spark Studio shows the signed-in username and enables private/gated model downloads without reading or storing the token
 - **Auto-Fix & Retry** — one click on a failed run starts a hands-free loop: the agent diagnoses, patches the recipe, relaunches, watches the new logs, and retries with fresh context — up to 3 attempts — until the engine actually serves. No more clicking Fix over and over
 - **Optimize Speed** — the same hands-free loop, but for *slow* runs instead of broken ones: one click on a healthy run benchmarks it (tok/s + TTFT), hands the agent the measured numbers, live GPU/memory vitals, and DGX Spark tuning knowledge (FlashInfer vs Marlin backends, `sparkrun tune` kernel configs, KV-cache quantization, per-family env vars from the eugr/sparkrun registries), relaunches the tuned recipe, and re-benchmarks. Whichever configuration *measured* fastest is the one left serving and saved on the recipe — a patch that benches slower is rolled back automatically. Declares victory at ≥10% improvement (`SPARK_STUDIO_OPTIMIZE_MARGIN`)
 - **Recipe Forge** — paste any HuggingFace repo id; Spark Studio checks the synced recipe registry for a Spark-validated YAML, falls back to adapted registry recipes, then heuristic presets. Each result is badged so you know ground truth vs. a guess. One-click starter chips surface your recent forges and Spark-validated models from the registry
@@ -156,7 +157,7 @@ git clone --depth 1 https://github.com/eugr/spark-vllm-docker.git    data/regist
 git clone --depth 1 https://github.com/spark-arena/sparkrun.git        data/registry/sparkrun
 ```
 
-### 3. (Optional) Install agent CLIs and Hermes
+### 3. (Optional) Connect agent CLIs, Hugging Face, and Hermes
 
 For the **Ask Claude** and **Ask Codex** buttons:
 
@@ -164,7 +165,9 @@ For the **Ask Claude** and **Ask Codex** buttons:
 npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-After installing, log in from the **Agents** tab inside Spark Studio — no API keys needed, just your browser OAuth flow.
+After installing, log in from **Agents & Identities** inside Spark Studio — no API keys needed, just your browser OAuth flow.
+
+Spark Studio already installs the official Hugging Face CLI. In **Agents & Identities**, click **Log in** under Hugging Face, open the displayed browser URL, and confirm the one-time code. The `hf` CLI owns the saved credential; Spark Studio only checks `hf auth whoami` to display your public username. This enables downloads of private repositories and gated models that your account has accepted access to.
 
 For Agent Lab, install the Hermes CLI used by NVIDIA's DGX Spark playbook:
 
@@ -679,8 +682,8 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/search?q=` | Web search (SearXNG, DuckDuckGo fallback) |
 | `POST` | `/api/searxng/start` | (Re)start the bundled SearXNG container |
 | `POST` | `/api/searxng/stop` | Stop the bundled SearXNG container |
-| `GET` | `/api/agents/status` | Claude/Codex install + login state |
-| `GET` | `/api/agents/login/{claude\|codex}` | SSE OAuth flow |
+| `GET` | `/api/agents/status` | Claude/Codex/Hugging Face install + login state |
+| `GET` | `/api/agents/login/{claude\|codex\|huggingface}` | SSE browser OAuth/device flow |
 | `POST` | `/api/agents/fix` | JSON-structured recipe patch |
 | `GET` | `/api/agents/autofix/{rid}` | SSE hands-free fix loop (diagnose → patch → relaunch → retry) |
 | `GET` | `/api/agents/optimize/{rid}` | SSE speed-optimization loop (bench → patch → relaunch → re-bench; fastest config wins) |

@@ -154,6 +154,7 @@ async function refreshSystem() {
         : '<span class="badge no" title="CLI not installed — see Agents tab">missing</span>');
     $('#sysClaude').innerHTML = agentBadge(a.claude);
     $('#sysCodex').innerHTML = agentBadge(a.codex);
+    $('#sysHuggingface').innerHTML = agentBadge(a.huggingface);
   } catch (e) { /* ignore */ }
   updateTitle();
 }
@@ -3850,23 +3851,35 @@ $('#benchGo').addEventListener('click', async () => {
 // ---------- agents login -------------------------------------------------
 async function refreshAgents() {
   const a = await api('/agents/status');
-  const pkgs = { claude: '@anthropic-ai/claude-code', codex: '@openai/codex' };
-  for (const which of ['claude', 'codex']) {
+  const installHelp = {
+    claude: 'install with <code>npm install -g @anthropic-ai/claude-code</code>',
+    codex: 'install with <code>npm install -g @openai/codex</code>',
+    huggingface: 'install with <code>uv pip install --python env/bin/python -U "huggingface_hub&gt;=1.25.1"</code>',
+  };
+  for (const which of ['claude', 'codex', 'huggingface']) {
     const s = a[which] || {};
     const status = $(`#${which}Status`);
     const btn = $(`#${which}Login`);
     if (!s.installed) {
-      status.innerHTML = `<span class="badge no">not installed</span> — install with <code>npm install -g ${pkgs[which]}</code>, then reopen this tab.`;
+      status.innerHTML = `<span class="badge no">not installed</span> — ${installHelp[which]}, then reopen this tab.`;
       btn.disabled = true;
       btn.classList.remove('primary');
       btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Log in';
     } else if (s.logged_in) {
-      status.innerHTML = '<span class="badge ok">✓ logged in</span> — ready to fix and optimize recipes.';
+      const identity = which === 'huggingface' && s.username
+        ? ` as <strong>${escapeHtml(s.username)}</strong>` : '';
+      const ready = which === 'huggingface'
+        ? 'private and gated model access is ready.'
+        : 'ready to fix and optimize recipes.';
+      status.innerHTML = `<span class="badge ok">✓ logged in${identity}</span> — ${ready}`;
       btn.disabled = false;
       btn.classList.remove('primary');
       btn.innerHTML = '<i class="fa-solid fa-arrows-rotate"></i> Re-authenticate';
     } else {
-      status.innerHTML = '<span class="badge warn">not logged in</span> — uses your existing subscription, no API key needed.';
+      const detail = which === 'huggingface'
+        ? 'browser sign-in unlocks private and gated model downloads.'
+        : 'uses your existing subscription, no API key needed.';
+      status.innerHTML = `<span class="badge warn">not logged in</span> — ${detail}`;
       btn.disabled = false;
       btn.classList.add('primary');
       btn.innerHTML = '<i class="fa-solid fa-right-to-bracket"></i> Log in';
@@ -3875,20 +3888,35 @@ async function refreshAgents() {
 }
 $('#claudeLogin').addEventListener('click', () => streamLogin('claude'));
 $('#codexLogin').addEventListener('click', () => streamLogin('codex'));
+$('#huggingfaceLogin').addEventListener('click', () => streamLogin('huggingface'));
 function streamLogin(which) {
   const pre = $(`#${which}Log`);
   pre.textContent = '';
+  // Reserve the tab during the click event so popup blockers do not suppress
+  // the device URL when it arrives asynchronously over SSE.
+  const authTab = ['codex', 'huggingface'].includes(which)
+    ? window.open('about:blank', `${which}-login`) : null;
+  if (authTab) authTab.opener = null;
+  let openedAuthUrl = false;
   const es = new EventSource(`/api/agents/login/${which}`);
   es.addEventListener('log', (ev) => {
     pre.textContent += ev.data + '\n';
     pre.scrollTop = pre.scrollHeight;
-    const url = ev.data.match(/https?:\/\/\S+/);
+    const url = ev.data.match(/https?:\/\/[^\s<>"']+/);
     if (url) {
-      window.open(url[0], '_blank', 'noopener');
+      const cleanUrl = url[0].replace(/[\]),.;]+$/, '');
+      if (authTab && !authTab.closed) authTab.location.href = cleanUrl;
+      else window.open(cleanUrl, '_blank', 'noopener');
+      openedAuthUrl = true;
     }
   });
-  es.addEventListener('done', () => { es.close(); refreshAgents(); });
-  es.addEventListener('error', () => { es.close(); refreshAgents(); });
+  const finish = () => {
+    es.close();
+    if (authTab && !openedAuthUrl && !authTab.closed) authTab.close();
+    refreshAgents();
+  };
+  es.addEventListener('done', finish);
+  es.addEventListener('error', finish);
 }
 
 // ---------- Engine chat tab ----------------------------------------------

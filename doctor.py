@@ -241,6 +241,28 @@ def _probe_agent(which: str) -> dict[str, Any]:
             "fix": "Log in from the Agents tab (browser OAuth, no API key)."}
 
 
+def _probe_huggingface() -> dict[str, Any]:
+    import agents
+    status = agents.huggingface_status()
+    if not status["installed"]:
+        return {
+            "status": "warn",
+            "detail": "HF CLI not installed — private/gated model access disabled",
+            "fix": 'uv pip install --python env/bin/python -U "huggingface_hub>=1.25.1"',
+        }
+    if status["logged_in"]:
+        username = status.get("username")
+        return {
+            "status": "ok",
+            "detail": "installed · logged in" + (f" as {username}" if username else ""),
+        }
+    return {
+        "status": "warn",
+        "detail": "installed but not logged in",
+        "fix": "Log in from the Agents tab (Hugging Face browser flow).",
+    }
+
+
 def _probe_hermes() -> dict[str, Any]:
     import agentlab
     status = agentlab.hermes_status()
@@ -311,6 +333,7 @@ def run_checks(port: int = DEFAULT_PORT) -> dict[str, Any]:
         _check("sparkrun", "sparkrun", _probe_sparkrun),
         _check("claude", "Claude Code agent", lambda: _probe_agent("claude")),
         _check("codex", "Codex agent", lambda: _probe_agent("codex")),
+        _check("huggingface", "Hugging Face identity", _probe_huggingface),
         _check("hermes", "Hermes Agent Lab", _probe_hermes),
         _check("benchy", "llama-benchy", _probe_benchy),
         _check("searxng", "Web search (SearXNG)", _probe_searxng),
