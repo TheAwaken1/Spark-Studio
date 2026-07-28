@@ -3925,6 +3925,11 @@ const hermesTui = {
   terminal: null,
   fit: null,
   socket: null,
+  httpSession: null,
+  httpPolling: false,
+  httpStarting: false,
+  httpGeneration: 0,
+  preferHttp: false,
   observer: null,
   retryTimer: null,
   autoStarted: false,
@@ -3991,11 +3996,15 @@ function ensureHermesTerminal() {
   terminal.onData((data) => {
     if (hermesTui.socket?.readyState === WebSocket.OPEN) {
       hermesTui.socket.send(new TextEncoder().encode(data));
+    } else if (hermesTui.httpSession) {
+      sendHermesHttpInput({ type: 'input', data: bytesToBase64(new TextEncoder().encode(data)) });
     }
   });
   terminal.onResize(({ cols, rows }) => {
     if (hermesTui.socket?.readyState === WebSocket.OPEN) {
       hermesTui.socket.send(JSON.stringify({ type: 'resize', cols, rows }));
+    } else if (hermesTui.httpSession) {
+      sendHermesHttpInput({ type: 'resize', cols, rows });
     }
   });
   hermesTui.observer = new ResizeObserver(() => {
@@ -4030,20 +4039,165 @@ async function refreshHermesTui(autoStart = false) {
       || '<i class="fa-solid fa-lock"></i> Terminal access restricted';
     const accessAllowed = status.access_allowed !== false;
     const ready = status.installed && status.pty && active?.ready && accessAllowed;
+    const running = Boolean(hermesTui.socket || hermesTui.httpSession || hermesTui.httpStarting);
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
     else if (!accessAllowed) setHermesTuiState(status.access_reason || 'Terminal access denied', 'error');
     else if (!active) setHermesTuiState('Load a model to start Hermes', 'error');
     else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
-    else if (!hermesTui.socket) setHermesTuiState('Ready to start');
-    $('#hermesTuiStart').disabled = !ready || Boolean(hermesTui.socket);
-    if (autoStart && ready && !hermesTui.socket && !hermesTui.autoStarted) {
+    else if (!running) setHermesTuiState('Ready to start');
+    document.querySelector('#hermesTuiStart').disabled = !ready || running;
+    if (autoStart && ready && !running && !hermesTui.autoStarted) {
       hermesTui.autoStarted = true;
       startHermesTui();
     }
   } catch (error) {
     setHermesTuiState(`Status unavailable: ${error.message}`, 'error');
   }
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function hermesHttpApi(path, opts = {}) {
+  return api(`/agentlab/terminal/sessions${path}`, {
+    ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      'X-Spark-Studio-Terminal': '1',
+      ...(opts.headers || {}),
+    },
+  });
+}
+
+function sendHermesHttpInput(body) {
+  const sessionId = hermesTui.httpSession;
+  if (!sessionId) return;
+  hermesHttpApi(`/${encodeURIComponent(sessionId)}/input`, {
+    method: 'POST',
+    body,
+  }).catch((error) => {
+    if (hermesTui.httpSession === sessionId) {
+      setHermesTuiState(`HTTPS terminal input failed: ${error.message}`, 'error');
+    }
+  });
+}
+
+async function pollHermesHttpOutput(sessionId) {
+  if (hermesTui.httpPolling) return;
+  hermesTui.httpPolling = true;
+  try {
+    while (hermesTui.httpSession === sessionId) {
+      const result = await hermesHttpApi(`/${encodeURIComponent(sessionId)}/output`);
+      if (hermesTui.httpSession !== sessionId) return;
+      if (result.data) hermesTui.terminal.write(base64ToBytes(result.data));
+      if (result.closed) {
+        hermesTui.httpSession = null;
+        setHermesControls(false);
+        setHermesTuiState('Hermes exited');
+        return;
+      }
+    }
+  } catch (error) {
+    if (hermesTui.httpSession !== sessionId) return;
+    hermesTui.httpSession = null;
+    setHermesControls(false);
+    const message = `HTTPS terminal interrupted — reconnecting: ${error.message}`;
+    hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
+    setHermesTuiState(message);
+    hermesTui.retryTimer = setTimeout(() => {
+      hermesTui.retryTimer = null;
+      if (!hermesTui.socket && !hermesTui.httpSession && hermesMod.activeView === 'chat') {
+        startHermesHttpFallback(0);
+      }
+    }, 1500);
+  } finally {
+    hermesTui.httpPolling = false;
+  }
+}
+
+async function startHermesHttpFallback(attempt = 0) {
+  if (!ensureHermesTerminal() || hermesTui.httpSession || hermesTui.httpStarting) return;
+  const generation = hermesTui.httpGeneration;
+  hermesTui.httpStarting = true;
+  hermesTui.preferHttp = true;
+  if (attempt === 0) {
+    hermesTui.terminal.reset();
+    hermesTui.terminal.write('\x1b[38;2;118;199;255mStarting Hermes over HTTPS fallback…\x1b[0m\r\n');
+  }
+  setHermesControls(true);
+  setHermesTuiState('Starting Hermes over HTTPS…');
+  try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
+  try {
+    const result = await hermesHttpApi('', {
+      method: 'POST',
+      body: {
+        workspace: $('#hermesWorkspace').value.trim(),
+        max_turns: 90,
+        cols: hermesTui.terminal.cols,
+        rows: hermesTui.terminal.rows,
+      },
+    });
+    if (generation !== hermesTui.httpGeneration) {
+      fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(result.session_id)}`, {
+        method: 'DELETE',
+        headers: { 'X-Spark-Studio-Terminal': '1' },
+        keepalive: true,
+      }).catch(() => {});
+      return;
+    }
+    hermesTui.httpStarting = false;
+    hermesTui.httpSession = result.session_id;
+    setHermesControls(true);
+    setHermesTuiState('Hermes is running over HTTPS', 'ready');
+    hermesTui.terminal.focus();
+    pollHermesHttpOutput(result.session_id);
+  } catch (error) {
+    if (generation !== hermesTui.httpGeneration) return;
+    hermesTui.httpStarting = false;
+    setHermesControls(false);
+    if (attempt < 4 && hermesMod.activeView === 'chat') {
+      const delayMs = Math.min(1500 * (2 ** attempt), 6000);
+      const message = `HTTPS terminal is still starting — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
+      hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
+      setHermesTuiState(message);
+      hermesTui.retryTimer = setTimeout(() => {
+        hermesTui.retryTimer = null;
+        startHermesHttpFallback(attempt + 1);
+      }, delayMs);
+      return;
+    }
+    const message = `HTTPS terminal failed: ${error.message}`;
+    hermesTui.terminal.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);
+    setHermesTuiState(message, 'error');
+  }
+}
+
+function stopHermesHttpTui() {
+  const sessionId = hermesTui.httpSession;
+  hermesTui.httpGeneration += 1;
+  hermesTui.httpStarting = false;
+  hermesTui.httpSession = null;
+  hermesTui.httpPolling = false;
+  if (!sessionId) return Promise.resolve();
+  return fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    headers: { 'X-Spark-Studio-Terminal': '1' },
+    keepalive: true,
+  }).catch(() => {});
 }
 
 function startHermesTui({ retryCount = 0 } = {}) {
@@ -4053,6 +4207,10 @@ function startHermesTui({ retryCount = 0 } = {}) {
     hermesTui.retryTimer = null;
   }
   if (!ensureHermesTerminal()) return;
+  if (hermesTui.preferHttp) {
+    startHermesHttpFallback(0);
+    return;
+  }
   if (hermesTui.socket) hermesTui.socket.close(1000, 'restart');
   hermesTui.terminal.reset();
   hermesTui.terminal.write('\x1b[38;2;118;199;255mStarting Hermes TUI…\x1b[0m\r\n');
@@ -4069,6 +4227,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
   socket.addEventListener('open', () => {
     if (hermesTui.socket !== socket) return;
     opened = true;
+    hermesTui.preferHttp = false;
     setHermesTuiState('Hermes is running', 'ready');
     socket.send(JSON.stringify({
       type: 'resize',
@@ -4087,7 +4246,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (hermesTui.socket !== socket) return;
     hermesTui.socket = null;
     setHermesControls(false);
-    const retryable = event.code === 1006 && retryCount < 3;
+    const retryable = event.code === 1006 && retryCount < 1;
     if (retryable) {
       const delayMs = Math.min(1500 * (2 ** retryCount), 6000);
       const phase = opened ? 'connection dropped' : 'dashboard is still starting';
@@ -4103,12 +4262,18 @@ function startHermesTui({ retryCount = 0 } = {}) {
       }, delayMs);
       return;
     }
+    if (event.code === 1006) {
+      hermesTui.preferHttp = true;
+      const message = 'WebSocket unavailable — switching to secure HTTPS transport…';
+      hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
+      setHermesTuiState(message);
+      startHermesHttpFallback(0);
+      return;
+    }
     const expected = event.code === 1000 || event.code === 4410;
     const reason = event.reason || (expected
       ? 'Hermes exited'
-      : (event.code === 1006
-        ? 'Terminal WebSocket is unavailable after automatic retries — reload this tab and check its access status'
-        : `connection closed (${event.code})`));
+      : `connection closed (${event.code})`);
     hermesTui.terminal.write(`\r\n\x1b[${expected ? '33' : '31'}m${reason}\x1b[0m\r\n`);
     setHermesTuiState(reason, expected ? '' : 'error');
     refreshHermesTui(false);
@@ -4123,10 +4288,17 @@ function stopHermesTui() {
     clearTimeout(hermesTui.retryTimer);
     hermesTui.retryTimer = null;
   }
-  hermesTui.socket?.close(1000, 'Stopped from Spark Studio');
+  const socket = hermesTui.socket;
+  stopHermesHttpTui();
+  if (socket) socket.close(1000, 'Stopped from Spark Studio');
+  else setHermesControls(false);
 }
 
 function restartHermesTui() {
+  if (hermesTui.httpSession) {
+    stopHermesHttpTui().finally(() => setTimeout(startHermesTui, 120));
+    return;
+  }
   const socket = hermesTui.socket;
   if (!socket) {
     startHermesTui();

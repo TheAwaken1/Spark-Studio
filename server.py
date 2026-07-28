@@ -6,12 +6,14 @@ Serves the dashboard at / and exposes REST + SSE endpoints at /api/*.
 from __future__ import annotations
 
 import asyncio
+import base64
 import csv
 import io
 import ipaddress
 import json
 import os
 import re
+import secrets
 import shlex
 import sys
 import time
@@ -2556,6 +2558,154 @@ async def hermes_mod_proxy(request: Request, path: str = ""):
     return Response(content=content, status_code=status_code, headers=headers)
 
 
+class HttpTerminalSessionReq(BaseModel):
+    workspace: str = str(APP_DIR)
+    max_turns: int = 90
+    cols: int = 120
+    rows: int = 36
+
+
+class HttpTerminalInputReq(BaseModel):
+    type: str = "input"
+    data: str | None = None
+    cols: int = 120
+    rows: int = 36
+
+
+_HTTP_TERMINAL_HEADER = "X-Spark-Studio-Terminal"
+_HTTP_TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
+_HTTP_TERMINAL_TTL_SECONDS = 120.0
+
+
+def _require_http_terminal_access(request: Request) -> None:
+    if request.headers.get(_HTTP_TERMINAL_HEADER) != "1":
+        raise HTTPException(403, "missing Spark Studio terminal header")
+    allowed, _, reason = _terminal_access_policy(
+        request.client.host if request.client else "",
+        request.url.scheme,
+    )
+    if not allowed:
+        raise HTTPException(403, reason)
+
+
+def _prune_http_terminal_sessions() -> None:
+    cutoff = time.monotonic() - _HTTP_TERMINAL_TTL_SECONDS
+    stale = [
+        session_id
+        for session_id, session in _HTTP_TERMINAL_SESSIONS.items()
+        if session["last_seen"] < cutoff
+    ]
+    for session_id in stale:
+        session = _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
+        if session:
+            session["bridge"].close()
+
+
+def _http_terminal_session(session_id: str) -> dict[str, Any]:
+    _prune_http_terminal_sessions()
+    session = _HTTP_TERMINAL_SESSIONS.get(session_id)
+    if not session:
+        raise HTTPException(404, "Hermes terminal session not found")
+    session["last_seen"] = time.monotonic()
+    return session
+
+
+async def _spawn_http_terminal(
+    request: Request,
+    req: HttpTerminalSessionReq,
+) -> hermes_terminal.PtyBridge:
+    active = runner.active()
+    if not active or not active.url:
+        raise HTTPException(409, "No model is loaded. Start an engine first.")
+    if not active.ready:
+        raise HTTPException(409, "The active model is still loading.")
+    workspace = Path(req.workspace or str(APP_DIR)).expanduser().resolve()
+    endpoint = await asyncio.to_thread(
+        agentlab.discover_endpoint,
+        base_url=active.url,
+    )
+    server = request.scope.get("server") or ("127.0.0.1", 7860)
+    internal_url = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
+    endpoint["studio_url"] = internal_url.rstrip("/") or (
+        f"http://127.0.0.1:{int(server[1] or 7860)}"
+    )
+    command, env = await asyncio.to_thread(
+        hermes_terminal.prepare_browser_tui,
+        endpoint,
+        workspace,
+        max_turns=max(1, min(int(req.max_turns), 1000)),
+    )
+    return await asyncio.to_thread(
+        hermes_terminal.PtyBridge.spawn,
+        command,
+        cwd=workspace,
+        env=env,
+        cols=req.cols,
+        rows=req.rows,
+    )
+
+
+@app.post("/api/agentlab/terminal/sessions")
+async def create_http_terminal_session(req: HttpTerminalSessionReq, request: Request):
+    """Create a PTY transported over same-origin HTTPS when WSS is unavailable."""
+    _require_http_terminal_access(request)
+    _prune_http_terminal_sessions()
+    bridge = await _spawn_http_terminal(request, req)
+    session_id = secrets.token_urlsafe(32)
+    _HTTP_TERMINAL_SESSIONS[session_id] = {
+        "bridge": bridge,
+        "last_seen": time.monotonic(),
+    }
+    return {"session_id": session_id, "transport": "https"}
+
+
+@app.get("/api/agentlab/terminal/sessions/{session_id}/output")
+async def poll_http_terminal_output(session_id: str, request: Request):
+    _require_http_terminal_access(request)
+    session = _http_terminal_session(session_id)
+    bridge = session["bridge"]
+    payload = await asyncio.to_thread(bridge.read, 0.75)
+    session["last_seen"] = time.monotonic()
+    if payload is None:
+        _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
+        await asyncio.to_thread(bridge.close)
+        return {"data": "", "closed": True}
+    return {
+        "data": base64.b64encode(payload).decode("ascii") if payload else "",
+        "closed": False,
+    }
+
+
+@app.post("/api/agentlab/terminal/sessions/{session_id}/input", status_code=204)
+async def write_http_terminal_input(
+    session_id: str,
+    req: HttpTerminalInputReq,
+    request: Request,
+):
+    _require_http_terminal_access(request)
+    bridge = _http_terminal_session(session_id)["bridge"]
+    if req.type == "resize":
+        await asyncio.to_thread(bridge.resize, req.cols, req.rows)
+        return Response(status_code=204)
+    try:
+        payload = base64.b64decode(req.data or "", validate=True)
+    except ValueError as exc:
+        raise HTTPException(400, "invalid terminal input") from exc
+    if len(payload) > 262144:
+        raise HTTPException(413, "terminal input is too large")
+    await asyncio.to_thread(bridge.write, payload)
+    return Response(status_code=204)
+
+
+@app.delete("/api/agentlab/terminal/sessions/{session_id}", status_code=204)
+async def close_http_terminal_session(session_id: str, request: Request):
+    _require_http_terminal_access(request)
+    session = _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
+    if session:
+        await asyncio.to_thread(session["bridge"].close)
+    return Response(status_code=204)
+
+
 @app.websocket("/api/agentlab/terminal")
 async def agentlab_terminal(ws: WebSocket):
     """Run Spark Studio's isolated Hermes profile behind a browser PTY."""
@@ -3351,6 +3501,10 @@ async def _background_registry_sync():
 @app.on_event("shutdown")
 async def _shutdown_hermes_mod():
     """The optional editor is app-owned; never leave its Node child behind."""
+    sessions = list(_HTTP_TERMINAL_SESSIONS.values())
+    _HTTP_TERMINAL_SESSIONS.clear()
+    for session in sessions:
+        await asyncio.to_thread(session["bridge"].close)
     await hermes_mod_service.stop()
 
 

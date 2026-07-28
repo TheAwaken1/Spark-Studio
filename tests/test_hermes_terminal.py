@@ -1,4 +1,5 @@
 import asyncio
+import base64
 import os
 import tempfile
 import time
@@ -96,6 +97,65 @@ class HermesBrowserTerminalTests(unittest.TestCase):
                 websocket.receive_bytes()
         self.assertEqual(failed.exception.code, 1011)
         self.assertEqual(failed.exception.reason, "Hermes TUI failed to start")
+
+    def test_http_terminal_creation_requires_browser_header(self):
+        client = TestClient(server.app)
+        spawn = mock.AsyncMock()
+        with mock.patch.object(server, "_spawn_http_terminal", new=spawn):
+            response = client.post(
+                "/api/agentlab/terminal/sessions",
+                json={"workspace": "."},
+            )
+        self.assertEqual(response.status_code, 403)
+        spawn.assert_not_awaited()
+
+    def test_http_terminal_fallback_streams_input_output_and_resize(self):
+        bridge = mock.Mock()
+        bridge.read.return_value = b"ready"
+        spawn = mock.AsyncMock(return_value=bridge)
+        client = TestClient(server.app)
+        headers = {"X-Spark-Studio-Terminal": "1"}
+
+        with mock.patch.object(server, "_spawn_http_terminal", new=spawn):
+            created = client.post(
+                "/api/agentlab/terminal/sessions",
+                headers=headers,
+                json={"workspace": ".", "cols": 132, "rows": 40},
+            )
+        self.assertEqual(created.status_code, 200)
+        session_id = created.json()["session_id"]
+        self.assertEqual(created.json()["transport"], "https")
+
+        output = client.get(
+            f"/api/agentlab/terminal/sessions/{session_id}/output",
+            headers=headers,
+        )
+        self.assertEqual(output.status_code, 200)
+        self.assertEqual(base64.b64decode(output.json()["data"]), b"ready")
+        self.assertFalse(output.json()["closed"])
+
+        typed = client.post(
+            f"/api/agentlab/terminal/sessions/{session_id}/input",
+            headers=headers,
+            json={"type": "input", "data": base64.b64encode(b"hello").decode()},
+        )
+        resized = client.post(
+            f"/api/agentlab/terminal/sessions/{session_id}/input",
+            headers=headers,
+            json={"type": "resize", "cols": 144, "rows": 48},
+        )
+        closed = client.delete(
+            f"/api/agentlab/terminal/sessions/{session_id}",
+            headers=headers,
+        )
+
+        self.assertEqual(typed.status_code, 204)
+        self.assertEqual(resized.status_code, 204)
+        self.assertEqual(closed.status_code, 204)
+        bridge.write.assert_called_once_with(b"hello")
+        bridge.resize.assert_called_once_with(144, 48)
+        bridge.close.assert_called_once_with()
+        self.assertNotIn(session_id, server._HTTP_TERMINAL_SESSIONS)
 
     def test_browser_command_launches_real_tui_with_agent_tools(self):
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")

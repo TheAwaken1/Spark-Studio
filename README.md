@@ -302,6 +302,10 @@ PTY lifecycle, and type `/model` inside Hermes to move between the local model
 and any authenticated Claude or Codex provider.
 The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
 are shared with `sparkstudio hermes`, so both entry points behave consistently.
+Spark Studio prefers the WebSocket bridge and automatically falls back to a
+same-origin HTTPS terminal transport when a browser, certificate policy, or
+network proxy rejects WSS. The fallback carries the same PTY bytes, keyboard
+input, resize events, and cleanup behavior; no user setting is required.
 
 The same **Hermes** area also includes **Skin Studio**, powered by the pinned
 `hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; Spark Studio
@@ -331,8 +335,10 @@ SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 ./start.sh
 ```
 
 Do not enable unrestricted remote terminal access on an untrusted network.
-WebSocket Origin validation remains enforced in every mode, and closing the
-page or pressing **Stop** terminates and reaps the Hermes TUI and its helpers.
+WebSocket Origin validation remains enforced in every mode. The HTTPS fallback
+requires a same-origin-only custom request header and an unguessable session ID.
+Closing the page or pressing **Stop** terminates and reaps the Hermes TUI and its
+helpers on either transport.
 
 Run the deterministic coding smoke suite through Hermes:
 
@@ -759,6 +765,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
 | `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |
 | `WS` | `/api/agentlab/terminal` | Byte-safe PTY bridge for the dashboard Hermes Chat tab (same-origin; local-only by default) |
+| `POST` `GET` `DELETE` | `/api/agentlab/terminal/sessions[...]` | Same-origin HTTPS PTY fallback: create, poll output, send input/resize, and close |
 | `GET` | `/api/agentlab/history` | Saved free-form and deterministic Agent Lab runs |
 | `GET` | `/api/agentlab/{run-id}` | One Agent Lab result, including report and workspace metadata |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |
