@@ -294,9 +294,10 @@ material and include their URLs for citation.
 
 The dashboard's **Hermes Chat** tab is the same real Hermes TUI, not a second
 chat implementation. Open the tab after a model is ready and it starts against
-that loaded model automatically. Choose a workspace before starting, use
-**Stop** or **Restart** for the PTY lifecycle, and type `/model` inside Hermes
-to move between the local model and any authenticated Claude or Codex provider.
+that loaded model automatically. Choose a workspace before starting; changing
+it requires stopping and restarting the TUI. Use **Stop** or **Restart** for the
+PTY lifecycle, and type `/model` inside Hermes to move between the local model
+and any authenticated Claude or Codex provider.
 The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
 are shared with `sparkstudio hermes`, so both entry points behave consistently.
 

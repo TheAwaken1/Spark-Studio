@@ -919,6 +919,12 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
   color: var(--muted);
   font-size: 11px;
 }
+.hermes-workspace-note {
+  opacity: 0.75;
+  font-size: 10px;
+  font-weight: 400;
+  white-space: nowrap;
+}
 .hermes-workspace-label input {
   display: block;
   width: 100%;
