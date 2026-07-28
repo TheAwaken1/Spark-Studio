@@ -47,6 +47,7 @@ import forge
 import hf_check
 import hostinfo
 import hermes_terminal
+import hermes_mod_service
 import models
 import vitals as _vitals
 import recipe_brain
@@ -2436,6 +2437,105 @@ def _studio_url_for_websocket(ws: WebSocket) -> str:
     return f"http://127.0.0.1:{port}"
 
 
+
+def _require_hermes_addon_access(request: Request) -> None:
+    allowed, _, reason = _terminal_access_policy(
+        request.client.host if request.client else "",
+        request.url.scheme,
+    )
+    if not allowed:
+        raise HTTPException(403, reason)
+
+
+@app.get("/api/hermes-mod/status")
+async def hermes_mod_status(request: Request):
+    _require_hermes_addon_access(request)
+    return await hermes_mod_service.status()
+
+
+@app.post("/api/hermes-mod/install")
+async def hermes_mod_install(request: Request):
+    _require_hermes_addon_access(request)
+    result = await hermes_mod_service.install()
+    if not result["installed"]:
+        raise HTTPException(500, result.get("error") or "Skin Studio installation failed")
+    return result
+
+
+@app.post("/api/hermes-mod/start")
+async def hermes_mod_start(request: Request):
+    _require_hermes_addon_access(request)
+    result = await hermes_mod_service.start()
+    if not result["healthy"]:
+        raise HTTPException(503, result.get("error") or "Skin Studio did not start")
+    return result
+
+
+@app.post("/api/hermes-mod/stop")
+async def hermes_mod_stop(request: Request):
+    _require_hermes_addon_access(request)
+    return await hermes_mod_service.stop()
+
+
+def _hermes_mod_cors_headers() -> dict[str, str]:
+    # The iframe intentionally omits allow-same-origin. Its opaque Origin is
+    # granted access only to this token-protected bridge, not to Spark Studio's
+    # other APIs.
+    return {
+        "Access-Control-Allow-Origin": "null",
+        "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
+        "Access-Control-Allow-Headers": (
+            f"Content-Type, {hermes_mod_service.BRIDGE_HEADER}"
+        ),
+        "Access-Control-Max-Age": "600",
+        "Vary": "Origin",
+    }
+
+
+@app.api_route(
+    "/api/hermes-mod/ui",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+)
+@app.api_route(
+    "/api/hermes-mod/ui/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+)
+async def hermes_mod_proxy(request: Request, path: str = ""):
+    _require_hermes_addon_access(request)
+    cors = _hermes_mod_cors_headers()
+    if request.method == "OPTIONS":
+        return Response(status_code=204, headers=cors)
+    if path.lstrip("/").startswith("api/") and not hermes_mod_service.valid_bridge_token(
+        request.headers.get(hermes_mod_service.BRIDGE_HEADER)
+    ):
+        raise HTTPException(403, "invalid Skin Studio bridge token")
+    forwarded_headers = {
+        key: value
+        for key, value in {
+            "accept": request.headers.get("accept"),
+            "content-type": request.headers.get("content-type"),
+        }.items()
+        if value
+    }
+    try:
+        status_code, headers, content = await hermes_mod_service.proxy_request(
+            request.method,
+            path,
+            request.url.query,
+            forwarded_headers,
+            await request.body(),
+        )
+        content_type = headers.get("content-type", "application/octet-stream")
+        content = hermes_mod_service.rewrite_response(path, content_type, content)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    headers.update(cors)
+    headers["Cache-Control"] = "no-store"
+    return Response(content=content, status_code=status_code, headers=headers)
+
+
 @app.websocket("/api/agentlab/terminal")
 async def agentlab_terminal(ws: WebSocket):
     """Run Spark Studio's isolated Hermes profile behind a browser PTY."""
@@ -3226,6 +3326,12 @@ async def _background_registry_sync():
         pass
     except Exception:  # noqa: BLE001
         pass
+
+
+@app.on_event("shutdown")
+async def _shutdown_hermes_mod():
+    """The optional editor is app-owned; never leave its Node child behind."""
+    await hermes_mod_service.stop()
 
 
 @app.on_event("shutdown")

@@ -293,48 +293,78 @@ def _write_hermes_config(
     enable_search: bool = False,
 ) -> Path:
     HERMES_HOME.mkdir(parents=True, exist_ok=True)
-    config = {
-        "model": {
-            "provider": "custom",
-            "default": model,
-            "base_url": api_base(base_url),
-            "api_key": "",
-        },
-        "terminal": {"backend": "local"},
-        "approvals": {
-            "mode": "smart",
-            "timeout": 10,
-            "deny": list(_DENY_COMMANDS),
-        },
-        "agent": {"max_turns": max_turns},
-    }
-    if enable_search:
-        config["mcp_servers"] = {
-            "sparkstudio": {
-                "command": sys.executable,
-                "args": [
-                    str(APP_DIR / "sparkstudio_mcp.py"),
-                    "--studio-url",
-                    studio_url.rstrip("/"),
-                ],
-                "enabled": True,
-                "timeout": 75,
-                "connect_timeout": 20,
-                "supports_parallel_tool_calls": True,
-                "tools": {
-                    "include": ["web_search"],
-                    "resources": False,
-                    "prompts": False,
-                },
-            }
-        }
     path = HERMES_HOME / "config.yaml"
-    payload = yaml.safe_dump(config, sort_keys=False)
     with _CONFIG_LOCK:
+        # Spark Studio owns the model/tool configuration in this isolated
+        # profile, while Hermes Mod owns display.skin. Preserve that user-facing
+        # selection whenever Chat refreshes the active model endpoint.
+        preserved_display = None
+        try:
+            existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+            if isinstance(existing, dict) and isinstance(existing.get("display"), dict):
+                preserved_display = existing["display"]
+        except (OSError, yaml.YAMLError):
+            pass
+
+        config = {
+            "model": {
+                "provider": "custom",
+                "default": model,
+                "base_url": api_base(base_url),
+                "api_key": "",
+            },
+            "terminal": {"backend": "local"},
+            "approvals": {
+                "mode": "smart",
+                "timeout": 10,
+                "deny": list(_DENY_COMMANDS),
+            },
+            "agent": {"max_turns": max_turns},
+        }
+        if preserved_display:
+            config["display"] = preserved_display
+        if enable_search:
+            config["mcp_servers"] = {
+                "sparkstudio": {
+                    "command": sys.executable,
+                    "args": [
+                        str(APP_DIR / "sparkstudio_mcp.py"),
+                        "--studio-url",
+                        studio_url.rstrip("/"),
+                    ],
+                    "enabled": True,
+                    "timeout": 75,
+                    "connect_timeout": 20,
+                    "supports_parallel_tool_calls": True,
+                    "tools": {
+                        "include": ["web_search"],
+                        "resources": False,
+                        "prompts": False,
+                    },
+                }
+            }
+        payload = yaml.safe_dump(config, sort_keys=False)
         temporary = HERMES_HOME / f"config-{threading.get_ident()}.tmp"
         temporary.write_text(payload, encoding="utf-8")
         temporary.replace(path)
     return path
+
+
+def active_hermes_skin() -> str:
+    """Return the selected skin in Spark Studio's isolated Hermes profile."""
+    path = HERMES_HOME / "config.yaml"
+    with _CONFIG_LOCK:
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return "default"
+    if not isinstance(config, dict):
+        return "default"
+    display = config.get("display")
+    if not isinstance(display, dict):
+        return "default"
+    skin = display.get("skin")
+    return str(skin).strip() if skin else "default"
 
 
 def build_hermes_command(

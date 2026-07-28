@@ -294,7 +294,7 @@ SearXNG/DDG pipeline. The MCP server exposes no generic browser, shell,
 credential, or write API. Search results are treated as untrusted source
 material and include their URLs for citation.
 
-The dashboard's **Hermes Chat** tab is the same real Hermes TUI, not a second
+The dashboard's **Hermes → Chat** view is the same real Hermes TUI, not a second
 chat implementation. Open the tab after a model is ready and it starts against
 that loaded model automatically. Choose a workspace before starting; changing
 it requires stopping and restarting the TUI. Use **Stop** or **Restart** for the
@@ -302,6 +302,16 @@ PTY lifecycle, and type `/model` inside Hermes to move between the local model
 and any authenticated Claude or Codex provider.
 The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
 are shared with `sparkstudio hermes`, so both entry points behave consistently.
+
+The same **Hermes** area also includes **Skin Studio**, powered by the pinned
+`hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; Spark Studio
+stores it under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
+and embeds it through a sandboxed same-origin bridge. It always targets
+`data/agent-lab/hermes`, never your personal `~/.hermes`. Create or load a skin,
+click **Activate** inside Skin Studio, then choose **Restart Chat to apply**.
+Only the Hermes PTY restarts—the loaded inference engine stays running. Image
+selection uses the browser picker, so it also works over Spark Studio's private
+HTTPS/LAN dashboard.
 
 Because Hermes can run terminal commands and edit files, the WebSocket terminal
 accepts loopback browsers and same-origin private-LAN browsers using HTTPS/WSS.
@@ -735,6 +745,9 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `POST` | `/api/tooleval/run` | Start the Tool Eval Bench against a run (defaults to the active engine) |
 | `GET` | `/api/tooleval/status` | Live progress, per-case results, and scores of the current/last eval |
 | `GET` | `/api/tooleval/history` | Past Tool Eval scores per model (reports live in `tooleval-results/`) |
+| `GET` | `/api/hermes-mod/status` | Pinned Skin Studio install/runtime state, active skin, and isolated profile |
+| `POST` | `/api/hermes-mod/{install\|start\|stop}` | Manage the optional loopback Hermes Mod sidecar |
+| `GET` `POST` `PUT` `DELETE` | `/api/hermes-mod/ui/...` | Sandboxed, token-protected iframe bridge to Hermes Mod |
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
 | `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |
 | `WS` | `/api/agentlab/terminal` | Byte-safe PTY bridge for the dashboard Hermes Chat tab (same-origin; local-only by default) |

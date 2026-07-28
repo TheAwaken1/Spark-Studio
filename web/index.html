@@ -37,7 +37,7 @@
       <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
       <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
       <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
-      <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> Hermes Chat</a>
+      <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> Hermes</a>
       <a class="tab" data-tab="cluster"><i class="fa-solid fa-circle-nodes"></i> Cluster</a>
       <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> Recovery</a>
     </nav>
@@ -489,32 +489,73 @@
       </div>
     </section>
 
-    <!-- HERMES TUI -->
+    <!-- HERMES -->
     <section class="panel hermes-panel" data-panel="hermes">
-      <header class="panel-header">
-        <h1>Hermes Chat</h1>
-        <p>The complete Hermes TUI, connected to Spark Studio's loaded model and agent tools.</p>
+      <header class="panel-header hermes-panel-header">
+        <div>
+          <h1>Hermes</h1>
+          <p>Chat with the loaded model or design the real TUI with Skin Studio.</p>
+        </div>
+        <div class="hermes-view-switch" role="tablist" aria-label="Hermes tools">
+          <button class="hermes-view-button active" data-hermes-target="chat" role="tab" aria-selected="true"><i class="fa-solid fa-terminal"></i> Chat</button>
+          <button class="hermes-view-button" data-hermes-target="skins" role="tab" aria-selected="false"><i class="fa-solid fa-palette"></i> Skin Studio</button>
+        </div>
       </header>
-      <div class="card hermes-terminal-card">
-        <div class="hermes-terminal-toolbar">
-          <div class="hermes-terminal-state">
-            <span id="hermesTuiDot" class="status-dot"></span>
-            <span id="hermesTuiStatus">Checking Hermes…</span>
+
+      <div class="hermes-view active" data-hermes-view="chat">
+        <div class="card hermes-terminal-card">
+          <div class="hermes-terminal-toolbar">
+            <div class="hermes-terminal-state">
+              <span id="hermesTuiDot" class="status-dot"></span>
+              <span id="hermesTuiStatus">Checking Hermes…</span>
+            </div>
+            <label class="hermes-workspace-label">
+              Workspace <span class="hermes-workspace-note" title="Changing the workspace requires stopping and restarting the Hermes TUI.">(stop &amp; restart to change)</span>
+              <input id="hermesWorkspace" class="mono" type="text" spellcheck="false" />
+            </label>
+            <button id="hermesTuiStart" class="btn primary"><i class="fa-solid fa-play"></i> Start</button>
+            <button id="hermesTuiRestart" class="btn" disabled><i class="fa-solid fa-rotate"></i> Restart</button>
+            <button id="hermesTuiStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
           </div>
-          <label class="hermes-workspace-label">
-            Workspace <span class="hermes-workspace-note" title="Changing the workspace requires stopping and restarting the Hermes TUI.">(stop &amp; restart to change)</span>
-            <input id="hermesWorkspace" class="mono" type="text" spellcheck="false" />
-          </label>
-          <button id="hermesTuiStart" class="btn primary"><i class="fa-solid fa-play"></i> Start</button>
-          <button id="hermesTuiRestart" class="btn" disabled><i class="fa-solid fa-rotate"></i> Restart</button>
-          <button id="hermesTuiStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+          <div class="hermes-terminal-hints">
+            <span id="hermesTuiModel" class="mono">No loaded model</span>
+            <span>Use <code>/model</code> inside Hermes to switch between local, Claude, and Codex.</span>
+            <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
+          </div>
+          <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
         </div>
-        <div class="hermes-terminal-hints">
-          <span id="hermesTuiModel" class="mono">No loaded model</span>
-          <span>Use <code>/model</code> inside Hermes to switch between local, Claude, and Codex.</span>
-          <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
+      </div>
+
+      <div class="hermes-view" data-hermes-view="skins" hidden>
+        <div class="card hermes-skin-card">
+          <div class="hermes-skin-toolbar">
+            <div class="hermes-terminal-state">
+              <span id="hermesModDot" class="status-dot"></span>
+              <span id="hermesModStatus">Checking Skin Studio…</span>
+            </div>
+            <div class="hermes-skin-meta">
+              <span><strong>Target:</strong> Spark Studio profile</span>
+              <span class="mono" id="hermesModProfile">data/agent-lab/hermes</span>
+              <span><strong>Active skin:</strong> <span class="mono" id="hermesModActiveSkin">default</span></span>
+            </div>
+            <div class="hermes-skin-actions">
+              <button id="hermesModInstall" class="btn primary" hidden><i class="fa-solid fa-download"></i> Install add-on</button>
+              <button id="hermesModStart" class="btn" hidden><i class="fa-solid fa-play"></i> Start</button>
+              <button id="hermesModStop" class="btn danger" hidden><i class="fa-solid fa-stop"></i> Stop</button>
+              <button id="hermesModApply" class="btn primary" disabled><i class="fa-solid fa-rotate"></i> Restart Chat to apply</button>
+              <button id="hermesModOpenChat" class="btn"><i class="fa-solid fa-terminal"></i> Open Chat</button>
+            </div>
+          </div>
+          <div id="hermesModNotice" class="hermes-skin-notice muted">Skin Studio edits only Spark Studio's isolated Hermes profile. Your personal <code>~/.hermes</code> remains unchanged.</div>
+          <div class="hermes-skin-frame-wrap">
+            <div id="hermesModPlaceholder" class="hermes-skin-placeholder">
+              <i class="fa-solid fa-palette"></i>
+              <strong>Skin Studio is ready to install</strong>
+              <span>The pinned add-on is installed locally under Spark Studio data and starts only when you open this view.</span>
+            </div>
+            <iframe id="hermesModFrame" title="Hermes Skin Studio" sandbox="allow-scripts allow-forms allow-modals allow-downloads" allow="clipboard-write" hidden></iframe>
+          </div>
         </div>
-        <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
       </div>
     </section>
 

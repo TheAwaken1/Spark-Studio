@@ -75,7 +75,7 @@ $$('.tab').forEach((t) =>
     if (t.dataset.tab === 'logs') refreshRuns();
     if (t.dataset.tab === 'bench') refreshBenchTab();
     if (t.dataset.tab === 'agents') refreshAgents();
-    if (t.dataset.tab === 'hermes') refreshHermesTui(true);
+    if (t.dataset.tab === 'hermes') refreshHermesPanel();
     if (t.dataset.tab === 'cluster') refreshCluster();
     if (t.dataset.tab !== 'cluster') stopClusterMonitor(); // one ssh-fanout stream only while watching
     if (t.dataset.tab === 'forge') refreshForgeSuggest();
@@ -3929,6 +3929,14 @@ const hermesTui = {
   autoStarted: false,
 };
 
+const hermesMod = {
+  busy: false,
+  iframeLoaded: false,
+  autoStartAttempted: false,
+  activeView: 'chat',
+  poller: null,
+};
+
 function setHermesTuiState(message, state = '') {
   const dot = $('#hermesTuiDot');
   $('#hermesTuiStatus').textContent = message;
@@ -4090,13 +4098,170 @@ function stopHermesTui() {
   hermesTui.socket?.close(1000, 'Stopped from Spark Studio');
 }
 
+function restartHermesTui() {
+  const socket = hermesTui.socket;
+  if (!socket) {
+    startHermesTui();
+    return;
+  }
+  socket.addEventListener('close', () => setTimeout(startHermesTui, 120), { once: true });
+  socket.close(1000, 'Restarted from Spark Studio');
+}
+
 $('#hermesTuiStart').addEventListener('click', startHermesTui);
-$('#hermesTuiRestart').addEventListener('click', () => {
-  stopHermesTui();
-  setTimeout(startHermesTui, 250);
-});
+$('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);
 window.addEventListener('beforeunload', stopHermesTui);
+
+
+// ---------- Hermes Skin Studio -------------------------------------------
+function setHermesModState(message, state = '') {
+  const dot = $('#hermesModDot');
+  $('#hermesModStatus').textContent = message;
+  dot.classList.toggle('ready', state === 'ready');
+  dot.classList.toggle('error', state === 'error');
+}
+
+function loadHermesModFrame() {
+  const frame = $('#hermesModFrame');
+  if (!hermesMod.iframeLoaded) {
+    frame.src = '/api/hermes-mod/ui/';
+    hermesMod.iframeLoaded = true;
+  }
+  frame.hidden = false;
+  $('#hermesModPlaceholder').hidden = true;
+}
+
+function unloadHermesModFrame(message = '') {
+  const frame = $('#hermesModFrame');
+  if (hermesMod.iframeLoaded) frame.src = 'about:blank';
+  hermesMod.iframeLoaded = false;
+  frame.hidden = true;
+  const placeholder = $('#hermesModPlaceholder');
+  placeholder.hidden = false;
+  if (message) placeholder.querySelector('span').textContent = message;
+}
+
+function renderHermesModStatus(status) {
+  $('#hermesModProfile').textContent = status.profile || 'data/agent-lab/hermes';
+  $('#hermesModActiveSkin').textContent = status.active_skin || 'default';
+  $('#hermesModInstall').hidden = status.installed;
+  $('#hermesModStart').hidden = !status.installed || status.running;
+  $('#hermesModStop').hidden = !status.running;
+  $('#hermesModApply').disabled = !status.healthy;
+
+  if (!status.node || !status.npm) {
+    setHermesModState('Node.js and npm are required', 'error');
+    unloadHermesModFrame('Install Node.js and npm, then reopen Skin Studio.');
+  } else if (!status.installed) {
+    setHermesModState(`Add-on ${status.pinned_version} is not installed`);
+    unloadHermesModFrame('Install the pinned add-on once; it stays local to Spark Studio data.');
+  } else if (status.healthy) {
+    setHermesModState(`Skin Studio ${status.installed_version} is running`, 'ready');
+    loadHermesModFrame();
+  } else if (status.state === 'starting') {
+    setHermesModState('Starting Skin Studio…');
+  } else if (status.error) {
+    setHermesModState(status.error, 'error');
+    unloadHermesModFrame(status.log_tail?.at(-1) || status.error);
+  } else {
+    setHermesModState(`Skin Studio ${status.installed_version} is stopped`);
+    unloadHermesModFrame('Start Skin Studio to open the visual Hermes skin editor.');
+  }
+
+  const runtime = status.skin_engine_found
+    ? 'Hermes skin engine detected. Images are selected in this browser, including from another LAN device.'
+    : 'The visual editor works, but the Hermes skin engine was not detected; reinstall Hermes if generated previews are incomplete.';
+  $('#hermesModNotice').innerHTML = `${escapeHtml(runtime)} Target: <code>${escapeHtml(status.profile || '')}</code>. Your personal <code>~/.hermes</code> remains unchanged.`;
+}
+
+async function refreshHermesMod(autoStart = false) {
+  if (hermesMod.busy) return;
+  try {
+    const status = await api('/hermes-mod/status');
+    renderHermesModStatus(status);
+    if (autoStart && status.installed && !status.running && !hermesMod.autoStartAttempted) {
+      hermesMod.autoStartAttempted = true;
+      await runHermesModAction('start');
+    }
+  } catch (error) {
+    setHermesModState(`Skin Studio status unavailable: ${error.message}`, 'error');
+    unloadHermesModFrame(error.message);
+  }
+}
+
+async function runHermesModAction(action) {
+  if (hermesMod.busy) return;
+  hermesMod.busy = true;
+  const labels = {
+    install: 'Installing pinned Hermes Mod…',
+    start: 'Starting Skin Studio…',
+    stop: 'Stopping Skin Studio…',
+  };
+  setHermesModState(labels[action] || 'Working…');
+  $$('#hermesModInstall, #hermesModStart, #hermesModStop').forEach((button) => { button.disabled = true; });
+  try {
+    if (action === 'install') {
+      await api('/hermes-mod/install', { method: 'POST' });
+      await api('/hermes-mod/start', { method: 'POST' });
+      hermesMod.autoStartAttempted = true;
+    } else {
+      await api(`/hermes-mod/${action}`, { method: 'POST' });
+      if (action === 'start') hermesMod.autoStartAttempted = true;
+      if (action === 'stop') hermesMod.autoStartAttempted = false;
+    }
+  } catch (error) {
+    setHermesModState(`${labels[action] || action} failed: ${error.message}`, 'error');
+  } finally {
+    hermesMod.busy = false;
+    $$('#hermesModInstall, #hermesModStart, #hermesModStop').forEach((button) => { button.disabled = false; });
+    await refreshHermesMod(false);
+  }
+}
+
+function setHermesView(view) {
+  hermesMod.activeView = view === 'skins' ? 'skins' : 'chat';
+  $$('[data-hermes-target]').forEach((button) => {
+    const active = button.dataset.hermesTarget === hermesMod.activeView;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-selected', String(active));
+  });
+  $$('[data-hermes-view]').forEach((panel) => {
+    const active = panel.dataset.hermesView === hermesMod.activeView;
+    panel.classList.toggle('active', active);
+    panel.hidden = !active;
+  });
+  if (hermesMod.activeView === 'skins') {
+    refreshHermesMod(true);
+    if (!hermesMod.poller) {
+      hermesMod.poller = setInterval(() => {
+        if ($('.tab.active')?.dataset.tab === 'hermes' && hermesMod.activeView === 'skins') {
+          refreshHermesMod(false);
+        }
+      }, 2500);
+    }
+  } else {
+    refreshHermesTui(false);
+    setTimeout(() => { try { hermesTui.fit?.fit(); } catch { /* hidden layout settling */ } }, 20);
+  }
+}
+
+function refreshHermesPanel() {
+  if (hermesMod.activeView === 'skins') refreshHermesMod(true);
+  else refreshHermesTui(true);
+}
+
+$$('[data-hermes-target]').forEach((button) => {
+  button.addEventListener('click', () => setHermesView(button.dataset.hermesTarget));
+});
+$('#hermesModInstall').addEventListener('click', () => runHermesModAction('install'));
+$('#hermesModStart').addEventListener('click', () => runHermesModAction('start'));
+$('#hermesModStop').addEventListener('click', () => runHermesModAction('stop'));
+$('#hermesModOpenChat').addEventListener('click', () => setHermesView('chat'));
+$('#hermesModApply').addEventListener('click', () => {
+  setHermesView('chat');
+  restartHermesTui();
+});
 
 // ---------- Engine chat tab ----------------------------------------------
 const wgAttachments = [];

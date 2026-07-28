@@ -66,6 +66,25 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(config["agent"]["max_turns"], 17)
         self.assertNotIn("mcp_servers", config)
 
+    def test_config_refresh_preserves_skin_studio_selection(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp) / "hermes-profile"
+            hermes_home.mkdir()
+            (hermes_home / "config.yaml").write_text(
+                "model:\n  default: old-model\ndisplay:\n  skin: ares\n  compact: true\n",
+                encoding="utf-8",
+            )
+            with mock.patch.object(agentlab, "HERMES_HOME", hermes_home):
+                path = agentlab._write_hermes_config(
+                    "http://127.0.0.1:9000", "new-model", 19
+                )
+                active_skin = agentlab.active_hermes_skin()
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(config["model"]["default"], "new-model")
+        self.assertEqual(config["display"], {"skin": "ares", "compact": True})
+        self.assertEqual(active_skin, "ares")
+
     def test_interactive_config_exposes_only_sparkstudio_search(self):
         with tempfile.TemporaryDirectory() as tmp:
             hermes_home = Path(tmp) / "hermes-profile"
