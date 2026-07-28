@@ -284,7 +284,14 @@ def hermes_status(endpoint: dict[str, Any] | None = None) -> dict[str, Any]:
     return status
 
 
-def _write_hermes_config(base_url: str, model: str, max_turns: int) -> Path:
+def _write_hermes_config(
+    base_url: str,
+    model: str,
+    max_turns: int,
+    *,
+    studio_url: str = "http://127.0.0.1:7860",
+    enable_search: bool = False,
+) -> Path:
     HERMES_HOME.mkdir(parents=True, exist_ok=True)
     config = {
         "model": {
@@ -301,6 +308,26 @@ def _write_hermes_config(base_url: str, model: str, max_turns: int) -> Path:
         },
         "agent": {"max_turns": max_turns},
     }
+    if enable_search:
+        config["mcp_servers"] = {
+            "sparkstudio": {
+                "command": sys.executable,
+                "args": [
+                    str(APP_DIR / "sparkstudio_mcp.py"),
+                    "--studio-url",
+                    studio_url.rstrip("/"),
+                ],
+                "enabled": True,
+                "timeout": 75,
+                "connect_timeout": 20,
+                "supports_parallel_tool_calls": True,
+                "tools": {
+                    "include": ["web_search"],
+                    "resources": False,
+                    "prompts": False,
+                },
+            }
+        }
     path = HERMES_HOME / "config.yaml"
     payload = yaml.safe_dump(config, sort_keys=False)
     with _CONFIG_LOCK:
@@ -352,7 +379,7 @@ def build_hermes_interactive_command(
         "--model",
         model,
         "--toolsets",
-        "file,terminal",
+        "file,terminal,mcp-sparkstudio",
         "--checkpoints",
         "--max-turns",
         str(max_turns),
@@ -376,7 +403,13 @@ def launch_hermes(
     workspace = repo.expanduser().resolve()
     if not workspace.is_dir():
         raise ValueError(f"repository directory does not exist: {workspace}")
-    _write_hermes_config(endpoint["base_url"], endpoint["model"], max_turns)
+    _write_hermes_config(
+        endpoint["base_url"],
+        endpoint["model"],
+        max_turns,
+        studio_url=endpoint.get("studio_url") or "http://127.0.0.1:7860",
+        enable_search=True,
+    )
     env = os.environ.copy()
     env.update(
         {

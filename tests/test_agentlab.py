@@ -43,7 +43,7 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(command[:2], ["hermes", "chat"])
         self.assertEqual(command[command.index("--model") + 1], "current-model")
         self.assertEqual(command[command.index("--max-turns") + 1], "55")
-        self.assertIn("file,terminal", command)
+        self.assertIn("file,terminal,mcp-sparkstudio", command)
         self.assertIn("--checkpoints", command)
         self.assertNotIn("--query", command)
         self.assertNotIn("--yolo", command)
@@ -64,6 +64,26 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(config["approvals"]["mode"], "smart")
         self.assertTrue(config["approvals"]["deny"])
         self.assertEqual(config["agent"]["max_turns"], 17)
+        self.assertNotIn("mcp_servers", config)
+
+    def test_interactive_config_exposes_only_sparkstudio_search(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp) / "hermes-profile"
+            with mock.patch.object(agentlab, "HERMES_HOME", hermes_home):
+                path = agentlab._write_hermes_config(
+                    "http://127.0.0.1:8000/v1",
+                    "fixture-model",
+                    25,
+                    studio_url="http://127.0.0.1:7860/",
+                    enable_search=True,
+                )
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        server = config["mcp_servers"]["sparkstudio"]
+        self.assertEqual(server["args"][-2:], ["--studio-url", "http://127.0.0.1:7860"])
+        self.assertEqual(server["tools"]["include"], ["web_search"])
+        self.assertFalse(server["tools"]["resources"])
+        self.assertFalse(server["tools"]["prompts"])
 
 
 class AgentLabFixtureTests(unittest.TestCase):
@@ -177,6 +197,15 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(direct.repo, "/tmp/project")
         self.assertIs(nested.func, sparkstudio_cli.cmd_agent_chat)
         self.assertEqual(nested.max_turns, 25)
+
+    def test_search_options_parse(self):
+        args = sparkstudio_cli.build_parser().parse_args(
+            ["search", "DGX Spark news", "--limit", "7", "--enrich"]
+        )
+        self.assertIs(args.func, sparkstudio_cli.cmd_search)
+        self.assertEqual(args.query, "DGX Spark news")
+        self.assertEqual(args.limit, 7)
+        self.assertTrue(args.enrich)
 
 
 if __name__ == "__main__":

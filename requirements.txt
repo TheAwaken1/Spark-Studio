@@ -4,6 +4,7 @@ sse-starlette>=2.1
 pydantic>=2.12.5,<3
 httpx>=0.28
 huggingface_hub>=1.25.1
+mcp>=1.28.1,<2
 python-multipart>=0.0.20
 hf_transfer>=0.1.9
 psutil>=6.1

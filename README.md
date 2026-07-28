@@ -267,6 +267,8 @@ Start Spark Studio, launch a tool-capable model, and check the full path:
 ```bash
 sparkstudio status
 sparkstudio models
+sparkstudio search "latest NVIDIA DGX Spark documentation"
+sparkstudio search "latest NVIDIA DGX Spark documentation" --enrich
 sparkstudio chat "Write a Python function that validates a recipe"
 sparkstudio bench speed
 sparkstudio bench tools
@@ -274,10 +276,20 @@ sparkstudio agent doctor
 sparkstudio hermes
 ```
 
+`sparkstudio search` uses the dashboard's existing `/api/search` pipeline:
+configured SearXNG first, bundled SearXNG next, then DuckDuckGo fallback. Add
+`--enrich` to fetch readable text from the top pages, `--limit 1..10` to size
+the result set, or put the global `--json` before `search` for automation.
+
 Use `sparkstudio hermes` (alias: `sparkstudio agent chat`) for an interactive
 Hermes session that follows the model currently loaded in the dashboard. Bare
 `hermes` intentionally reads your personal `~/.hermes/config.yaml`; if that
 profile contains an older engine port, it will continue trying the old model.
+Interactive Spark Studio sessions also receive one read-only MCP tool,
+`mcp__sparkstudio__web_search`. It routes every query through Spark Studio's
+SearXNG/DDG pipeline. The MCP server exposes no generic browser, shell,
+credential, or write API. Search results are treated as untrusted source
+material and include their URLs for citation.
 
 Run the deterministic coding smoke suite through Hermes:
 
@@ -309,11 +321,13 @@ prints the retained workspace and diff. Pass `--in-place` only when you want
 Hermes to edit the original checkout.
 
 Agent Lab uses a dedicated profile at `data/agent-lab/hermes` so it never
-rewrites your personal Hermes settings. The default enables smart approvals,
-restricts the advertised tools to file and terminal, adds denials for common
-high-risk commands, and keeps Hermes checkpoints. This is process guidance,
-not an OS sandbox: review generated changes before using them and avoid
-`--unsafe-yolo` unless the workspace is disposable.
+rewrites your personal Hermes settings. Interactive `sparkstudio hermes` adds
+the single search MCP tool to `file,terminal`; unattended `agent run` and
+`agent eval` remain restricted to `file,terminal` and explicitly prohibit
+network use. Smart approvals, denials for common high-risk commands, and
+Hermes checkpoints remain enabled. This is process guidance, not an OS
+sandbox: review generated changes before using them and avoid `--unsafe-yolo`
+unless the workspace is disposable.
 
 For an external OpenAI-compatible server, place global overrides before the
 command: `sparkstudio --base-url http://127.0.0.1:41293/v1 --model MODEL agent eval`.

@@ -13,6 +13,7 @@ from typing import Any
 import httpx
 
 import agentlab
+import studio_search
 
 DEFAULT_STUDIO_URL = os.environ.get("SPARK_STUDIO_URL", "http://127.0.0.1:7860")
 
@@ -117,6 +118,24 @@ def cmd_chat(args: argparse.Namespace) -> int:
     else:
         message = ((result.get("choices") or [{}])[0].get("message") or {})
         print(message.get("content") or "")
+    return 0
+
+
+def cmd_search(args: argparse.Namespace) -> int:
+    try:
+        payload = studio_search.search(
+            args.studio_url,
+            args.query,
+            limit=args.limit,
+            enrich=args.enrich,
+            timeout=args.timeout,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise _request_error(exc) from exc
+    if args.json:
+        _json(payload)
+    else:
+        print(studio_search.format_results(payload))
     return 0
 
 
@@ -348,6 +367,13 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.set_defaults(func=cmd_doctor)
     models = commands.add_parser("models", help="list models reported by the active endpoint")
     models.set_defaults(func=cmd_models)
+
+    search = commands.add_parser("search", help="search via Spark Studio's SearXNG/DDG pipeline")
+    search.add_argument("query", help="web search query")
+    search.add_argument("--limit", type=int, default=5, help="number of results (1-10)")
+    search.add_argument("--enrich", action="store_true", help="fetch readable text from top result pages")
+    search.add_argument("--timeout", type=float, default=60)
+    search.set_defaults(func=cmd_search)
 
     hermes = commands.add_parser("hermes", help="launch Hermes with the active Spark Studio model")
     hermes.add_argument("--repo", default=".", help="workspace path (default: current directory)")
