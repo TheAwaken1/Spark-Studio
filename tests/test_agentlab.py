@@ -36,6 +36,18 @@ class AgentLabConfigurationTests(unittest.TestCase):
         )
         self.assertIn("--yolo", command)
 
+    def test_interactive_command_uses_current_model_and_no_query(self):
+        command = agentlab.build_hermes_interactive_command(
+            "hermes", "current-model", max_turns=55
+        )
+        self.assertEqual(command[:2], ["hermes", "chat"])
+        self.assertEqual(command[command.index("--model") + 1], "current-model")
+        self.assertEqual(command[command.index("--max-turns") + 1], "55")
+        self.assertIn("file,terminal", command)
+        self.assertIn("--checkpoints", command)
+        self.assertNotIn("--query", command)
+        self.assertNotIn("--yolo", command)
+
     def test_config_is_written_to_dedicated_profile(self):
         with tempfile.TemporaryDirectory() as tmp:
             hermes_home = Path(tmp) / "hermes-profile"
@@ -156,6 +168,15 @@ class CliParserTests(unittest.TestCase):
         self.assertEqual(args.agent_command, "eval")
         self.assertEqual(args.jobs, 2)
         self.assertEqual(args.trials, 3)
+
+    def test_interactive_hermes_aliases_parse(self):
+        parser = sparkstudio_cli.build_parser()
+        direct = parser.parse_args(["hermes", "--repo", "/tmp/project"])
+        nested = parser.parse_args(["agent", "chat", "--max-turns", "25"])
+        self.assertIs(direct.func, sparkstudio_cli.cmd_agent_chat)
+        self.assertEqual(direct.repo, "/tmp/project")
+        self.assertIs(nested.func, sparkstudio_cli.cmd_agent_chat)
+        self.assertEqual(nested.max_turns, 25)
 
 
 if __name__ == "__main__":

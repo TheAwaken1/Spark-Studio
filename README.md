@@ -208,13 +208,14 @@ source ~/.bashrc
 export PATH="$HOME/.local/bin:$PATH"
 which hermes
 sparkstudio agent doctor
+sparkstudio hermes
 sparkstudio agent cases
 sparkstudio agent eval --suite coding-smoke
 ```
 
 Spark Studio rewrites its isolated Hermes profile with the currently active
-engine URL before each Agent Lab run, so a later port change does not require
-editing your personal Hermes configuration.
+engine URL before every Agent Lab run and before `sparkstudio hermes`, so a
+later port change does not require editing your personal Hermes configuration.
 
 ## Running
 
@@ -267,7 +268,13 @@ sparkstudio chat "Write a Python function that validates a recipe"
 sparkstudio bench speed
 sparkstudio bench tools
 sparkstudio agent doctor
+sparkstudio hermes
 ```
+
+Use `sparkstudio hermes` (alias: `sparkstudio agent chat`) for an interactive
+Hermes session that follows the model currently loaded in the dashboard. Bare
+`hermes` intentionally reads your personal `~/.hermes/config.yaml`; if that
+profile contains an older engine port, it will continue trying the old model.
 
 Run the deterministic coding smoke suite through Hermes:
 

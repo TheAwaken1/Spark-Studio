@@ -207,6 +207,21 @@ def cmd_agent_doctor(args: argparse.Namespace) -> int:
     return 0 if status["installed"] and endpoint else 1
 
 
+def cmd_agent_chat(args: argparse.Namespace) -> int:
+    if args.json:
+        raise RuntimeError("--json cannot be used with interactive Hermes")
+    endpoint = _endpoint(args)
+    print(f"Hermes model: {endpoint['model']}")
+    print(f"Hermes endpoint: {endpoint['base_url']}")
+    print(f"Isolated profile: {agentlab.HERMES_HOME}")
+    return agentlab.launch_hermes(
+        endpoint,
+        Path(args.repo),
+        max_turns=args.max_turns,
+        unsafe_yolo=args.unsafe_yolo,
+    )
+
+
 def _print_agent_run(result: dict[str, Any]) -> None:
     print(f"Run: {result['id']} · {result['status']}")
     print(f"Model: {result['model']}")
@@ -334,6 +349,12 @@ def build_parser() -> argparse.ArgumentParser:
     models = commands.add_parser("models", help="list models reported by the active endpoint")
     models.set_defaults(func=cmd_models)
 
+    hermes = commands.add_parser("hermes", help="launch Hermes with the active Spark Studio model")
+    hermes.add_argument("--repo", default=".", help="workspace path (default: current directory)")
+    hermes.add_argument("--max-turns", type=int, default=90)
+    hermes.add_argument("--unsafe-yolo", action="store_true", help="disable Hermes command approvals (not recommended)")
+    hermes.set_defaults(func=cmd_agent_chat)
+
     chat = commands.add_parser("chat", help="send one prompt directly to the loaded model")
     chat.add_argument("prompt", help="prompt text, or - to read stdin")
     chat.add_argument("--max-tokens", type=int, default=1024)
@@ -355,6 +376,11 @@ def build_parser() -> argparse.ArgumentParser:
     agent_commands = agent.add_subparsers(dest="agent_command", required=True)
     agent_doctor = agent_commands.add_parser("doctor", help="check Hermes and the active model")
     agent_doctor.set_defaults(func=cmd_agent_doctor)
+    agent_chat = agent_commands.add_parser("chat", help="launch interactive Hermes with the active model")
+    agent_chat.add_argument("--repo", default=".", help="workspace path (default: current directory)")
+    agent_chat.add_argument("--max-turns", type=int, default=90)
+    agent_chat.add_argument("--unsafe-yolo", action="store_true", help="disable Hermes command approvals (not recommended)")
+    agent_chat.set_defaults(func=cmd_agent_chat)
     cases = agent_commands.add_parser("cases", help="list deterministic evaluation cases")
     cases.set_defaults(func=cmd_agent_cases)
 

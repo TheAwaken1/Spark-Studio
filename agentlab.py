@@ -339,6 +339,61 @@ def build_hermes_command(
     return command
 
 
+def build_hermes_interactive_command(
+    binary: str,
+    model: str,
+    *,
+    max_turns: int = 90,
+    unsafe_yolo: bool = False,
+) -> list[str]:
+    command = [
+        binary,
+        "chat",
+        "--model",
+        model,
+        "--toolsets",
+        "file,terminal",
+        "--checkpoints",
+        "--max-turns",
+        str(max_turns),
+    ]
+    if unsafe_yolo:
+        command.append("--yolo")
+    return command
+
+
+def launch_hermes(
+    endpoint: dict[str, Any],
+    repo: Path,
+    *,
+    max_turns: int = 90,
+    unsafe_yolo: bool = False,
+) -> int:
+    """Launch interactive Hermes against Spark Studio's current model."""
+    binary = find_hermes()
+    if not binary:
+        raise RuntimeError(f"Hermes Agent is not installed. Run: {HERMES_INSTALL}")
+    workspace = repo.expanduser().resolve()
+    if not workspace.is_dir():
+        raise ValueError(f"repository directory does not exist: {workspace}")
+    _write_hermes_config(endpoint["base_url"], endpoint["model"], max_turns)
+    env = os.environ.copy()
+    env.update(
+        {
+            "HERMES_HOME": str(HERMES_HOME),
+            "HERMES_WRITE_SAFE_ROOT": os.pathsep.join((str(workspace), str(HERMES_HOME))),
+        }
+    )
+    command = build_hermes_interactive_command(
+        binary,
+        endpoint["model"],
+        max_turns=max_turns,
+        unsafe_yolo=unsafe_yolo,
+    )
+    completed = subprocess.run(command, cwd=str(workspace), env=env, check=False)
+    return completed.returncode
+
+
 class _TelemetrySampler:
     def __init__(self) -> None:
         self.samples: list[dict[str, Any]] = []
