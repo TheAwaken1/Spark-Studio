@@ -2453,6 +2453,16 @@ def _require_hermes_addon_access(request: Request) -> None:
         raise HTTPException(403, reason)
 
 
+@app.post("/api/agentlab/install")
+async def agentlab_install(request: Request):
+    """Install the official Hermes CLI without requiring a terminal."""
+    _require_hermes_addon_access(request)
+    result = await asyncio.to_thread(agentlab.install_hermes)
+    if not result.get("installed"):
+        raise HTTPException(500, result.get("error") or "Hermes installation failed")
+    return result
+
+
 class HermesLearningReq(BaseModel):
     memory_enabled: bool | None = None
     user_profile_enabled: bool | None = None

@@ -157,6 +157,23 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         bridge.close.assert_called_once_with()
         self.assertNotIn(session_id, server._HTTP_TERMINAL_SESSIONS)
 
+    def test_hermes_install_api_runs_guarded_official_installer(self):
+        installed = {
+            "installed": True,
+            "ok": True,
+            "binary": "/home/test/.local/bin/hermes",
+            "version": "1.2.3",
+        }
+        client = TestClient(server.app)
+        with mock.patch.object(
+            server.agentlab, "install_hermes", return_value=installed
+        ) as install:
+            response = client.post("/api/agentlab/install")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["installed"])
+        install.assert_called_once_with()
+
     def test_learning_api_defaults_to_profile_on_and_persists_choice(self):
         client = TestClient(server.app)
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(

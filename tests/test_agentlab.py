@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -18,6 +19,39 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(
             agentlab.api_base("http://127.0.0.1:8000/v1"),
             "http://127.0.0.1:8000/v1",
+        )
+
+    def test_install_hermes_uses_fixed_official_installer(self):
+        statuses = [
+            {"installed": False, "binary": None},
+            {
+                "installed": True,
+                "binary": "/home/test/.local/bin/hermes",
+                "ok": True,
+                "version": "1.2.3",
+            },
+        ]
+        completed = subprocess.CompletedProcess(
+            ["/bin/bash", "-lc", agentlab.HERMES_INSTALL],
+            0,
+            stdout="installed",
+            stderr="",
+        )
+        with (
+            mock.patch.object(agentlab, "hermes_status", side_effect=statuses),
+            mock.patch.object(
+                agentlab.shutil,
+                "which",
+                side_effect=lambda name: f"/usr/bin/{name}",
+            ),
+            mock.patch.object(agentlab, "_run", return_value=completed) as run,
+        ):
+            result = agentlab.install_hermes()
+
+        self.assertTrue(result["installed"])
+        self.assertEqual(result["install_output"], "installed")
+        run.assert_called_once_with(
+            ["/usr/bin/bash", "-lc", agentlab.HERMES_INSTALL], timeout=900
         )
 
     def test_hermes_command_uses_constrained_toolset(self):

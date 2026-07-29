@@ -133,6 +133,10 @@ body {
   overflow: hidden;
   font-size: 12px;
 }
+.vitals-widget.telemetry-reconnecting {
+  border-color: rgba(255, 183, 74, 0.45);
+}
+.vitals-widget.telemetry-reconnecting .vitals-stats-text { color: var(--warn); }
 .vitals-header {
   display: flex;
   align-items: center;

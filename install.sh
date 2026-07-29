@@ -18,7 +18,7 @@
 # Profiles:
 #   basic        dashboard + recipes + local runs (Python env only)
 #   recommended  basic + sparkrun CLI (community recipes, kernel tuning)
-#   full         recommended + llama-benchy + Claude/Codex CLIs + Hermes Agent
+#   full         recommended + benches + agent CLIs + Hermes + Hermes Mod
 
 set -euo pipefail
 
@@ -98,8 +98,8 @@ command -v docker >/dev/null 2>&1 \
 
 if [[ "$PROFILE" == "full" ]]; then
     command -v npm >/dev/null 2>&1 \
-        && ok "npm found (needed for Claude/Codex agent CLIs)" \
-        || warn "npm not found — agent CLIs will be skipped (install Node.js later to enable them)"
+        && ok "npm found (needed for agent CLIs and Hermes Skin Studio)" \
+        || warn "npm not found — Claude/Codex and Hermes Skin Studio will be skipped"
 fi
 
 # ----- clone / update ---------------------------------------------------------
@@ -158,6 +158,16 @@ if [[ "$PROFILE" == "full" ]]; then
         fi
     else
         ok "Hermes Agent already installed"
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        if [[ "$INTERACTIVE" != "1" ]] \
+                || ask "Install the pinned Hermes Skin Studio add-on? [Y/n]" y; then
+            npm install --prefix data/addons/hermes-mod --save-exact --no-audit --no-fund hermes-mod@0.2.0 \
+                && ok "Hermes Skin Studio add-on installed" \
+                || warn "Hermes Mod install did not finish — install it later with one click in Hermes → Skin Studio"
+        fi
+    else
+        warn "Install Node.js + npm later, then use Hermes → Skin Studio → Install add-on"
     fi
 fi
 

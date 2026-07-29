@@ -114,7 +114,7 @@ install optional pieces per profile:
 |---|---|
 | `--basic` | dashboard + recipes + local runs |
 | `--recommended` *(default)* | + sparkrun CLI (community recipes, kernel tuning) |
-| `--full` | + llama-benchy + Claude/Codex agent CLIs + Hermes Agent |
+| `--full` | + llama-benchy + Claude/Codex agent CLIs + Hermes Agent + pinned Hermes Mod |
 
 Piped installs (`curl … \| bash`) can't prompt, so they run fully
 non-interactive with the defaults above; use the `bash <(curl …)` form for
@@ -170,7 +170,9 @@ After installing, log in from **Agents & Identities** inside Spark Studio — no
 
 Spark Studio already installs the official Hugging Face CLI. In **Agents & Identities**, click **Log in** under Hugging Face, open the displayed browser URL, and confirm the one-time code. The `hf` CLI owns the saved credential; Spark Studio only checks `hf auth whoami` to display your public username. This enables downloads of private repositories and gated models that your account has accepted access to.
 
-For Agent Lab, install the Hermes CLI used by NVIDIA's DGX Spark playbook:
+For Agent Lab, open **Hermes → Chat** and click **Install Hermes**. Spark Studio
+runs the official per-user installer and detects the CLI automatically. The
+equivalent manual command is:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
@@ -307,6 +309,11 @@ same-origin HTTPS terminal transport when a browser, certificate policy, or
 network proxy rejects WSS. The fallback carries the same PTY bytes, keyboard
 input, resize events, and cleanup behavior; no user setting is required.
 
+The sidebar hardware widget uses a separate, read-only telemetry stream. A
+browser or proxy can briefly reconnect that stream without interrupting Spark
+Studio, the loaded model, or Hermes. The UI keeps the last good reading during
+short retries and labels a longer retry as **Telemetry reconnecting**.
+
 ### Hermes Learning
 
 The **Hermes → Learning** view controls durable knowledge for Spark Studio's
@@ -337,9 +344,12 @@ from the official sparkrun recipe-format documentation, without injecting the
 entire reference into unrelated prompts.
 
 The same **Hermes** area also includes **Skin Studio**, powered by the pinned
-`hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; Spark Studio
-stores it under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
-and embeds it through a sandboxed same-origin bridge. It always targets
+`hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; if Hermes is
+missing, the button installs Hermes first and then continues automatically.
+The `--full` one-command profile preinstalls both. Spark Studio stores the
+add-on under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
+and embeds it through a sandboxed same-origin bridge. Node.js and npm are the
+only add-on prerequisites. It always targets
 `data/agent-lab/hermes`, never your personal `~/.hermes`. Create or load a skin,
 click **Activate** inside Skin Studio, then choose **Restart Chat to apply**.
 Spark Studio automatically converts multi-line logo and hero color markup to
@@ -792,6 +802,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `DELETE` | `/api/hermes-mod/skins/{name}` | Delete one custom skin from the isolated Spark Studio Hermes profile |
 | `GET` `POST` `PUT` `DELETE` | `/api/hermes-mod/ui/...` | Sandboxed, token-protected iframe bridge to Hermes Mod |
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
+| `POST` | `/api/agentlab/install` | Run the fixed official Hermes per-user installer from the private dashboard |
 | `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |
 | `GET` `PUT` | `/api/agentlab/learning` | Isolated Hermes memory, user-profile, skills, session-search, and write-approval preferences |
 | `WS` | `/api/agentlab/terminal` | Byte-safe PTY bridge for the dashboard Hermes Chat tab (same-origin; local-only by default) |

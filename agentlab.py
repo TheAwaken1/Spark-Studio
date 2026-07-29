@@ -36,6 +36,7 @@ HERMES_HOME = DATA_DIR / "hermes"
 WORKSPACES_DIR = DATA_DIR / "workspaces"
 RESULTS_DIR = DATA_DIR / "results"
 _CONFIG_LOCK = threading.Lock()
+_INSTALL_LOCK = threading.Lock()
 
 HERMES_INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/"
@@ -290,6 +291,48 @@ def hermes_status(endpoint: dict[str, Any] | None = None) -> dict[str, Any]:
     status["version"] = (result.stdout or result.stderr).strip()
     status["ok"] = result.returncode == 0
     return status
+
+
+def install_hermes() -> dict[str, Any]:
+    """Install the official Hermes Agent CLI for the current user.
+
+    The command is intentionally fixed to Hermes' official installer and the
+    caller is expected to enforce Spark Studio's local/private-HTTPS access
+    policy. A process-wide lock prevents double-clicks from running two
+    installers against the same user profile.
+    """
+    with _INSTALL_LOCK:
+        current = hermes_status()
+        if current["installed"] and current.get("ok", True):
+            return {**current, "already_installed": True, "install_output": ""}
+        curl = shutil.which("curl")
+        bash = shutil.which("bash")
+        if not curl or not bash:
+            missing = " and ".join(
+                name for name, path in (("curl", curl), ("bash", bash)) if not path
+            )
+            return {**current, "error": f"{missing} is required to install Hermes"}
+        try:
+            result = _run([bash, "-lc", HERMES_INSTALL], timeout=900)
+            output = (result.stdout or result.stderr or "").strip()[-6000:]
+        except subprocess.TimeoutExpired:
+            return {
+                **current,
+                "error": "Hermes installation timed out after 15 minutes",
+            }
+        except (OSError, subprocess.SubprocessError) as exc:
+            return {**current, "error": f"could not run Hermes installer: {exc}"}
+        refreshed = hermes_status()
+        response = {
+            **refreshed,
+            "already_installed": False,
+            "install_output": output,
+        }
+        if result.returncode != 0 or not refreshed["installed"]:
+            response["error"] = output or (
+                f"Hermes installer exited with code {result.returncode}"
+            )
+        return response
 
 
 def _learning_settings_path() -> Path:

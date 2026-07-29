@@ -3933,6 +3933,7 @@ const hermesTui = {
   observer: null,
   retryTimer: null,
   autoStarted: false,
+  installing: false,
 };
 
 const hermesMod = {
@@ -4040,6 +4041,9 @@ async function refreshHermesTui(autoStart = false) {
     const accessAllowed = status.access_allowed !== false;
     const ready = status.installed && status.pty && active?.ready && accessAllowed;
     const running = Boolean(hermesTui.socket || hermesTui.httpSession || hermesTui.httpStarting);
+    const install = $('#hermesInstall');
+    install.hidden = status.installed;
+    install.disabled = hermesTui.installing;
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
     else if (!accessAllowed) setHermesTuiState(status.access_reason || 'Terminal access denied', 'error');
@@ -4053,6 +4057,25 @@ async function refreshHermesTui(autoStart = false) {
     }
   } catch (error) {
     setHermesTuiState(`Status unavailable: ${error.message}`, 'error');
+  }
+}
+
+async function installHermes() {
+  if (hermesTui.installing) return;
+  hermesTui.installing = true;
+  const button = $('#hermesInstall');
+  button.disabled = true;
+  setHermesTuiState('Installing official Hermes Agent… this can take a few minutes');
+  try {
+    const result = await api('/agentlab/install', { method: 'POST' });
+    setHermesTuiState(`Hermes ${result.version || ''} installed — ready for local models`, 'ready');
+    button.hidden = true;
+    await refreshHermesTui(false);
+  } catch (error) {
+    setHermesTuiState(`Hermes installation failed: ${error.message}`, 'error');
+  } finally {
+    hermesTui.installing = false;
+    button.disabled = false;
   }
 }
 
@@ -4308,6 +4331,7 @@ function restartHermesTui() {
   socket.close(1000, 'Restarted from Spark Studio');
 }
 
+$('#hermesInstall').addEventListener('click', installHermes);
 $('#hermesTuiStart').addEventListener('click', startHermesTui);
 $('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);
@@ -4367,15 +4391,25 @@ function renderHermesModStatus(status) {
   $('#hermesModProfile').textContent = status.profile || 'data/agent-lab/hermes';
   $('#hermesModActiveSkin').textContent = status.active_skin || 'default';
   renderHermesModSkinOptions(status);
-  $('#hermesModInstall').hidden = status.installed;
-  $('#hermesModStart').hidden = !status.installed || status.running;
+  $('#hermesModInstall').hidden = status.installed && status.skin_engine_found;
+  $('#hermesModStart').hidden = !status.installed || status.running || !status.skin_engine_found;
   $('#hermesModStop').hidden = !status.running;
   $('#hermesModOriginal').disabled = status.active_skin === 'default';
   $('#hermesModApply').disabled = !status.healthy;
+  const install = $('#hermesModInstall');
+  const hasNode = Boolean(status.node && status.npm);
+  install.disabled = !hasNode;
+  install.title = hasNode ? '' : 'Install Node.js and npm first';
+  install.innerHTML = status.skin_engine_found
+    ? '<i class="fa-solid fa-download"></i> Install add-on'
+    : '<i class="fa-solid fa-download"></i> Install Hermes + add-on';
 
   if (!status.node || !status.npm) {
     setHermesModState('Node.js and npm are required', 'error');
     unloadHermesModFrame('Install Node.js and npm, then reopen Skin Studio.');
+  } else if (!status.skin_engine_found) {
+    setHermesModState('Hermes Agent is required');
+    unloadHermesModFrame('Click Install Hermes + add-on; Spark Studio handles both steps.');
   } else if (!status.installed) {
     setHermesModState(`Add-on ${status.pinned_version} is not installed`);
     unloadHermesModFrame('Install the pinned add-on once; it stays local to Spark Studio data.');
@@ -4425,7 +4459,14 @@ async function runHermesModAction(action) {
   $$('#hermesModInstall, #hermesModStart, #hermesModStop').forEach((button) => { button.disabled = true; });
   try {
     if (action === 'install') {
+      const hermes = await api('/agentlab/status');
+      if (!hermes.installed) {
+        setHermesModState('Installing official Hermes Agent first…');
+        await api('/agentlab/install', { method: 'POST' });
+      }
+      setHermesModState('Installing pinned Hermes Mod…');
       await api('/hermes-mod/install', { method: 'POST' });
+      setHermesModState('Starting Skin Studio…');
       await api('/hermes-mod/start', { method: 'POST' });
       hermesMod.autoStartAttempted = true;
     } else {
@@ -5222,16 +5263,36 @@ $('#vitalsToggle').addEventListener('click', () => {
 // Start the SSE stream
 (function _startVitalsStream() {
   const es = new EventSource('/api/spark/vitals');
+  let lastReadingAt = 0;
+  let reconnectNotice = null;
+  const markHealthy = () => {
+    if (reconnectNotice) clearTimeout(reconnectNotice);
+    reconnectNotice = null;
+    $('#vitalsWidget').classList.remove('telemetry-reconnecting');
+    $('#vitalsToggle').title = 'Click to expand live vitals';
+  };
+  es.addEventListener('open', markHealthy);
   es.addEventListener('vitals', (ev) => {
     try {
       const d = JSON.parse(ev.data);
+      lastReadingAt = Date.now();
+      markHealthy();
       _vitals.last = d;
       _updateVitalsUI(d);
     } catch { /* ignore parse errors */ }
   });
   es.addEventListener('error', () => {
-    // Back-off is handled by the browser; just update header text
-    $('#vitalsMemText').textContent = 'reconnecting…';
+    // EventSource retries automatically. Keep the last good reading through a
+    // brief browser/proxy reset so this independent telemetry stream is never
+    // mistaken for the app, model, or Hermes disconnecting.
+    if (reconnectNotice) return;
+    reconnectNotice = setTimeout(() => {
+      reconnectNotice = null;
+      if (lastReadingAt && Date.now() - lastReadingAt < 8000) return;
+      $('#vitalsWidget').classList.add('telemetry-reconnecting');
+      $('#vitalsStatsText').textContent = 'Telemetry reconnecting · model stays online';
+      $('#vitalsToggle').title = 'Hardware telemetry is reconnecting; Spark Studio, the model, and Hermes are unaffected';
+    }, 5000);
   });
 })();
 
