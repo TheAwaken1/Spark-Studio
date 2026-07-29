@@ -21,9 +21,12 @@ cd Spark-Studio
 Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on your LAN). First run sets up the Python environment automatically, then a **setup wizard** checks your system, recommends a model that fits your Spark, and launches it.
 
 > **Security note:** the dashboard has no authentication and binds to all
-> interfaces so your LAN can use it. Anyone on your network can control it —
-> use `./start.sh --host 127.0.0.1` for local-only, and never expose the port
-> to the internet.
+> interfaces so your LAN can use it. Anyone on your network can control it,
+> and — over the HTTPS/Caddy setup — open **Hermes Chat, which is a real
+> interactive shell running as your user**. Only run it on a network where you
+> trust every device (not guest/shared Wi-Fi), use
+> `./start.sh --host 127.0.0.1` for local-only, and never expose the port to
+> the internet.
 
 ```bash
 ./start.sh --doctor   # full system health report at any time
@@ -95,7 +98,7 @@ Your inference engine(s) installed separately:
 Optional extras:
 - [llama-benchy](https://github.com/eugr/llama-benchy) for full benchmark sweeps — `uv pip install --python env/bin/python llama-benchy`
 - [sparkrun](https://github.com/spark-arena/sparkrun) for multi-node community recipes — `uvx sparkrun setup` (guided cluster wizard)
-- [Hermes Agent](https://hermes-agent.nousresearch.com/) for the local-model Agent Lab — `curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash`
+- [Hermes Agent](https://hermes-agent.nousresearch.com/) for the local-model Agent Lab — installed with one click from **Hermes → Chat**, pinned to release `v2026.7.20` (manual command below)
 - **Docker** for spark-vllm-docker recipes and the bundled SearXNG web search
 
 ## Installation
@@ -170,28 +173,29 @@ After installing, log in from **Agents & Identities** inside Spark Studio — no
 
 Spark Studio already installs the official Hugging Face CLI. In **Agents & Identities**, click **Log in** under Hugging Face, open the displayed browser URL, and confirm the one-time code. The `hf` CLI owns the saved credential; Spark Studio only checks `hf auth whoami` to display your public username. This enables downloads of private repositories and gated models that your account has accepted access to.
 
-For Agent Lab, open **Hermes → Chat** and click **Install Hermes**. Spark Studio
-runs the official per-user installer and detects the CLI automatically. The
-equivalent manual command is:
+For Agent Lab, open **Hermes → Chat** and click **Install Hermes** — that's the
+whole setup. Spark Studio runs the official per-user installer (pinned to
+release `v2026.7.20`), detects the CLI automatically, and connects Hermes to
+whatever model is currently loaded. There is no wizard to answer: the isolated
+profile is generated from the live engine endpoint (URL, model id, context
+length) and refreshed automatically before every run, so a changed engine port
+never needs manual editing. The equivalent manual command is:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.20/scripts/install.sh \
+    | bash -s -- --commit 3ef6bbd201263d354fd83ec55b3c306ded2eb72a --non-interactive
 ./start.sh --install-cli
 ```
 
-#### Hermes setup sequence (DGX Spark local model)
+#### Optional: standalone `hermes` outside Spark Studio
 
-Load the model in Spark Studio **before** running the Hermes setup wizard.
-Open **Engine Chat** and copy the endpoint shown for the loaded model. An
-example working endpoint from Spark Studio, make sure to add /v1 to the end of the URL:
-
-```text
-http://127.0.0.1:41293/v1
-```
-
-The engine port is assigned per run and can change after reloading a model, so
-always prefer the current URL shown in Engine Chat. When the Hermes installer
-asks questions, choose:
+**Skip this section unless you also want to use bare `hermes` with your
+personal `~/.hermes` profile.** Nothing in Spark Studio (dashboard Chat,
+`sparkstudio hermes`, Agent Lab benchmarks) requires it. If you do run Hermes'
+own interactive setup wizard for your personal profile, load the model in
+Spark Studio first, copy the endpoint shown in **Engine Chat** (add `/v1`, e.g.
+`http://127.0.0.1:41293/v1` — the port changes per run, so always use the
+current URL), and answer:
 
 | Installer prompt | Answer |
 |---|---|

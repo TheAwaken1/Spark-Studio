@@ -4064,9 +4064,9 @@ async function refreshHermesTui(autoStart = false) {
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
     else if (!accessAllowed) setHermesTuiState(status.access_reason || 'Terminal access denied', 'error');
-    else if (!active) setHermesTuiState('Load a model to start Hermes', 'error');
+    else if (!active) setHermesTuiState('Load a model to connect Hermes', 'error');
     else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
-    else if (!running) setHermesTuiState('Ready to start');
+    else if (!running) setHermesTuiState('Ready to connect to the loaded model');
     document.querySelector('#hermesTuiStart').disabled = !ready || running;
     if (autoStart && ready && !running && !hermesTui.autoStarted) {
       hermesTui.autoStarted = true;
@@ -4085,9 +4085,11 @@ async function installHermes() {
   setHermesTuiState('Installing official Hermes Agent… this can take a few minutes');
   try {
     const result = await api('/agentlab/install', { method: 'POST' });
-    setHermesTuiState(`Hermes ${result.version || ''} installed — ready for local models`, 'ready');
+    setHermesTuiState(`Hermes ${result.version || ''} installed — connecting to the loaded model…`, 'ready');
     button.hidden = true;
-    await refreshHermesTui(false);
+    // Freshly installed: connect to the active model immediately, no extra click.
+    hermesTui.autoStarted = false;
+    await refreshHermesTui(true);
   } catch (error) {
     setHermesTuiState(`Hermes installation failed: ${error.message}`, 'error');
   } finally {
