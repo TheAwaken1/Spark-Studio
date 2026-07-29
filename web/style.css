@@ -990,6 +990,80 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
   flex-direction: column;
 }
 .hermes-view[hidden] { display: none !important; }
+.hermes-learning-card {
+  min-width: 0;
+  flex: 1;
+  padding: 18px;
+  overflow-y: auto;
+}
+.hermes-learning-header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--border);
+}
+.hermes-learning-header p {
+  margin: 7px 0 0 17px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.hermes-learning-header > .mono {
+  color: var(--accent);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+.hermes-learning-callout,
+.hermes-learning-reference {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid rgba(118, 199, 255, 0.22);
+  border-radius: 10px;
+  background: rgba(118, 199, 255, 0.07);
+}
+.hermes-learning-callout > i,
+.hermes-learning-reference > i { color: var(--accent); font-size: 18px; }
+.hermes-learning-callout div { display: grid; gap: 4px; }
+.hermes-learning-callout span,
+.hermes-learning-reference { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.hermes-learning-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.hermes-learning-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 11px;
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(5, 8, 13, 0.45);
+  cursor: pointer;
+}
+.hermes-learning-option:hover { border-color: rgba(118, 199, 255, 0.35); }
+.hermes-learning-option input { margin-top: 3px; accent-color: var(--accent); }
+.hermes-learning-option span { display: grid; gap: 5px; }
+.hermes-learning-option strong { color: var(--text); font-size: 13px; }
+.hermes-learning-option small { color: var(--muted); font-size: 11px; line-height: 1.45; }
+.hermes-learning-option-wide { grid-column: 1 / -1; }
+.hermes-learning-option:has(input:disabled) { opacity: 0.5; cursor: not-allowed; }
+.hermes-learning-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 9px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.hermes-learning-actions > span { margin-right: auto; font-size: 11px; }
+
 .hermes-skin-card {
   min-width: 0;
   min-height: 0;
@@ -1394,6 +1468,10 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .hermes-view-switch { align-self: stretch; }
   .hermes-view-button { flex: 1; }
   .hermes-skin-meta { min-width: 100%; }
+  .hermes-learning-header { flex-direction: column; }
+  .hermes-learning-grid { grid-template-columns: 1fr; }
+  .hermes-learning-option-wide { grid-column: auto; }
+  .hermes-learning-actions .btn { flex: 1; }
   .hermes-skin-actions { justify-content: stretch; }
   .hermes-skin-actions .btn { flex: 1; }
 }

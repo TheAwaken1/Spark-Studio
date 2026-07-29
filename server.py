@@ -2453,6 +2453,38 @@ def _require_hermes_addon_access(request: Request) -> None:
         raise HTTPException(403, reason)
 
 
+class HermesLearningReq(BaseModel):
+    memory_enabled: bool | None = None
+    user_profile_enabled: bool | None = None
+    skills_enabled: bool | None = None
+    session_search_enabled: bool | None = None
+    write_approval: bool | None = None
+
+
+@app.get("/api/agentlab/learning")
+def agentlab_learning_status(request: Request):
+    """Learning preferences for Spark Studio's isolated Hermes profile."""
+    _require_hermes_addon_access(request)
+    return agentlab.hermes_learning_status()
+
+
+@app.put("/api/agentlab/learning")
+def update_agentlab_learning(req: HermesLearningReq, request: Request):
+    """Update learning preferences; active sessions apply them after restart."""
+    _require_hermes_addon_access(request)
+    try:
+        settings = agentlab.update_hermes_learning_settings(
+            req.model_dump(exclude_none=True)
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    return {
+        **settings,
+        "profile": str(agentlab.HERMES_HOME),
+        "toolsets": agentlab.hermes_interactive_toolsets(settings).split(","),
+        "restart_required": True,
+    }
+
 @app.get("/api/hermes-mod/status")
 async def hermes_mod_status(request: Request):
     _require_hermes_addon_access(request)

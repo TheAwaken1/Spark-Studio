@@ -51,6 +51,14 @@ _DENY_COMMANDS = [
     "docker system prune*",
 ]
 
+_LEARNING_DEFAULTS: dict[str, bool] = {
+    "memory_enabled": True,
+    "user_profile_enabled": True,
+    "skills_enabled": True,
+    "session_search_enabled": True,
+    "write_approval": True,
+}
+
 
 SMOKE_CASES: tuple[dict[str, Any], ...] = (
     {
@@ -284,6 +292,130 @@ def hermes_status(endpoint: dict[str, Any] | None = None) -> dict[str, Any]:
     return status
 
 
+def _learning_settings_path() -> Path:
+    return HERMES_HOME / "learning.json"
+
+
+def _load_learning_settings_unlocked() -> dict[str, bool]:
+    settings = dict(_LEARNING_DEFAULTS)
+    try:
+        saved = json.loads(_learning_settings_path().read_text(encoding="utf-8"))
+    except (OSError, ValueError, TypeError):
+        saved = None
+    if isinstance(saved, dict):
+        for key in settings:
+            if isinstance(saved.get(key), bool):
+                settings[key] = saved[key]
+        return settings
+
+    # One-time compatibility path for profiles configured manually before the
+    # Learning UI existed. Preserve standard Hermes memory/approval choices.
+    try:
+        config = yaml.safe_load(
+            (HERMES_HOME / "config.yaml").read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, yaml.YAMLError):
+        return settings
+    memory = config.get("memory") if isinstance(config, dict) else None
+    if isinstance(memory, dict):
+        for key in ("memory_enabled", "user_profile_enabled"):
+            if isinstance(memory.get(key), bool):
+                settings[key] = memory[key]
+        if isinstance(memory.get("write_approval"), bool):
+            settings["write_approval"] = memory["write_approval"]
+    skills = config.get("skills") if isinstance(config, dict) else None
+    if isinstance(skills, dict) and isinstance(skills.get("write_approval"), bool):
+        settings["write_approval"] = skills["write_approval"]
+    return settings
+
+
+def hermes_learning_settings() -> dict[str, bool]:
+    """Return Spark Studio's isolated Hermes learning preferences."""
+    with _CONFIG_LOCK:
+        return _load_learning_settings_unlocked()
+
+
+def _apply_learning_config(
+    config: dict[str, Any], settings: dict[str, bool]
+) -> None:
+    memory = config.get("memory") if isinstance(config.get("memory"), dict) else {}
+    memory.update(
+        {
+            "memory_enabled": settings["memory_enabled"],
+            "user_profile_enabled": settings["user_profile_enabled"],
+            "write_approval": settings["write_approval"],
+        }
+    )
+    config["memory"] = memory
+    skills = config.get("skills") if isinstance(config.get("skills"), dict) else {}
+    skills["write_approval"] = settings["write_approval"]
+    external_dirs = skills.get("external_dirs")
+    if not isinstance(external_dirs, list):
+        external_dirs = []
+    studio_skills = str(APP_DIR / "agent-skills")
+    if studio_skills not in external_dirs:
+        external_dirs.append(studio_skills)
+    skills["external_dirs"] = external_dirs
+    config["skills"] = skills
+
+
+def update_hermes_learning_settings(changes: dict[str, Any]) -> dict[str, bool]:
+    """Persist learning preferences without touching the personal Hermes profile."""
+    with _CONFIG_LOCK:
+        settings = _load_learning_settings_unlocked()
+        for key in settings:
+            if key in changes:
+                if not isinstance(changes[key], bool):
+                    raise ValueError(f"{key} must be true or false")
+                settings[key] = changes[key]
+        HERMES_HOME.mkdir(parents=True, exist_ok=True)
+        settings_path = _learning_settings_path()
+        temporary = HERMES_HOME / f"learning-{threading.get_ident()}.tmp"
+        temporary.write_text(
+            json.dumps(settings, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        temporary.replace(settings_path)
+
+        config_path = HERMES_HOME / "config.yaml"
+        try:
+            config = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            config = {}
+        if isinstance(config, dict) and config:
+            _apply_learning_config(config, settings)
+            config_tmp = HERMES_HOME / f"config-{threading.get_ident()}.tmp"
+            config_tmp.write_text(
+                yaml.safe_dump(config, sort_keys=False), encoding="utf-8"
+            )
+            config_tmp.replace(config_path)
+        return settings
+
+
+def hermes_interactive_toolsets(
+    settings: dict[str, bool] | None = None,
+) -> str:
+    """Toolsets shared by dashboard Chat and ``sparkstudio hermes``."""
+    selected = settings or hermes_learning_settings()
+    toolsets = ["file", "terminal", "mcp-sparkstudio"]
+    if selected["memory_enabled"] or selected["user_profile_enabled"]:
+        toolsets.append("memory")
+    if selected["skills_enabled"]:
+        toolsets.append("skills")
+    if selected["session_search_enabled"]:
+        toolsets.append("session_search")
+    return ",".join(toolsets)
+
+
+def hermes_learning_status() -> dict[str, Any]:
+    settings = hermes_learning_settings()
+    return {
+        **settings,
+        "profile": str(HERMES_HOME),
+        "toolsets": hermes_interactive_toolsets(settings).split(","),
+    }
+
+
 def _write_hermes_config(
     base_url: str,
     model: str,
@@ -295,6 +427,7 @@ def _write_hermes_config(
     HERMES_HOME.mkdir(parents=True, exist_ok=True)
     path = HERMES_HOME / "config.yaml"
     with _CONFIG_LOCK:
+        learning = _load_learning_settings_unlocked()
         # Spark Studio owns the model/tool configuration in this isolated
         # profile, while Hermes Mod owns display.skin. Preserve that user-facing
         # selection whenever Chat refreshes the active model endpoint.
@@ -321,6 +454,7 @@ def _write_hermes_config(
             },
             "agent": {"max_turns": max_turns},
         }
+        _apply_learning_config(config, learning)
         if preserved_display:
             config["display"] = preserved_display
         if enable_search:
@@ -409,7 +543,7 @@ def build_hermes_interactive_command(
         "--model",
         model,
         "--toolsets",
-        "file,terminal,mcp-sparkstudio",
+        hermes_interactive_toolsets(),
         "--checkpoints",
         "--max-turns",
         str(max_turns),

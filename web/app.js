@@ -4478,9 +4478,62 @@ async function deleteSelectedHermesSkin() {
     $('#hermesModDelete').disabled = !$('#hermesModSkinSelect').value;
   }
 }
+function setHermesLearningState(message, state = '') {
+  const dot = $('#hermesLearningDot');
+  $('#hermesLearningStatus').textContent = message;
+  dot.classList.toggle('ready', state === 'ready');
+  dot.classList.toggle('error', state === 'error');
+}
+
+async function refreshHermesLearning() {
+  const save = $('#hermesLearningSave');
+  try {
+    const settings = await api('/agentlab/learning');
+    $('#hermesLearningMemory').checked = settings.memory_enabled;
+    $('#hermesLearningProfileEnabled').checked = settings.user_profile_enabled;
+    $('#hermesLearningSkills').checked = settings.skills_enabled;
+    $('#hermesLearningSessions').checked = settings.session_search_enabled;
+    $('#hermesLearningApproval').checked = settings.write_approval;
+    $('#hermesLearningProfile').textContent = settings.profile || 'data/agent-lab/hermes';
+    setHermesLearningState('Learning is configured', 'ready');
+  } catch (error) {
+    setHermesLearningState(`Learning settings unavailable: ${error.message}`, 'error');
+  } finally {
+    save.disabled = false;
+  }
+}
+
+async function saveHermesLearning() {
+  const save = $('#hermesLearningSave');
+  save.disabled = true;
+  setHermesLearningState('Saving learning settings…');
+  try {
+    await api('/agentlab/learning', {
+      method: 'PUT',
+      body: {
+        memory_enabled: $('#hermesLearningMemory').checked,
+        user_profile_enabled: $('#hermesLearningProfileEnabled').checked,
+        skills_enabled: $('#hermesLearningSkills').checked,
+        session_search_enabled: $('#hermesLearningSessions').checked,
+        write_approval: $('#hermesLearningApproval').checked,
+      },
+    });
+    const running = Boolean(hermesTui.socket || hermesTui.httpSession || hermesTui.httpStarting);
+    setHermesLearningState(
+      running ? 'Saved — restart Chat to apply' : 'Saved — applies when Chat starts',
+      'ready',
+    );
+  } catch (error) {
+    setHermesLearningState(`Could not save learning settings: ${error.message}`, 'error');
+  } finally {
+    save.disabled = false;
+  }
+}
+
 
 function setHermesView(view) {
-  hermesMod.activeView = view === 'skins' ? 'skins' : 'chat';
+  const validViews = new Set(['chat', 'learning', 'skins']);
+  hermesMod.activeView = validViews.has(view) ? view : 'chat';
   $$('[data-hermes-target]').forEach((button) => {
     const active = button.dataset.hermesTarget === hermesMod.activeView;
     button.classList.toggle('active', active);
@@ -4491,7 +4544,9 @@ function setHermesView(view) {
     panel.classList.toggle('active', active);
     panel.hidden = !active;
   });
-  if (hermesMod.activeView === 'skins') {
+  if (hermesMod.activeView === 'learning') {
+    refreshHermesLearning();
+  } else if (hermesMod.activeView === 'skins') {
     refreshHermesMod(true);
     if (!hermesMod.poller) {
       hermesMod.poller = setInterval(() => {
@@ -4507,13 +4562,16 @@ function setHermesView(view) {
 }
 
 function refreshHermesPanel() {
-  if (hermesMod.activeView === 'skins') refreshHermesMod(true);
+  if (hermesMod.activeView === 'learning') refreshHermesLearning();
+  else if (hermesMod.activeView === 'skins') refreshHermesMod(true);
   else refreshHermesTui(true);
 }
 
 $$('[data-hermes-target]').forEach((button) => {
   button.addEventListener('click', () => setHermesView(button.dataset.hermesTarget));
 });
+document.querySelector('#hermesLearningSave').addEventListener('click', saveHermesLearning);
+document.querySelector('#hermesLearningOpenChat').addEventListener('click', () => setHermesView('chat'));
 $('#hermesModInstall').addEventListener('click', () => runHermesModAction('install'));
 $('#hermesModStart').addEventListener('click', () => runHermesModAction('start'));
 $('#hermesModStop').addEventListener('click', () => runHermesModAction('stop'));

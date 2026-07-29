@@ -43,7 +43,7 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(command[:2], ["hermes", "chat"])
         self.assertEqual(command[command.index("--model") + 1], "current-model")
         self.assertEqual(command[command.index("--max-turns") + 1], "55")
-        self.assertIn("file,terminal,mcp-sparkstudio", command)
+        self.assertIn("file,terminal,mcp-sparkstudio,memory,skills,session_search", command)
         self.assertIn("--checkpoints", command)
         self.assertNotIn("--query", command)
         self.assertNotIn("--yolo", command)
@@ -64,7 +64,40 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(config["approvals"]["mode"], "smart")
         self.assertTrue(config["approvals"]["deny"])
         self.assertEqual(config["agent"]["max_turns"], 17)
+        self.assertTrue(config["memory"]["memory_enabled"])
+        self.assertTrue(config["memory"]["user_profile_enabled"])
+        self.assertTrue(config["memory"]["write_approval"])
+        self.assertTrue(config["skills"]["write_approval"])
         self.assertNotIn("mcp_servers", config)
+
+    def test_learning_choices_persist_and_drive_interactive_tools(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp) / "hermes-profile"
+            with mock.patch.object(agentlab, "HERMES_HOME", hermes_home):
+                settings = agentlab.update_hermes_learning_settings(
+                    {
+                        "memory_enabled": True,
+                        "user_profile_enabled": False,
+                        "skills_enabled": False,
+                        "session_search_enabled": True,
+                        "write_approval": True,
+                    }
+                )
+                path = agentlab._write_hermes_config(
+                    "http://127.0.0.1:8000", "fixture-model", 17
+                )
+                toolsets = agentlab.hermes_interactive_toolsets().split(",")
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertFalse(settings["user_profile_enabled"])
+        self.assertTrue(config["memory"]["memory_enabled"])
+        self.assertFalse(config["memory"]["user_profile_enabled"])
+        self.assertTrue(config["memory"]["write_approval"])
+        self.assertTrue(config["skills"]["write_approval"])
+        self.assertIn(str(agentlab.APP_DIR / "agent-skills"), config["skills"]["external_dirs"])
+        self.assertIn("memory", toolsets)
+        self.assertIn("session_search", toolsets)
+        self.assertNotIn("skills", toolsets)
 
     def test_config_refresh_preserves_skin_studio_selection(self):
         with tempfile.TemporaryDirectory() as tmp:

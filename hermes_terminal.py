@@ -155,7 +155,7 @@ def browser_tui_command(binary: str, model: str) -> list[str]:
         "--model",
         model,
         "--toolsets",
-        "file,terminal,mcp-sparkstudio",
+        agentlab.hermes_interactive_toolsets(),
     ]
 
 

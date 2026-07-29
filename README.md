@@ -307,6 +307,35 @@ same-origin HTTPS terminal transport when a browser, certificate policy, or
 network proxy rejects WSS. The fallback carries the same PTY bytes, keyboard
 input, resize events, and cleanup behavior; no user setting is required.
 
+### Hermes Learning
+
+The **Hermes → Learning** view controls durable knowledge for Spark Studio's
+isolated profile. Interactive dashboard and `sparkstudio hermes` sessions enable
+three complementary capabilities by default:
+
+- **Memory** keeps a bounded set of environment, engine, model, and recipe facts.
+- **Skills** preserve reusable procedures for fixing, fine-tuning, benchmarking,
+  and optimizing recipes or models.
+- **Session search** retrieves relevant details from earlier conversations.
+
+The **User profile** is also enabled by default so Hermes can remember optional
+personal preferences, but it has its own switch and can be disabled without
+turning off technical memory. None of these features retrain or alter model
+weights; they provide durable context that follows the isolated Hermes profile
+when `/model` switches between a local model, Claude, or Codex.
+
+**Review learning before saving** defaults on. Foreground memory writes prompt
+for approval in the interactive TUI; review staged background memory writes
+with `/memory pending` and learned skill changes with `/skills pending`.
+Settings apply to the next Chat start or restart. Deterministic Agent Lab model
+evaluations intentionally keep the constrained stateless toolset, preventing
+learned answers from contaminating comparison scores.
+
+For recipe work, Spark Studio registers the curated `sparkrun-recipes` skill.
+It directs agents to the repository's `Title Recipe Format.md` reference captured
+from the official sparkrun recipe-format documentation, without injecting the
+entire reference into unrelated prompts.
+
 The same **Hermes** area also includes **Skin Studio**, powered by the pinned
 `hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; Spark Studio
 stores it under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
@@ -764,6 +793,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` `POST` `PUT` `DELETE` | `/api/hermes-mod/ui/...` | Sandboxed, token-protected iframe bridge to Hermes Mod |
 | `GET` | `/api/agentlab/status` | Hermes install state and its isolated Spark Studio profile |
 | `GET` | `/api/agentlab/terminal/status` | Embedded Hermes TUI readiness, active model, workspace, and access mode |
+| `GET` `PUT` | `/api/agentlab/learning` | Isolated Hermes memory, user-profile, skills, session-search, and write-approval preferences |
 | `WS` | `/api/agentlab/terminal` | Byte-safe PTY bridge for the dashboard Hermes Chat tab (same-origin; local-only by default) |
 | `POST` `GET` `DELETE` | `/api/agentlab/terminal/sessions[...]` | Same-origin HTTPS PTY fallback: create, poll output, send input/resize, and close |
 | `GET` | `/api/agentlab/history` | Saved free-form and deterministic Agent Lab runs |

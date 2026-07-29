@@ -494,10 +494,11 @@
       <header class="panel-header hermes-panel-header">
         <div>
           <h1>Hermes</h1>
-          <p>Chat with the loaded model or design the real TUI with Skin Studio.</p>
+          <p>Chat, build durable recipe knowledge, or design the real TUI with Skin Studio.</p>
         </div>
         <div class="hermes-view-switch" role="tablist" aria-label="Hermes tools">
           <button class="hermes-view-button active" data-hermes-target="chat" role="tab" aria-selected="true"><i class="fa-solid fa-terminal"></i> Chat</button>
+          <button class="hermes-view-button" data-hermes-target="learning" role="tab" aria-selected="false"><i class="fa-solid fa-brain"></i> Learning</button>
           <button class="hermes-view-button" data-hermes-target="skins" role="tab" aria-selected="false"><i class="fa-solid fa-palette"></i> Skin Studio</button>
         </div>
       </header>
@@ -523,6 +524,60 @@
             <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
           </div>
           <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
+        </div>
+      </div>
+
+      <div class="hermes-view" data-hermes-view="learning" hidden>
+        <div class="card hermes-learning-card">
+          <div class="hermes-learning-header">
+            <div>
+              <div class="hermes-terminal-state">
+                <span id="hermesLearningDot" class="status-dot"></span>
+                <span id="hermesLearningStatus">Checking learning settings…</span>
+              </div>
+              <p>Give every model durable Spark Studio context without changing its weights.</p>
+            </div>
+            <span class="mono" id="hermesLearningProfile">data/agent-lab/hermes</span>
+          </div>
+
+          <div class="hermes-learning-callout">
+            <i class="fa-solid fa-flask"></i>
+            <div><strong>Built for recipe improvement</strong><span>Hermes can remember proven environment facts, reuse successful repair and tuning procedures, and find earlier recipe investigations. Deterministic model evaluations remain stateless.</span></div>
+          </div>
+
+          <div class="hermes-learning-grid">
+            <label class="hermes-learning-option">
+              <input type="checkbox" id="hermesLearningMemory" />
+              <span><strong>Persistent memory</strong><small>Keep compact facts about engines, models, recipe conventions, and your Spark environment.</small></span>
+            </label>
+            <label class="hermes-learning-option">
+              <input type="checkbox" id="hermesLearningProfileEnabled" />
+              <span><strong>User profile</strong><small>Remember optional details such as your name, preferences, and preferred working style.</small></span>
+            </label>
+            <label class="hermes-learning-option">
+              <input type="checkbox" id="hermesLearningSkills" />
+              <span><strong>Reusable skills</strong><small>Capture procedures that repeatedly fix, fine-tune, benchmark, or optimize recipes and models.</small></span>
+            </label>
+            <label class="hermes-learning-option">
+              <input type="checkbox" id="hermesLearningSessions" />
+              <span><strong>Session search</strong><small>Let Hermes retrieve relevant details from earlier conversations in this isolated profile.</small></span>
+            </label>
+            <label class="hermes-learning-option hermes-learning-option-wide">
+              <input type="checkbox" id="hermesLearningApproval" />
+              <span><strong>Review learning before saving</strong><small>Recommended. Memory writes require approval; background memory and skill changes can be reviewed with <code>/memory pending</code> and <code>/skills pending</code>.</small></span>
+            </label>
+          </div>
+
+          <div class="hermes-learning-reference">
+            <i class="fa-solid fa-book-open"></i>
+            <span>The curated <strong>sparkrun recipes</strong> skill uses <code>Title Recipe Format.md</code> as its local format reference.</span>
+          </div>
+
+          <div class="hermes-learning-actions">
+            <span class="muted">Changes apply the next time Hermes Chat starts or restarts.</span>
+            <button id="hermesLearningSave" class="btn primary"><i class="fa-solid fa-floppy-disk"></i> Save learning settings</button>
+            <button id="hermesLearningOpenChat" class="btn"><i class="fa-solid fa-terminal"></i> Open Chat</button>
+          </div>
         </div>
       </div>
 

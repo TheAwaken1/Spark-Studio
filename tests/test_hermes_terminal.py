@@ -157,12 +157,34 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         bridge.close.assert_called_once_with()
         self.assertNotIn(session_id, server._HTTP_TERMINAL_SESSIONS)
 
+    def test_learning_api_defaults_to_profile_on_and_persists_choice(self):
+        client = TestClient(server.app)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            agentlab, "HERMES_HOME", Path(tmp) / "hermes-profile"
+        ):
+            current = client.get("/api/agentlab/learning")
+            updated = client.put(
+                "/api/agentlab/learning",
+                json={"user_profile_enabled": False},
+            )
+            saved = agentlab.hermes_learning_settings()
+
+        self.assertEqual(current.status_code, 200)
+        self.assertTrue(current.json()["user_profile_enabled"])
+        self.assertEqual(updated.status_code, 200)
+        self.assertFalse(updated.json()["user_profile_enabled"])
+        self.assertTrue(updated.json()["restart_required"])
+        self.assertFalse(saved["user_profile_enabled"])
+        self.assertIn("memory", updated.json()["toolsets"])
+        self.assertIn("skills", updated.json()["toolsets"])
+        self.assertIn("session_search", updated.json()["toolsets"])
+
     def test_browser_command_launches_real_tui_with_agent_tools(self):
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
         self.assertEqual(command[:2], ["/opt/hermes", "--tui"])
         self.assertEqual(command[command.index("--model") + 1], "fixture-model")
         self.assertNotIn("--max-turns", command)
-        self.assertIn("file,terminal,mcp-sparkstudio", command)
+        self.assertIn("file,terminal,mcp-sparkstudio,memory,skills,session_search", command)
 
     def test_prepare_uses_isolated_profile_workspace_and_search(self):
         with tempfile.TemporaryDirectory() as tmp:
