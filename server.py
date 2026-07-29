@@ -84,6 +84,50 @@ if _cors_origins:
     )
 
 
+def _origin_matches_request(origin: str, headers: Any) -> bool:
+    """True when a browser-supplied Origin belongs to this dashboard.
+
+    Non-browser clients (CLI, MCP child, curl) send no Origin header and are
+    handled by the caller. ``Origin: null`` (sandboxed iframes, some redirects)
+    never matches, which is the safe default.
+    """
+    if origin in _cors_origins:
+        return True
+    parsed = urllib.parse.urlparse(origin)
+    if parsed.scheme not in {"http", "https"}:
+        return False
+    forwarded_host = headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
+    valid_hosts = {headers.get("host", "").strip(), forwarded_host}
+    valid_hosts.discard("")
+    return parsed.netloc in valid_hosts
+
+
+_MUTATING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+
+
+@app.middleware("http")
+async def _reject_cross_site_writes(request: Request, call_next):
+    """CSRF guard: block state-changing /api requests from foreign origins.
+
+    Same-origin CORS alone stops cross-site *reads*, but a malicious page can
+    still fire preflight-free writes (forms, ``no-cors`` fetch) at the
+    dashboard's loopback or LAN address. Browsers always attach Origin to
+    cross-origin POST/PUT/PATCH/DELETE, so a present-but-mismatched Origin is
+    proof of a cross-site write and is rejected before any handler runs.
+    """
+    if request.method in _MUTATING_METHODS and request.url.path.startswith("/api/"):
+        origin = request.headers.get("origin", "")
+        if origin and not _origin_matches_request(origin, request.headers):
+            return Response(
+                content=json.dumps(
+                    {"detail": "cross-origin API writes are not allowed"}
+                ),
+                status_code=403,
+                media_type="application/json",
+            )
+    return await call_next(request)
+
+
 # ----- Models ---------------------------------------------------------------
 
 class Recipe(BaseModel):
@@ -2421,14 +2465,7 @@ def _websocket_same_origin(ws: WebSocket) -> bool:
     origin = ws.headers.get("origin", "")
     if not origin:
         return _websocket_peer_is_local(ws)
-    parsed = urllib.parse.urlparse(origin)
-    forwarded_host = ws.headers.get("x-forwarded-host", "").split(",", 1)[0].strip()
-    valid_hosts = {
-        ws.headers.get("host", "").strip(),
-        forwarded_host,
-    }
-    valid_hosts.discard("")
-    return parsed.scheme in {"http", "https"} and parsed.netloc in valid_hosts
+    return _origin_matches_request(origin, ws.headers)
 
 
 def _studio_url_for_websocket(ws: WebSocket) -> str:

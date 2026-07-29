@@ -47,9 +47,16 @@ _SKILL_FRONTMATTER = re.compile(
     r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL
 )
 
+# Pinned Hermes release: the bootstrap script is fetched from the release tag
+# and the checkout is pinned to that tag's commit, so a compromised upstream
+# `main` can never reach users through Spark Studio's install button. Bump both
+# values together when adopting a new Hermes release.
+HERMES_PIN_TAG = "v2026.7.20"
+HERMES_PIN_COMMIT = "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
 HERMES_INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/"
-    "main/scripts/install.sh | bash"
+    f"{HERMES_PIN_TAG}/scripts/install.sh"
+    f" | bash -s -- --commit {HERMES_PIN_COMMIT} --non-interactive"
 )
 
 _DENY_COMMANDS = [

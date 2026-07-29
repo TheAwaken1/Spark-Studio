@@ -152,7 +152,9 @@ if [[ "$PROFILE" == "full" ]]; then
     if ! command -v hermes >/dev/null 2>&1; then
         if [[ "$INTERACTIVE" != "1" ]] \
                 || ask "Install Hermes Agent for the local-model Agent Lab? [Y/n]" y; then
-            curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scripts/install.sh | bash \
+            # Keep this pinned release in sync with HERMES_PIN_TAG/COMMIT in agentlab.py
+            curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.20/scripts/install.sh \
+                | bash -s -- --commit 3ef6bbd201263d354fd83ec55b3c306ded2eb72a --non-interactive \
                 && ok "Hermes Agent installed" \
                 || warn "Hermes install did not finish — run 'sparkstudio agent doctor' for the supported command"
         fi

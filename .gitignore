@@ -20,3 +20,9 @@ nohup.out
 SESSIONS.md
 CLAUDE.md
 AGENTS.md
+# Local demo/bench artifacts generated while testing agents
+contra.html
+contra-spark-force.html
+robo-fight-64.html
+super-mario.html
+speculative_benchmark_results.json
