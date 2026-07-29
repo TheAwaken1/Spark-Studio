@@ -182,8 +182,8 @@ curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/main/scri
 #### Hermes setup sequence (DGX Spark local model)
 
 Load the model in Spark Studio **before** running the Hermes setup wizard.
-Open **Engine Chat** and copy the endpoint shown for the loaded model. A
-confirmed working endpoint from Spark Studio is:
+Open **Engine Chat** and copy the endpoint shown for the loaded model. An
+example working endpoint from Spark Studio, make sure to add /v1 to the end of the URL:
 
 ```text
 http://127.0.0.1:41293/v1
@@ -331,12 +331,15 @@ turning off technical memory. None of these features retrain or alter model
 weights; they provide durable context that follows the isolated Hermes profile
 when `/model` switches between a local model, Claude, or Codex.
 
-**Review learning before saving** defaults on. Foreground memory writes prompt
-for approval in the interactive TUI; review staged background memory writes
-with `/memory pending` and learned skill changes with `/skills pending`.
-Settings apply to the next Chat start or restart. Deterministic Agent Lab model
-evaluations intentionally keep the constrained stateless toolset, preventing
-learned answers from contaminating comparison scores.
+**Review learning before saving** defaults on. Proposed memory and skill writes
+appear as approval cards above the embedded Chat terminal, showing the content
+with explicit **Approve** and **Reject** buttons. You do not need to type
+`approved` into the prompt. The `/memory pending` and `/skills pending` commands
+remain available for terminal-first review. Approved learning is available to
+new Chat sessions, so restart an already-running Chat to load it into context.
+Deterministic Agent Lab model evaluations intentionally keep the constrained
+stateless toolset, preventing learned answers from contaminating comparison
+scores.
 
 For recipe work, Spark Studio registers the curated `sparkrun-recipes` skill.
 It directs agents to the repository's `Title Recipe Format.md` reference captured
@@ -376,8 +379,10 @@ SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 ./start.sh
 Do not enable unrestricted remote terminal access on an untrusted network.
 WebSocket Origin validation remains enforced in every mode. The HTTPS fallback
 requires a same-origin-only custom request header and an unguessable session ID.
-Closing the page or pressing **Stop** terminates and reaps the Hermes TUI and its
-helpers on either transport.
+The HTTPS fallback keeps a ten-minute encrypted session lease so returning from
+an opened preview or reloading the dashboard reattaches to the same Hermes TUI.
+Pressing **Stop** still terminates it immediately; abandoned sessions and their
+helpers are reaped automatically when the lease expires.
 
 Run the deterministic coding smoke suite through Hermes:
 

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -37,6 +38,10 @@ WORKSPACES_DIR = DATA_DIR / "workspaces"
 RESULTS_DIR = DATA_DIR / "results"
 _CONFIG_LOCK = threading.Lock()
 _INSTALL_LOCK = threading.Lock()
+_PENDING_LOCK = threading.Lock()
+_PENDING_SUBSYSTEMS = {"memory", "skills"}
+_PENDING_ID = re.compile(r"^[0-9a-f]{8}$")
+_PENDING_PREVIEW_LIMIT = 16_000
 
 HERMES_INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/"
@@ -456,6 +461,165 @@ def hermes_learning_status() -> dict[str, Any]:
         **settings,
         "profile": str(HERMES_HOME),
         "toolsets": hermes_interactive_toolsets(settings).split(","),
+    }
+
+
+def _validate_pending_target(subsystem: str, pending_id: str) -> None:
+    if subsystem not in _PENDING_SUBSYSTEMS:
+        raise ValueError("subsystem must be memory or skills")
+    if not _PENDING_ID.fullmatch(pending_id):
+        raise ValueError("invalid pending write id")
+
+
+def _pending_preview(record: dict[str, Any]) -> tuple[str, bool]:
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        payload = {}
+    content = payload.get("content")
+    if not isinstance(content, str):
+        content = payload.get("file_content")
+    if not isinstance(content, str):
+        content = json.dumps(payload, indent=2, ensure_ascii=False, sort_keys=True)
+    old_text = payload.get("old_text")
+    if isinstance(old_text, str) and old_text.strip():
+        content = f"Replace:\n{old_text}\n\nWith:\n{content}"
+    truncated = len(content) > _PENDING_PREVIEW_LIMIT
+    return content[:_PENDING_PREVIEW_LIMIT], truncated
+
+
+def hermes_pending_writes() -> list[dict[str, Any]]:
+    """List staged writes in Spark Studio's isolated Hermes profile."""
+    records: list[dict[str, Any]] = []
+    with _PENDING_LOCK:
+        for subsystem in sorted(_PENDING_SUBSYSTEMS):
+            directory = HERMES_HOME / "pending" / subsystem
+            if not directory.is_dir():
+                continue
+            for path in directory.glob("*.json"):
+                try:
+                    record = json.loads(path.read_text(encoding="utf-8"))
+                except (OSError, ValueError, TypeError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                pending_id = record.get("id")
+                if (
+                    not isinstance(pending_id, str)
+                    or not _PENDING_ID.fullmatch(pending_id)
+                    or path.stem != pending_id
+                    or record.get("subsystem") != subsystem
+                ):
+                    continue
+                payload = record.get("payload")
+                payload = payload if isinstance(payload, dict) else {}
+                preview, truncated = _pending_preview(record)
+                try:
+                    created_at = float(record.get("created_at") or 0)
+                except (TypeError, ValueError):
+                    created_at = 0.0
+                records.append(
+                    {
+                        "id": pending_id,
+                        "subsystem": subsystem,
+                        "action": str(record.get("action") or payload.get("action") or ""),
+                        "summary": str(record.get("summary") or ""),
+                        "origin": str(record.get("origin") or "foreground"),
+                        "created_at": created_at,
+                        "target": str(payload.get("target") or ""),
+                        "name": str(payload.get("name") or ""),
+                        "file_path": str(payload.get("file_path") or ""),
+                        "preview": preview,
+                        "truncated": truncated,
+                    }
+                )
+    records.sort(key=lambda item: item["created_at"])
+    return records
+
+
+def _hermes_agent_runtime() -> tuple[Path, Path]:
+    override = os.environ.get("SPARK_STUDIO_HERMES_AGENT_DIR", "").strip()
+    candidates = [Path(override)] if override else []
+    candidates.append(Path.home() / ".hermes" / "hermes-agent")
+    for source in candidates:
+        python = source / "venv" / "bin" / "python"
+        if python.is_file() and (source / "hermes_cli" / "write_approval_commands.py").is_file():
+            return source, python
+    raise RuntimeError(
+        "Hermes approval runtime was not found; reinstall Hermes from the Chat tab"
+    )
+
+
+_HERMES_APPROVAL_BRIDGE = """
+import json
+import sys
+from hermes_cli.write_approval_commands import handle_pending_subcommand
+from tools import write_approval as wa
+
+subsystem, action, pending_id = sys.argv[1:4]
+memory_store = None
+if subsystem == wa.MEMORY and action == "approve":
+    from tools.memory_tool import load_on_disk_store
+    memory_store = load_on_disk_store()
+message = handle_pending_subcommand(
+    subsystem, [action, pending_id], memory_store=memory_store
+)
+remaining = wa.get_pending(subsystem, pending_id) is not None
+print(json.dumps({"ok": not remaining, "message": message or ""}))
+""".strip()
+
+
+def resolve_hermes_pending(
+    subsystem: str, pending_id: str, action: str
+) -> dict[str, Any]:
+    """Approve or reject one staged write through Hermes's official handler."""
+    _validate_pending_target(subsystem, pending_id)
+    if action not in {"approve", "reject"}:
+        raise ValueError("action must be approve or reject")
+    source, python = _hermes_agent_runtime()
+    env = os.environ.copy()
+    env.pop("PYTHONHOME", None)
+    env.pop("PYTHONPATH", None)
+    env["HERMES_HOME"] = str(HERMES_HOME)
+    with _PENDING_LOCK:
+        pending_path = HERMES_HOME / "pending" / subsystem / f"{pending_id}.json"
+        if not pending_path.is_file():
+            raise FileNotFoundError(f"pending {subsystem} write {pending_id} was not found")
+        try:
+            result = _run(
+                [
+                    str(python),
+                    "-c",
+                    _HERMES_APPROVAL_BRIDGE,
+                    subsystem,
+                    action,
+                    pending_id,
+                ],
+                cwd=source,
+                env=env,
+                timeout=60,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise RuntimeError(f"Hermes could not {action} the pending write: {exc}") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or result.stdout or "unknown Hermes error").strip()
+        raise RuntimeError(f"Hermes could not {action} the pending write: {detail[-2000:]}")
+    try:
+        response = json.loads(result.stdout.strip().splitlines()[-1])
+    except (IndexError, ValueError, TypeError) as exc:
+        raise RuntimeError(
+            f"Hermes returned an invalid {action} response"
+        ) from exc
+    if not response.get("ok"):
+        raise RuntimeError(
+            str(response.get("message") or f"Hermes could not {action} the pending write")
+        )
+    return {
+        "ok": True,
+        "action": action,
+        "id": pending_id,
+        "subsystem": subsystem,
+        "message": str(response.get("message") or ""),
+        "restart_recommended": action == "approve",
     }
 
 

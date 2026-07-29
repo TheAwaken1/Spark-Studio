@@ -126,6 +126,13 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         session_id = created.json()["session_id"]
         self.assertEqual(created.json()["transport"], "https")
 
+        inspected = client.get(
+            f"/api/agentlab/terminal/sessions/{session_id}",
+            headers=headers,
+        )
+        self.assertEqual(inspected.status_code, 200)
+        self.assertTrue(inspected.json()["active"])
+
         output = client.get(
             f"/api/agentlab/terminal/sessions/{session_id}/output",
             headers=headers,
@@ -195,6 +202,93 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         self.assertIn("memory", updated.json()["toolsets"])
         self.assertIn("skills", updated.json()["toolsets"])
         self.assertIn("session_search", updated.json()["toolsets"])
+
+    def test_pending_learning_api_lists_isolated_memory_and_skill_cards(self):
+        client = TestClient(server.app)
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            agentlab, "HERMES_HOME", Path(tmp) / "hermes-profile"
+        ):
+            pending = agentlab.HERMES_HOME / "pending"
+            (pending / "memory").mkdir(parents=True)
+            (pending / "skills").mkdir(parents=True)
+            (pending / "memory" / "a1b2c3d4.json").write_text(
+                """{
+                  "id": "a1b2c3d4", "subsystem": "memory", "action": "add",
+                  "summary": "remember recipe preference", "created_at": 1,
+                  "payload": {"target": "memory", "content": "Prefer spark-vllm-docker."}
+                }"""
+            )
+            (pending / "skills" / "e5f6a7b8.json").write_text(
+                """{
+                  "id": "e5f6a7b8", "subsystem": "skills", "action": "write_file",
+                  "summary": "update recipe skill", "created_at": 2,
+                  "payload": {"name": "recipes", "file_path": "SKILL.md", "content": "Verify the recipe."}
+                }"""
+            )
+            response = client.get("/api/agentlab/pending")
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        self.assertEqual(body["memory_count"], 1)
+        self.assertEqual(body["skills_count"], 1)
+        self.assertEqual(body["pending"][0]["preview"], "Prefer spark-vllm-docker.")
+        self.assertEqual(body["pending"][1]["file_path"], "SKILL.md")
+
+    def test_pending_learning_api_resolves_only_explicit_valid_action(self):
+        client = TestClient(server.app)
+        result = {
+            "ok": True,
+            "action": "approve",
+            "id": "a1b2c3d4",
+            "subsystem": "memory",
+            "message": "Approved 1 memory write(s).",
+            "restart_recommended": True,
+        }
+        with mock.patch.object(
+            server.agentlab, "resolve_hermes_pending", return_value=result
+        ) as resolve:
+            response = client.post(
+                "/api/agentlab/pending/memory/a1b2c3d4/approve"
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json()["restart_recommended"])
+        resolve.assert_called_once_with("memory", "a1b2c3d4", "approve")
+
+        invalid = client.post("/api/agentlab/pending/memory/not-an-id/approve")
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_pending_resolution_keeps_spark_studio_hermes_home(self):
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"ok": true, "message": "Approved 1 memory write(s)."}\n',
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            source = Path(tmp) / "hermes-agent"
+            python = source / "venv" / "bin" / "python"
+            pending = profile / "pending" / "memory"
+            pending.mkdir(parents=True)
+            (pending / "a1b2c3d4.json").write_text("{}")
+            with (
+                mock.patch.object(agentlab, "HERMES_HOME", profile),
+                mock.patch.object(
+                    agentlab, "_hermes_agent_runtime", return_value=(source, python)
+                ),
+                mock.patch.object(agentlab, "_run", return_value=completed) as run,
+            ):
+                result = agentlab.resolve_hermes_pending(
+                    "memory", "a1b2c3d4", "approve"
+                )
+
+        self.assertTrue(result["ok"])
+        call = run.call_args
+        self.assertEqual(call.args[0][-3:], ["memory", "approve", "a1b2c3d4"])
+        self.assertEqual(call.kwargs["env"]["HERMES_HOME"], str(profile))
+        self.assertNotIn("PYTHONHOME", call.kwargs["env"])
+
 
     def test_browser_command_launches_real_tui_with_agent_tools(self):
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")

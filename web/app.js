@@ -3934,7 +3934,24 @@ const hermesTui = {
   retryTimer: null,
   autoStarted: false,
   installing: false,
+  pendingPoller: null,
+  pendingRefreshing: false,
+  pendingSignature: '',
 };
+
+const HERMES_HTTP_SESSION_KEY = 'spark-studio-hermes-http-session';
+
+function storedHermesHttpSession() {
+  try { return window.sessionStorage.getItem(HERMES_HTTP_SESSION_KEY) || ''; }
+  catch { return ''; }
+}
+
+function rememberHermesHttpSession(sessionId) {
+  try {
+    if (sessionId) window.sessionStorage.setItem(HERMES_HTTP_SESSION_KEY, sessionId);
+    else window.sessionStorage.removeItem(HERMES_HTTP_SESSION_KEY);
+  } catch { /* storage may be disabled; the live in-memory session still works */ }
+}
 
 const hermesMod = {
   busy: false,
@@ -4129,6 +4146,7 @@ async function pollHermesHttpOutput(sessionId) {
       if (result.data) hermesTui.terminal.write(base64ToBytes(result.data));
       if (result.closed) {
         hermesTui.httpSession = null;
+        rememberHermesHttpSession('');
         setHermesControls(false);
         setHermesTuiState('Hermes exited');
         return;
@@ -4165,6 +4183,30 @@ async function startHermesHttpFallback(attempt = 0) {
   setHermesTuiState('Starting Hermes over HTTPS…');
   try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
   try {
+    const savedSession = attempt === 0 ? storedHermesHttpSession() : '';
+    if (savedSession) {
+      try {
+        await hermesHttpApi(`/${encodeURIComponent(savedSession)}`);
+        if (generation !== hermesTui.httpGeneration) return;
+        hermesTui.httpStarting = false;
+        hermesTui.httpSession = savedSession;
+        setHermesControls(true);
+        setHermesTuiState('Hermes reconnected over HTTPS', 'ready');
+        sendHermesHttpInput({
+          type: 'resize',
+          cols: hermesTui.terminal.cols,
+          rows: hermesTui.terminal.rows,
+        });
+        hermesTui.terminal.focus();
+        pollHermesHttpOutput(savedSession);
+        return;
+      } catch (error) {
+        // A missing/expired lease needs a new PTY. For network and proxy
+        // failures, retain the opaque ID so the next retry can reattach.
+        if (!String(error.message || '').startsWith('404 ')) throw error;
+        rememberHermesHttpSession('');
+      }
+    }
     const result = await hermesHttpApi('', {
       method: 'POST',
       body: {
@@ -4184,6 +4226,7 @@ async function startHermesHttpFallback(attempt = 0) {
     }
     hermesTui.httpStarting = false;
     hermesTui.httpSession = result.session_id;
+    rememberHermesHttpSession(result.session_id);
     setHermesControls(true);
     setHermesTuiState('Hermes is running over HTTPS', 'ready');
     hermesTui.terminal.focus();
@@ -4210,11 +4253,12 @@ async function startHermesHttpFallback(attempt = 0) {
 }
 
 function stopHermesHttpTui() {
-  const sessionId = hermesTui.httpSession;
+  const sessionId = hermesTui.httpSession || storedHermesHttpSession();
   hermesTui.httpGeneration += 1;
   hermesTui.httpStarting = false;
   hermesTui.httpSession = null;
   hermesTui.httpPolling = false;
+  rememberHermesHttpSession('');
   if (!sessionId) return Promise.resolve();
   return fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(sessionId)}`, {
     method: 'DELETE',
@@ -4230,7 +4274,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     hermesTui.retryTimer = null;
   }
   if (!ensureHermesTerminal()) return;
-  if (hermesTui.preferHttp) {
+  if (hermesTui.preferHttp || storedHermesHttpSession()) {
     startHermesHttpFallback(0);
     return;
   }
@@ -4335,7 +4379,13 @@ $('#hermesInstall').addEventListener('click', installHermes);
 $('#hermesTuiStart').addEventListener('click', startHermesTui);
 $('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);
-window.addEventListener('beforeunload', stopHermesTui);
+window.addEventListener('beforeunload', () => {
+  // A WSS PTY belongs to its socket and is reaped server-side on disconnect.
+  // Keep an HTTPS fallback lease alive so this tab can reattach after opening
+  // a preview, navigating back, or reloading. The Stop button still closes it
+  // immediately, and the server janitor reaps abandoned sessions.
+  if (hermesTui.socket) hermesTui.socket.close(1000, 'Dashboard page unloaded');
+});
 
 
 // ---------- Hermes Skin Studio -------------------------------------------
@@ -4572,6 +4622,121 @@ async function saveHermesLearning() {
 }
 
 
+function hermesPendingTitle(item) {
+  const subject = item.name || item.target || item.file_path || '';
+  return [item.action || 'change', subject].filter(Boolean).join(' · ');
+}
+
+function renderHermesPending(result) {
+  const section = $('#hermesPendingApprovals');
+  const list = $('#hermesPendingList');
+  const pending = Array.isArray(result?.pending) ? result.pending : [];
+  const signature = pending.map((item) => `${item.subsystem}:${item.id}`).join('|');
+  if (signature === hermesTui.pendingSignature) return;
+  hermesTui.pendingSignature = signature;
+  section.hidden = pending.length === 0;
+  $('#hermesPendingCount').textContent = String(pending.length);
+  list.replaceChildren();
+  pending.forEach((item) => {
+    const card = document.createElement('article');
+    card.className = 'hermes-pending-card';
+    card.dataset.pendingId = item.id;
+
+    const main = document.createElement('div');
+    main.className = 'hermes-pending-card-main';
+    const meta = document.createElement('div');
+    meta.className = 'hermes-pending-meta';
+    const kind = document.createElement('span');
+    kind.className = 'hermes-pending-kind';
+    kind.textContent = item.subsystem;
+    const title = document.createElement('span');
+    title.textContent = hermesPendingTitle(item);
+    const age = document.createElement('span');
+    age.textContent = item.created_at
+      ? new Date(item.created_at * 1000).toLocaleString()
+      : 'Pending';
+    meta.append(kind, title, age);
+
+    const summary = document.createElement('p');
+    summary.className = 'hermes-pending-summary';
+    summary.textContent = item.summary || 'Hermes proposed a persistent change.';
+    const preview = document.createElement('pre');
+    preview.className = 'hermes-pending-preview';
+    preview.textContent = item.preview || '(No content preview supplied)';
+    main.append(meta, summary, preview);
+    if (item.truncated) {
+      const note = document.createElement('div');
+      note.className = 'hermes-pending-truncated';
+      note.textContent = 'Preview shortened for the dashboard. Use the slash-command diff for the complete skill change.';
+      main.append(note);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'hermes-pending-actions';
+    const approve = document.createElement('button');
+    approve.className = 'btn primary';
+    approve.dataset.pendingAction = 'approve';
+    approve.dataset.pendingSubsystem = item.subsystem;
+    approve.dataset.pendingId = item.id;
+    approve.innerHTML = '<i class="fa-solid fa-check"></i> Approve';
+    const reject = document.createElement('button');
+    reject.className = 'btn danger';
+    reject.dataset.pendingAction = 'reject';
+    reject.dataset.pendingSubsystem = item.subsystem;
+    reject.dataset.pendingId = item.id;
+    reject.innerHTML = '<i class="fa-solid fa-xmark"></i> Reject';
+    actions.append(approve, reject);
+    card.append(main, actions);
+    list.append(card);
+  });
+  if (!section.hidden) {
+    setTimeout(() => { try { hermesTui.fit?.fit(); } catch { /* card changed terminal size */ } }, 20);
+  }
+}
+
+async function refreshHermesPending() {
+  if (hermesTui.pendingRefreshing) return;
+  hermesTui.pendingRefreshing = true;
+  try {
+    renderHermesPending(await api('/agentlab/pending'));
+  } catch (error) {
+    $('#hermesPendingApprovals').title = `Approval status unavailable: ${error.message}`;
+  } finally {
+    hermesTui.pendingRefreshing = false;
+  }
+}
+
+async function resolveHermesPending(button) {
+  const { pendingAction: action, pendingSubsystem: subsystem, pendingId: id } = button.dataset;
+  if (!['approve', 'reject'].includes(action)) return;
+  if (action === 'reject' && !window.confirm(`Reject this pending ${subsystem} change?`)) return;
+  const card = button.closest('.hermes-pending-card');
+  card?.querySelectorAll('button').forEach((candidate) => { candidate.disabled = true; });
+  try {
+    const result = await api(
+      `/agentlab/pending/${encodeURIComponent(subsystem)}/${encodeURIComponent(id)}/${action}`,
+      { method: 'POST' },
+    );
+    toast(action === 'approve'
+      ? `${result.message || 'Learning approved.'} Restart Chat to load it into the active context.`
+      : (result.message || 'Pending learning rejected.'));
+    await refreshHermesPending();
+  } catch (error) {
+    toast(`Could not ${action} learning: ${error.message}`, 'danger');
+    card?.querySelectorAll('button').forEach((candidate) => { candidate.disabled = false; });
+  }
+}
+
+function ensureHermesPendingPoller() {
+  if (hermesTui.pendingPoller) return;
+  hermesTui.pendingPoller = setInterval(() => {
+    if ($('.tab.active')?.dataset.tab === 'hermes' && hermesMod.activeView === 'chat') {
+      refreshHermesPending();
+    }
+  }, 2500);
+}
+
+
 function setHermesView(view) {
   const validViews = new Set(['chat', 'learning', 'skins']);
   hermesMod.activeView = validViews.has(view) ? view : 'chat';
@@ -4598,6 +4763,8 @@ function setHermesView(view) {
     }
   } else {
     refreshHermesTui(false);
+    refreshHermesPending();
+    ensureHermesPendingPoller();
     setTimeout(() => { try { hermesTui.fit?.fit(); } catch { /* hidden layout settling */ } }, 20);
   }
 }
@@ -4605,7 +4772,11 @@ function setHermesView(view) {
 function refreshHermesPanel() {
   if (hermesMod.activeView === 'learning') refreshHermesLearning();
   else if (hermesMod.activeView === 'skins') refreshHermesMod(true);
-  else refreshHermesTui(true);
+  else {
+    refreshHermesTui(true);
+    refreshHermesPending();
+    ensureHermesPendingPoller();
+  }
 }
 
 $$('[data-hermes-target]').forEach((button) => {
@@ -4613,6 +4784,10 @@ $$('[data-hermes-target]').forEach((button) => {
 });
 document.querySelector('#hermesLearningSave').addEventListener('click', saveHermesLearning);
 document.querySelector('#hermesLearningOpenChat').addEventListener('click', () => setHermesView('chat'));
+$('#hermesPendingList').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-pending-action]');
+  if (button) resolveHermesPending(button);
+});
 $('#hermesModInstall').addEventListener('click', () => runHermesModAction('install'));
 $('#hermesModStart').addEventListener('click', () => runHermesModAction('start'));
 $('#hermesModStop').addEventListener('click', () => runHermesModAction('stop'));

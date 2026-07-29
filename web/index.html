@@ -524,6 +524,17 @@
             <span>Use <code>/model</code> inside Hermes to switch between local, Claude, and Codex.</span>
             <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
           </div>
+          <section id="hermesPendingApprovals" class="hermes-pending-approvals" hidden aria-live="polite">
+            <div class="hermes-pending-heading">
+              <i class="fa-solid fa-shield-halved"></i>
+              <div>
+                <strong>Learning approval needed</strong>
+                <span>Review the proposed change, then click Approve or Reject. You do not need to type <code>approved</code> in Chat.</span>
+              </div>
+              <span id="hermesPendingCount" class="hermes-pending-count">0</span>
+            </div>
+            <div id="hermesPendingList" class="hermes-pending-list"></div>
+          </section>
           <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
         </div>
       </div>
@@ -565,7 +576,7 @@
             </label>
             <label class="hermes-learning-option hermes-learning-option-wide">
               <input type="checkbox" id="hermesLearningApproval" />
-              <span><strong>Review learning before saving</strong><small>Recommended. Memory writes require approval; background memory and skill changes can be reviewed with <code>/memory pending</code> and <code>/skills pending</code>.</small></span>
+              <span><strong>Review learning before saving</strong><small>Recommended. Pending memory and skill changes appear as approval cards above Chat; <code>/memory pending</code> and <code>/skills pending</code> remain available.</small></span>
             </label>
           </div>
 

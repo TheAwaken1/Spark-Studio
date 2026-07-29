@@ -945,6 +945,102 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
 }
 #hermesTuiModel { color: var(--accent); overflow-wrap: anywhere; }
 #hermesTuiSecurity { margin-left: auto; }
+.hermes-pending-approvals {
+  flex: 0 1 auto;
+  max-height: 270px;
+  margin: 0 0 10px;
+  padding: 11px;
+  overflow-y: auto;
+  border: 1px solid rgba(255, 183, 74, 0.42);
+  border-radius: 10px;
+  background: rgba(255, 183, 74, 0.07);
+}
+.hermes-pending-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--warning, #ffb74a);
+}
+.hermes-pending-heading > i { font-size: 15px; }
+.hermes-pending-heading > div {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+}
+.hermes-pending-heading strong { color: var(--text); font-size: 12px; }
+.hermes-pending-heading span { color: var(--muted); font-size: 10px; }
+.hermes-pending-count {
+  min-width: 24px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  color: #171006 !important;
+  background: #ffb74a;
+  font-size: 11px !important;
+  font-weight: 700;
+  text-align: center;
+}
+.hermes-pending-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 9px;
+}
+.hermes-pending-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 7px 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 8px;
+  background: rgba(5, 8, 13, 0.82);
+}
+.hermes-pending-card-main { min-width: 0; }
+.hermes-pending-meta {
+  display: flex;
+  gap: 7px;
+  flex-wrap: wrap;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10px;
+}
+.hermes-pending-kind {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: rgba(118, 199, 255, 0.12);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.hermes-pending-summary {
+  margin: 6px 0 0;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.35;
+}
+.hermes-pending-preview {
+  max-height: 90px;
+  margin: 7px 0 0;
+  padding: 7px 8px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: #cfd8e6;
+  background: #05080d;
+  font: 10px/1.4 "JetBrains Mono", ui-monospace, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.hermes-pending-truncated { margin-top: 4px; color: var(--muted); font-size: 9px; }
+.hermes-pending-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.hermes-pending-actions .btn { padding: 6px 9px; font-size: 10px; }
+.hermes-terminal-card:has(.hermes-pending-approvals:not([hidden])) .hermes-terminal {
+  min-height: 300px;
+}
 .hermes-terminal {
   min-width: 0;
   min-height: 420px;
@@ -957,6 +1053,10 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
 }
 .hermes-terminal .xterm { height: 100%; }
 .hermes-terminal .xterm-viewport { background: transparent !important; }
+@media (max-width: 760px) {
+  .hermes-pending-card { grid-template-columns: 1fr; }
+  .hermes-pending-actions { justify-content: flex-end; }
+}
 .hermes-panel-header {
   display: flex;
   align-items: end;

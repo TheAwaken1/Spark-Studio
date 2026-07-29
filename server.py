@@ -2495,6 +2495,38 @@ def update_agentlab_learning(req: HermesLearningReq, request: Request):
         "restart_required": True,
     }
 
+
+@app.get("/api/agentlab/pending")
+def agentlab_pending_writes(request: Request):
+    """Pending isolated-profile memory and skill writes for dashboard review."""
+    _require_hermes_addon_access(request)
+    pending = agentlab.hermes_pending_writes()
+    return {
+        "pending": pending,
+        "count": len(pending),
+        "memory_count": sum(item["subsystem"] == "memory" for item in pending),
+        "skills_count": sum(item["subsystem"] == "skills" for item in pending),
+    }
+
+
+@app.post("/api/agentlab/pending/{subsystem}/{pending_id}/{action}")
+async def resolve_agentlab_pending(
+    subsystem: str, pending_id: str, action: str, request: Request
+):
+    """Approve or reject one staged Hermes write after an explicit UI action."""
+    _require_hermes_addon_access(request)
+    try:
+        return await asyncio.to_thread(
+            agentlab.resolve_hermes_pending, subsystem, pending_id, action
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    except RuntimeError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+
 @app.get("/api/hermes-mod/status")
 async def hermes_mod_status(request: Request):
     _require_hermes_addon_access(request)
@@ -2616,7 +2648,7 @@ class HttpTerminalInputReq(BaseModel):
 
 _HTTP_TERMINAL_HEADER = "X-Spark-Studio-Terminal"
 _HTTP_TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
-_HTTP_TERMINAL_TTL_SECONDS = 120.0
+_HTTP_TERMINAL_TTL_SECONDS = 600.0
 
 
 def _require_http_terminal_access(request: Request) -> None:
@@ -2699,6 +2731,14 @@ async def create_http_terminal_session(req: HttpTerminalSessionReq, request: Req
         "last_seen": time.monotonic(),
     }
     return {"session_id": session_id, "transport": "https"}
+
+
+@app.get("/api/agentlab/terminal/sessions/{session_id}")
+async def inspect_http_terminal_session(session_id: str, request: Request):
+    """Refresh a live HTTPS PTY lease so a reloaded dashboard can reattach."""
+    _require_http_terminal_access(request)
+    _http_terminal_session(session_id)
+    return {"session_id": session_id, "transport": "https", "active": True}
 
 
 @app.get("/api/agentlab/terminal/sessions/{session_id}/output")
@@ -3529,6 +3569,9 @@ async def _bind_loop():
     # Engine health watchdog: readiness probing, server-side working/failed
     # recipe tagging, and "container Up but engine dead" detection.
     asyncio.create_task(_watchdog_loop())
+    # HTTPS terminal sessions deliberately survive a brief page navigation or
+    # reload. Reap abandoned PTYs after their lease expires.
+    asyncio.create_task(_http_terminal_session_janitor())
 
 
 async def _background_registry_sync():
@@ -3538,6 +3581,13 @@ async def _background_registry_sync():
         pass
     except Exception:  # noqa: BLE001
         pass
+
+
+async def _http_terminal_session_janitor():
+    """Reap HTTPS PTYs whose browser never returned to close or resume them."""
+    while True:
+        await asyncio.sleep(30)
+        await asyncio.to_thread(_prune_http_terminal_sessions)
 
 
 @app.on_event("shutdown")
