@@ -1,5 +1,6 @@
 import asyncio
 import base64
+import json
 import os
 import tempfile
 import time
@@ -288,6 +289,113 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         self.assertEqual(call.args[0][-3:], ["memory", "approve", "a1b2c3d4"])
         self.assertEqual(call.kwargs["env"]["HERMES_HOME"], str(profile))
         self.assertNotIn("PYTHONHOME", call.kwargs["env"])
+
+    def test_pending_cards_repair_legacy_skill_and_block_its_file_until_created(self):
+        create_record = {
+            "id": "a1b2c3d4",
+            "subsystem": "skills",
+            "action": "create",
+            "summary": "create recipe-helper",
+            "created_at": 1,
+            "payload": {
+                "action": "create",
+                "name": "recipe-helper",
+                "category": "mlops/inference",
+                "content": """---
+name: recipe-helper
+description: This description is deliberately longer than the current Hermes routing limit and needs compatibility repair.
+---
+
+# Recipe helper
+
+Use this skill when repairing recipes.
+""",
+            },
+        }
+        file_record = {
+            "id": "e5f6a7b8",
+            "subsystem": "skills",
+            "action": "write_file",
+            "summary": "add reference",
+            "created_at": 2,
+            "payload": {
+                "action": "write_file",
+                "name": "recipe-helper",
+                "file_path": "references/checks.md",
+                "content": "Verify the recipe.",
+            },
+        }
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            agentlab, "HERMES_HOME", Path(tmp) / "profile"
+        ):
+            pending = agentlab.HERMES_HOME / "pending" / "skills"
+            pending.mkdir(parents=True)
+            for record in (create_record, file_record):
+                (pending / f"{record['id']}.json").write_text(
+                    json.dumps(record)
+                )
+            cards = agentlab.hermes_pending_writes()
+
+        create, supporting_file = cards
+        self.assertEqual(create["name"], "recipe-helper")
+        self.assertTrue(
+            any("mlops-inference" in note for note in create["repair_notes"])
+        )
+        self.assertIn("Use for recipe helper workflows.", create["preview"])
+        self.assertTrue(create["repair_notes"])
+        self.assertFalse(create["blocked_reason"])
+        self.assertEqual(supporting_file["depends_on"], "a1b2c3d4")
+        self.assertIn("create card", supporting_file["blocked_reason"])
+        self.assertIn("current Hermes schema", supporting_file["repair_notes"][0])
+
+    def test_pending_skill_repair_is_written_before_official_approval(self):
+        record = {
+            "id": "a1b2c3d4",
+            "subsystem": "skills",
+            "action": "create",
+            "summary": "create html game skill",
+            "created_at": 1,
+            "payload": {
+                "action": "create",
+                "name": "",
+                "category": "creative",
+                "content": "# single-file-html-game\n\nBuild one-file games.\n",
+            },
+        }
+        completed = SimpleNamespace(
+            returncode=0,
+            stdout='{"ok": true, "message": "Approved 1 skills write(s)."}\n',
+            stderr="",
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            profile = Path(tmp) / "profile"
+            source = Path(tmp) / "hermes-agent"
+            python = source / "venv" / "bin" / "python"
+            pending = profile / "pending" / "skills"
+            pending.mkdir(parents=True)
+            path = pending / "a1b2c3d4.json"
+            path.write_text(json.dumps(record))
+
+            def inspect_repaired(*_args, **_kwargs):
+                repaired = json.loads(path.read_text())
+                self.assertEqual(repaired["payload"]["name"], "single-file-html-game")
+                self.assertTrue(repaired["payload"]["content"].startswith("---\n"))
+                return completed
+
+            with (
+                mock.patch.object(agentlab, "HERMES_HOME", profile),
+                mock.patch.object(
+                    agentlab, "_hermes_agent_runtime", return_value=(source, python)
+                ),
+                mock.patch.object(agentlab, "_run", side_effect=inspect_repaired),
+            ):
+                result = agentlab.resolve_hermes_pending(
+                    "skills", "a1b2c3d4", "approve"
+                )
+
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["repaired"])
+        self.assertTrue(result["repair_notes"])
 
 
     def test_browser_command_launches_real_tui_with_agent_tools(self):

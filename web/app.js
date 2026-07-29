@@ -4640,6 +4640,7 @@ function renderHermesPending(result) {
   pending.forEach((item) => {
     const card = document.createElement('article');
     card.className = 'hermes-pending-card';
+    card.classList.toggle('blocked', Boolean(item.blocked_reason));
     card.dataset.pendingId = item.id;
 
     const main = document.createElement('div');
@@ -4670,6 +4671,28 @@ function renderHermesPending(result) {
       note.textContent = 'Preview shortened for the dashboard. Use the slash-command diff for the complete skill change.';
       main.append(note);
     }
+    if (Array.isArray(item.repair_notes) && item.repair_notes.length) {
+      const repair = document.createElement('div');
+      repair.className = 'hermes-pending-repair';
+      repair.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i>';
+      const text = document.createElement('span');
+      text.textContent = item.repair_notes.join(' ');
+      repair.append(text);
+      main.append(repair);
+    }
+    if (item.blocked_reason) {
+      const blocked = document.createElement('div');
+      blocked.className = 'hermes-pending-blocked';
+      blocked.innerHTML = '<i class="fa-solid fa-link"></i>';
+      const text = document.createElement('span');
+      text.textContent = item.blocked_reason;
+      blocked.append(text);
+      main.append(blocked);
+    }
+    const inlineError = document.createElement('div');
+    inlineError.className = 'hermes-pending-error';
+    inlineError.hidden = true;
+    main.append(inlineError);
 
     const actions = document.createElement('div');
     actions.className = 'hermes-pending-actions';
@@ -4678,7 +4701,11 @@ function renderHermesPending(result) {
     approve.dataset.pendingAction = 'approve';
     approve.dataset.pendingSubsystem = item.subsystem;
     approve.dataset.pendingId = item.id;
-    approve.innerHTML = '<i class="fa-solid fa-check"></i> Approve';
+    approve.disabled = Boolean(item.blocked_reason);
+    approve.title = item.blocked_reason || '';
+    approve.innerHTML = item.repair_notes?.length
+      ? '<i class="fa-solid fa-wand-magic-sparkles"></i> Repair &amp; Approve'
+      : '<i class="fa-solid fa-check"></i> Approve';
     const reject = document.createElement('button');
     reject.className = 'btn danger';
     reject.dataset.pendingAction = 'reject';
@@ -4711,6 +4738,11 @@ async function resolveHermesPending(button) {
   if (!['approve', 'reject'].includes(action)) return;
   if (action === 'reject' && !window.confirm(`Reject this pending ${subsystem} change?`)) return;
   const card = button.closest('.hermes-pending-card');
+  const inlineError = card?.querySelector('.hermes-pending-error');
+  if (inlineError) {
+    inlineError.hidden = true;
+    inlineError.textContent = '';
+  }
   card?.querySelectorAll('button').forEach((candidate) => { candidate.disabled = true; });
   try {
     const result = await api(
@@ -4723,7 +4755,14 @@ async function resolveHermesPending(button) {
     await refreshHermesPending();
   } catch (error) {
     toast(`Could not ${action} learning: ${error.message}`, 'danger');
-    card?.querySelectorAll('button').forEach((candidate) => { candidate.disabled = false; });
+    if (inlineError) {
+      inlineError.textContent = error.message.replace(/^\d{3}\s+/, '');
+      inlineError.hidden = false;
+    }
+    card?.querySelectorAll('button').forEach((candidate) => {
+      candidate.disabled = candidate.dataset.pendingAction === 'approve'
+        && Boolean(card.classList.contains('blocked'));
+    });
   }
 }
 

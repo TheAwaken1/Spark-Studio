@@ -2523,6 +2523,8 @@ async def resolve_agentlab_pending(
         raise HTTPException(400, str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(404, str(exc)) from exc
+    except agentlab.PendingWriteConflict as exc:
+        raise HTTPException(409, str(exc)) from exc
     except RuntimeError as exc:
         raise HTTPException(500, str(exc)) from exc
 

@@ -42,6 +42,10 @@ _PENDING_LOCK = threading.Lock()
 _PENDING_SUBSYSTEMS = {"memory", "skills"}
 _PENDING_ID = re.compile(r"^[0-9a-f]{8}$")
 _PENDING_PREVIEW_LIMIT = 16_000
+_SKILL_SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]{0,63}$")
+_SKILL_FRONTMATTER = re.compile(
+    r"\A---[ \t]*\r?\n(.*?)\r?\n---[ \t]*(?:\r?\n|\Z)", re.DOTALL
+)
 
 HERMES_INSTALL = (
     "curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/"
@@ -64,6 +68,10 @@ _LEARNING_DEFAULTS: dict[str, bool] = {
     "session_search_enabled": True,
     "write_approval": True,
 }
+
+
+class PendingWriteConflict(RuntimeError):
+    """A staged write is valid but cannot be applied before a prerequisite."""
 
 
 SMOKE_CASES: tuple[dict[str, Any], ...] = (
@@ -487,9 +495,139 @@ def _pending_preview(record: dict[str, Any]) -> tuple[str, bool]:
     return content[:_PENDING_PREVIEW_LIMIT], truncated
 
 
+def _skill_slug(value: Any) -> str:
+    text = re.sub(r"[^a-z0-9._-]+", "-", str(value or "").strip().lower())
+    text = text.strip("-._")[:64]
+    return text if _SKILL_SLUG.fullmatch(text) else ""
+
+
+def _skill_description(name: str) -> str:
+    topic = re.sub(r"[-_.]+", " ", name).strip()[:41].rstrip()
+    return f"Use for {topic} workflows."
+
+
+def _prepare_pending_record(
+    record: dict[str, Any],
+) -> tuple[dict[str, Any], list[str], str]:
+    """Repair deterministic legacy skill payload issues before review/apply."""
+    prepared = dict(record)
+    payload = record.get("payload")
+    payload = dict(payload) if isinstance(payload, dict) else {}
+    prepared["payload"] = payload
+    notes: list[str] = []
+    if record.get("subsystem") != "skills":
+        return prepared, notes, ""
+
+    action = str(payload.get("action") or record.get("action") or "")
+    if action == "write_file":
+        if payload.get("file_content") is None and isinstance(payload.get("content"), str):
+            payload["file_content"] = payload["content"]
+            notes.append("Converted this older supporting-file payload to the current Hermes schema.")
+        return prepared, notes, ""
+    if action != "create":
+        return prepared, notes, ""
+
+    content = payload.get("content")
+    if not isinstance(content, str) or not content.strip():
+        return prepared, notes, "This skill has no SKILL.md content to approve."
+    clean_content = content.lstrip("\ufeff")
+    match = _SKILL_FRONTMATTER.match(clean_content)
+    frontmatter: dict[str, Any] = {}
+    body = clean_content.strip()
+    if match:
+        try:
+            loaded = yaml.safe_load(match.group(1))
+        except yaml.YAMLError as exc:
+            return prepared, notes, f"The staged SKILL.md frontmatter is invalid: {exc}"
+        if not isinstance(loaded, dict):
+            return prepared, notes, "The staged SKILL.md frontmatter is not a YAML mapping."
+        frontmatter = dict(loaded)
+        body = clean_content[match.end() :].strip()
+
+    name = str(payload.get("name") or "").strip()
+    if not _SKILL_SLUG.fullmatch(name):
+        candidates = [frontmatter.get("name")]
+        heading = re.search(r"(?m)^#\s+([^\r\n]+)", body)
+        if heading:
+            candidates.append(heading.group(1))
+        derived = next((_skill_slug(candidate) for candidate in candidates if _skill_slug(candidate)), "")
+        if not derived:
+            return prepared, notes, "A valid skill name could not be derived from this staged change."
+        payload["name"] = derived
+        name = derived
+        notes.append(f"Recovered the missing skill name as '{name}'.")
+
+    category = payload.get("category")
+    if category and not _SKILL_SLUG.fullmatch(str(category).strip()):
+        repaired_category = _skill_slug(str(category).replace("/", "-"))
+        if not repaired_category:
+            return prepared, notes, f"The category '{category}' cannot be repaired safely."
+        payload["category"] = repaired_category
+        notes.append(f"Flattened the legacy category to '{repaired_category}'.")
+
+    changed_frontmatter = not bool(match)
+    if frontmatter.get("name") != name:
+        frontmatter["name"] = name
+        changed_frontmatter = True
+    description = str(frontmatter.get("description") or "").strip().strip("'\"")
+    if not description or len(description) > 60:
+        frontmatter["description"] = _skill_description(name)
+        changed_frontmatter = True
+        notes.append("Added a concise description that fits Hermes's 60-character routing limit.")
+    if not match:
+        notes.append("Added the YAML frontmatter required by current Hermes versions.")
+    if not body:
+        return prepared, notes, "The staged SKILL.md has no instructions after its frontmatter."
+    if changed_frontmatter:
+        header = yaml.safe_dump(
+            frontmatter,
+            sort_keys=False,
+            allow_unicode=True,
+            width=1000,
+        ).strip()
+        payload["content"] = f"---\n{header}\n---\n\n{body}\n"
+    return prepared, notes, ""
+
+
+def _installed_skill_names() -> set[str]:
+    root = HERMES_HOME / "skills"
+    if not root.is_dir():
+        return set()
+    return {path.parent.name for path in root.rglob("SKILL.md")}
+
+
+def _pending_create_ids(records: list[dict[str, Any]]) -> dict[str, str]:
+    creates: dict[str, str] = {}
+    for record in records:
+        payload = record.get("payload")
+        if not isinstance(payload, dict) or payload.get("action") != "create":
+            continue
+        name = str(payload.get("name") or "")
+        if name:
+            creates[name] = str(record.get("id") or "")
+    return creates
+
+
+def _pending_skill_block(
+    record: dict[str, Any], installed: set[str], creates: dict[str, str]
+) -> tuple[str, str]:
+    payload = record.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
+    action = str(payload.get("action") or record.get("action") or "")
+    name = str(payload.get("name") or "")
+    if action == "create" and name in installed:
+        return f"A skill named '{name}' already exists.", ""
+    if action in {"edit", "patch", "delete", "write_file", "remove_file"} and name not in installed:
+        dependency = creates.get(name, "")
+        if dependency and dependency != record.get("id"):
+            return f"Approve the create card for '{name}' first.", dependency
+        return f"Skill '{name}' does not exist in this Hermes profile.", ""
+    return "", ""
+
+
 def hermes_pending_writes() -> list[dict[str, Any]]:
     """List staged writes in Spark Studio's isolated Hermes profile."""
-    records: list[dict[str, Any]] = []
+    prepared_records: list[tuple[dict[str, Any], list[str], str]] = []
     with _PENDING_LOCK:
         for subsystem in sorted(_PENDING_SUBSYSTEMS):
             directory = HERMES_HOME / "pending" / subsystem
@@ -510,28 +648,44 @@ def hermes_pending_writes() -> list[dict[str, Any]]:
                     or record.get("subsystem") != subsystem
                 ):
                     continue
-                payload = record.get("payload")
-                payload = payload if isinstance(payload, dict) else {}
-                preview, truncated = _pending_preview(record)
-                try:
-                    created_at = float(record.get("created_at") or 0)
-                except (TypeError, ValueError):
-                    created_at = 0.0
-                records.append(
-                    {
-                        "id": pending_id,
-                        "subsystem": subsystem,
-                        "action": str(record.get("action") or payload.get("action") or ""),
-                        "summary": str(record.get("summary") or ""),
-                        "origin": str(record.get("origin") or "foreground"),
-                        "created_at": created_at,
-                        "target": str(payload.get("target") or ""),
-                        "name": str(payload.get("name") or ""),
-                        "file_path": str(payload.get("file_path") or ""),
-                        "preview": preview,
-                        "truncated": truncated,
-                    }
-                )
+                prepared, repair_notes, blocked_reason = _prepare_pending_record(record)
+                prepared_records.append((prepared, repair_notes, blocked_reason))
+
+    installed = _installed_skill_names()
+    creates = _pending_create_ids([item[0] for item in prepared_records])
+    records: list[dict[str, Any]] = []
+    for record, repair_notes, blocked_reason in prepared_records:
+        payload = record.get("payload")
+        payload = payload if isinstance(payload, dict) else {}
+        if record.get("subsystem") == "skills" and not blocked_reason:
+            blocked_reason, depends_on = _pending_skill_block(
+                record, installed, creates
+            )
+        else:
+            depends_on = ""
+        preview, truncated = _pending_preview(record)
+        try:
+            created_at = float(record.get("created_at") or 0)
+        except (TypeError, ValueError):
+            created_at = 0.0
+        records.append(
+            {
+                "id": str(record.get("id") or ""),
+                "subsystem": str(record.get("subsystem") or ""),
+                "action": str(record.get("action") or payload.get("action") or ""),
+                "summary": str(record.get("summary") or ""),
+                "origin": str(record.get("origin") or "foreground"),
+                "created_at": created_at,
+                "target": str(payload.get("target") or ""),
+                "name": str(payload.get("name") or ""),
+                "file_path": str(payload.get("file_path") or ""),
+                "preview": preview,
+                "truncated": truncated,
+                "repair_notes": repair_notes,
+                "blocked_reason": blocked_reason,
+                "depends_on": depends_on,
+            }
+        )
     records.sort(key=lambda item: item["created_at"])
     return records
 
@@ -584,6 +738,38 @@ def resolve_hermes_pending(
         pending_path = HERMES_HOME / "pending" / subsystem / f"{pending_id}.json"
         if not pending_path.is_file():
             raise FileNotFoundError(f"pending {subsystem} write {pending_id} was not found")
+        repair_notes: list[str] = []
+        if subsystem == "skills" and action == "approve":
+            try:
+                record = json.loads(pending_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError, TypeError) as exc:
+                raise RuntimeError("The pending skill record could not be read") from exc
+            if not isinstance(record, dict):
+                raise RuntimeError("The pending skill record is invalid")
+            prepared, repair_notes, blocked_reason = _prepare_pending_record(record)
+            if not blocked_reason:
+                other_records: list[dict[str, Any]] = []
+                for other_path in (HERMES_HOME / "pending" / "skills").glob("*.json"):
+                    try:
+                        other = json.loads(other_path.read_text(encoding="utf-8"))
+                    except (OSError, ValueError, TypeError):
+                        continue
+                    if isinstance(other, dict):
+                        other_records.append(_prepare_pending_record(other)[0])
+                blocked_reason, _ = _pending_skill_block(
+                    prepared,
+                    _installed_skill_names(),
+                    _pending_create_ids(other_records),
+                )
+            if blocked_reason:
+                raise PendingWriteConflict(blocked_reason)
+            if prepared != record:
+                temporary = pending_path.with_suffix(".json.tmp")
+                temporary.write_text(
+                    json.dumps(prepared, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                temporary.replace(pending_path)
         try:
             result = _run(
                 [
@@ -620,6 +806,8 @@ def resolve_hermes_pending(
         "subsystem": subsystem,
         "message": str(response.get("message") or ""),
         "restart_recommended": action == "approve",
+        "repaired": bool(repair_notes),
+        "repair_notes": repair_notes,
     }
 
 

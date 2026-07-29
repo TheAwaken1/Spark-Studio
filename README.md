@@ -337,6 +337,9 @@ with explicit **Approve** and **Reject** buttons. You do not need to type
 `approved` into the prompt. The `/memory pending` and `/skills pending` commands
 remain available for terminal-first review. Approved learning is available to
 new Chat sessions, so restart an already-running Chat to load it into context.
+Older staged skills are normalized to the current Hermes schema and clearly
+labeled **Repair & Approve**. Supporting-file cards stay disabled until their
+preceding create-skill card is approved, preventing dependency-order failures.
 Deterministic Agent Lab model evaluations intentionally keep the constrained
 stateless toolset, preventing learned answers from contaminating comparison
 scores.
