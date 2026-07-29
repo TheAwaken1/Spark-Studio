@@ -354,7 +354,9 @@ from the official sparkrun recipe-format documentation, without injecting the
 entire reference into unrelated prompts.
 
 The same **Hermes** area also includes **Skin Studio**, powered by the pinned
-`hermes-mod@0.2.0` add-on. On first use, click **Install add-on**; if Hermes is
+[`hermes-mod@0.2.0`](https://github.com/cocktailpeanut/hermes-mod) add-on —
+big thanks to [@cocktailpeanut](https://github.com/cocktailpeanut) for building
+and open-sourcing it. On first use, click **Install add-on**; if Hermes is
 missing, the button installs Hermes first and then continues automatically.
 The `--full` one-command profile preinstalls both. Spark Studio stores the
 add-on under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
