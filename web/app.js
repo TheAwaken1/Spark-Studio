@@ -4061,9 +4061,14 @@ async function refreshHermesTui(autoStart = false) {
     const install = $('#hermesInstall');
     install.hidden = status.installed;
     install.disabled = hermesTui.installing;
+    // Plain-HTTP LAN browsers may install Hermes but not open the shell;
+    // point them at the encrypted dashboard instead of a bare denial.
+    const httpsHint = status.access_mode === 'private_http_denied'
+      ? `Hermes Chat needs the encrypted dashboard from this device — open https://${window.location.hostname}:8443`
+      : '';
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
-    else if (!accessAllowed) setHermesTuiState(status.access_reason || 'Terminal access denied', 'error');
+    else if (!accessAllowed) setHermesTuiState(httpsHint || status.access_reason || 'Terminal access denied', 'error');
     else if (!active) setHermesTuiState('Load a model to connect Hermes', 'error');
     else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
     else if (!running) setHermesTuiState('Ready to connect to the loaded model');

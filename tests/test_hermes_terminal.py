@@ -44,6 +44,27 @@ class HermesBrowserTerminalTests(unittest.TestCase):
                 (False, "remote_denied"),
             )
 
+    def test_hermes_install_allows_plain_http_lan_but_not_public_remote(self):
+        # Installing the pinned CLI is a fixed action with no shell access, so
+        # it follows the dashboard's normal LAN trust boundary, not the HTTPS
+        # terminal policy that gates Hermes Chat itself.
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
+            self.assertTrue(server._lan_peer_allowed("192.168.0.158"))
+            self.assertTrue(server._lan_peer_allowed("127.0.0.1"))
+            self.assertFalse(server._lan_peer_allowed("8.8.8.8"))
+            self.assertFalse(server._lan_peer_allowed(""))
+
+    def test_hermes_install_endpoint_reaches_installer_from_test_peer(self):
+        client = TestClient(server.app)
+        installed = {"installed": True, "version": "v2026.7.20"}
+        with mock.patch.object(
+            server.agentlab, "install_hermes", return_value=installed
+        ) as install:
+            response = client.post("/api/agentlab/install")
+        self.assertEqual(response.status_code, 200)
+        install.assert_called_once()
+
     def test_terminal_access_override_is_explicit(self):
         with mock.patch.dict(
             os.environ, {"SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE": "1"}

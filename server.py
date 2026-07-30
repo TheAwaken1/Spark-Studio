@@ -2490,10 +2490,41 @@ def _require_hermes_addon_access(request: Request) -> None:
         raise HTTPException(403, reason)
 
 
+def _lan_peer_allowed(peer: str) -> bool:
+    """The dashboard's normal trust boundary: loopback or the private LAN.
+
+    Unlike ``_terminal_access_policy`` this does not demand HTTPS — it matches
+    what every other dashboard action (start engines, edit recipes) already
+    permits. Reserved for actions with fixed behavior and no shell access.
+    """
+    if peer in {"localhost", "testclient"}:
+        return True
+    try:
+        address = ipaddress.ip_address(peer)
+    except ValueError:
+        return _hermes_remote_override()
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or _hermes_remote_override()
+    )
+
+
+def _require_lan_access(request: Request) -> None:
+    if not _lan_peer_allowed(request.client.host if request.client else ""):
+        raise HTTPException(403, "this action is unavailable to public remote clients")
+
+
 @app.post("/api/agentlab/install")
 async def agentlab_install(request: Request):
-    """Install the official Hermes CLI without requiring a terminal."""
-    _require_hermes_addon_access(request)
+    """Install the pinned official Hermes CLI without requiring a terminal.
+
+    Deliberately gated by LAN membership only, not the HTTPS terminal policy:
+    the command is fixed, runs no user input, and grants the caller nothing —
+    Hermes Chat itself still requires the encrypted-transport policy to start.
+    """
+    _require_lan_access(request)
     result = await asyncio.to_thread(agentlab.install_hermes)
     if not result.get("installed"):
         raise HTTPException(500, result.get("error") or "Hermes installation failed")
