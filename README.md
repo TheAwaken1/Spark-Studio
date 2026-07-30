@@ -393,6 +393,30 @@ an opened preview or reloading the dashboard reattaches to the same Hermes TUI.
 Pressing **Stop** still terminates it immediately; abandoned sessions and their
 helpers are reaped automatically when the lease expires.
 
+**Recommended Caddy retry settings.** By default Caddy returns an instant 502
+when the dashboard is mid-restart (`./start.sh --update`, the in-app updater,
+or `systemctl --user restart spark-studio`). With a dashboard tab open, that
+can leave half-loaded panels — most visibly a Skin Studio iframe whose assets
+failed to load. Tell Caddy to ride out restarts instead by giving the
+`reverse_proxy` directive a retry window:
+
+```caddyfile
+https://<Spark-IP>:8443 {
+    tls internal
+    reverse_proxy 127.0.0.1:7860 {
+        # Ride out dashboard restarts instead of returning 502: hold each
+        # request up to 15s, retrying every 500ms.
+        lb_try_duration 15s
+        lb_try_interval 500ms
+    }
+}
+```
+
+Requests made during a restart then pause briefly and complete once the
+dashboard is back, so updates are invisible to open browser tabs. Note that
+with `admin off` in the Caddyfile, `caddy reload` cannot work — restart the
+proxy to apply changes: `systemctl --user restart spark-studio-https`.
+
 Run the deterministic coding smoke suite through Hermes:
 
 ```bash
