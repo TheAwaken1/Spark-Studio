@@ -41,6 +41,32 @@ class CrossSiteWriteGuardTests(unittest.TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertIn("cross-origin", response.json()["detail"])
 
+    def test_sandboxed_skin_studio_iframe_writes_pass_with_bridge_token(self):
+        # The Skin Studio iframe has an opaque origin (sandbox without
+        # allow-same-origin), so it sends Origin: null. Its per-process bridge
+        # token must satisfy the guard; the handler then fails for its own
+        # reason (the sidecar is not running), proving the request got through.
+        import hermes_mod_service
+
+        response = self.client.post(
+            "/api/hermes-mod/ui/api/generate-logo",
+            json={"title": "SPARK", "style": "minimal"},
+            headers={
+                "Origin": "null",
+                hermes_mod_service.BRIDGE_HEADER: hermes_mod_service.BRIDGE_TOKEN,
+            },
+        )
+        self.assertNotEqual(response.status_code, 403)
+
+    def test_sandboxed_iframe_writes_without_token_stay_rejected(self):
+        response = self.client.post(
+            "/api/hermes-mod/ui/api/generate-logo",
+            json={"title": "SPARK", "style": "minimal"},
+            headers={"Origin": "null"},
+        )
+        self.assertEqual(response.status_code, 403)
+        self.assertIn("cross-origin", response.json()["detail"])
+
     def test_same_origin_write_reaches_the_handler(self):
         # The handler then rejects for its own reason (missing terminal
         # header), proving the CSRF guard let same-origin traffic through.

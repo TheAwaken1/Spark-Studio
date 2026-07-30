@@ -114,10 +114,21 @@ async def _reject_cross_site_writes(request: Request, call_next):
     dashboard's loopback or LAN address. Browsers always attach Origin to
     cross-origin POST/PUT/PATCH/DELETE, so a present-but-mismatched Origin is
     proof of a cross-site write and is rejected before any handler runs.
+
+    The Skin Studio iframe is sandboxed without ``allow-same-origin``, so its
+    requests carry ``Origin: null``. Its per-process bridge token is delivered
+    only through the same-origin-rewritten app.js, so a valid token is
+    stronger proof of same-origin provenance than the Origin header itself.
     """
     if request.method in _MUTATING_METHODS and request.url.path.startswith("/api/"):
         origin = request.headers.get("origin", "")
-        if origin and not _origin_matches_request(origin, request.headers):
+        if (
+            origin
+            and not _origin_matches_request(origin, request.headers)
+            and not hermes_mod_service.valid_bridge_token(
+                request.headers.get(hermes_mod_service.BRIDGE_HEADER)
+            )
+        ):
             return Response(
                 content=json.dumps(
                     {"detail": "cross-origin API writes are not allowed"}
