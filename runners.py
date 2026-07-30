@@ -1013,6 +1013,7 @@ class Runner:
         run = Run(id=run_id, engine=engine, recipe_id=None, cmd=cmd, env={}, port=None)
         run.label = name
         run.url = url.rstrip("/").replace("0.0.0.0", "127.0.0.1")
+        run.meta["_external"] = True
         run.status = "running"
         # Already serving when registered — there's no load to time.
         run.ready_at = run.started_at

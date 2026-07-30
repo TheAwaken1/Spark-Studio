@@ -3688,6 +3688,7 @@ async def _shutdown_runs():
 # ----- restart reconciliation + engine watchdog ------------------------------
 
 _WATCHDOG_INTERVAL = 10
+_EXTERNAL_PROBE_FAILURES = 2
 # Warn when a not-yet-ready engine has produced no output for this long.
 _STALL_AFTER = int(os.environ.get("SPARK_STUDIO_STALL_AFTER", "300"))
 # Never-ready deadline for sparkrun runs where no container liveness signal is
@@ -3997,9 +3998,20 @@ async def _watchdog_tick(tick: int) -> None:
             else:
                 run.probe_failures += 1
 
-        # Post-ready failure: the engine answered before but has been failing
-        # probes for ~2 minutes.
-        if run.ready and run.probe_failures >= 12:
+        # Post-ready failure. External registrations have no owning process to
+        # report their exit, so retire them promptly after two failed probes;
+        # otherwise they remain status="running" and Overview advertises a
+        # dead endpoint forever. Managed workloads keep the longer tolerance.
+        is_external = bool(run.meta.get("_external"))
+        failure_limit = _EXTERNAL_PROBE_FAILURES if is_external else 12
+        if run.ready and run.probe_failures >= failure_limit:
+            if is_external:
+                runner.finalize(
+                    run,
+                    exit_code=1,
+                    reason="external endpoint stopped answering",
+                )
+                continue
             if run.detached:
                 container = run.managed_containers[0] if run.managed_containers else None
                 if container:

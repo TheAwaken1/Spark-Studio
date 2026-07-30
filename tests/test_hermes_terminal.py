@@ -635,5 +635,38 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertEqual(run.label, "repo/model")
 
 
+    def test_registered_external_is_marked_for_watchdog(self):
+        manager = runners.Runner()
+        with mock.patch.object(runners.db, "runs_insert"):
+            run = manager.register_external(
+                "vllm", "fixture-model", "http://127.0.0.1:9999"
+            )
+        self.assertTrue(run.meta["_external"])
+
+    def test_dead_external_endpoint_is_retired_after_two_failed_probes(self):
+        run = runners.Run(
+            id="external", engine="vllm", recipe_id=None, cmd=["external"], env={}
+        )
+        run.status = "running"
+        run.ready = True
+        run.url = "http://127.0.0.1:9999"
+        run.probe_failures = server._EXTERNAL_PROBE_FAILURES - 1
+        run.meta["_external"] = True
+        client = mock.AsyncMock()
+        client.get.side_effect = RuntimeError("endpoint is down")
+        context = mock.MagicMock()
+        context.__aenter__ = mock.AsyncMock(return_value=client)
+        context.__aexit__ = mock.AsyncMock(return_value=None)
+        with (
+            mock.patch.object(server.runner, "runs", {run.id: run}),
+            mock.patch("httpx.AsyncClient", return_value=context),
+            mock.patch.object(runners.db, "runs_update"),
+        ):
+            asyncio.run(server._watchdog_tick(1))
+        self.assertEqual(run.status, "exited")
+        self.assertFalse(server.runner.active())
+        self.assertIn("external endpoint stopped answering", "\n".join(run.ring))
+
+
 if __name__ == "__main__":
     unittest.main()
