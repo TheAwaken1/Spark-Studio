@@ -423,6 +423,7 @@ Use this skill when repairing recipes.
         command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
         self.assertEqual(command[:2], ["/opt/hermes", "--tui"])
         self.assertEqual(command[command.index("--model") + 1], "fixture-model")
+        self.assertEqual(command[command.index("--provider") + 1], "custom")
         self.assertNotIn("--max-turns", command)
         self.assertIn("file,terminal,mcp-sparkstudio,memory,skills,session_search", command)
 

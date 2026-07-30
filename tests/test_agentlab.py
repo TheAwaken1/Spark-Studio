@@ -59,6 +59,7 @@ class AgentLabConfigurationTests(unittest.TestCase):
             "/usr/bin/hermes", "do the task", "local-model", max_turns=42
         )
         self.assertEqual(command[:2], ["/usr/bin/hermes", "chat"])
+        self.assertEqual(command[command.index("--provider") + 1], "custom")
         self.assertIn("file,terminal", command)
         self.assertIn("--checkpoints", command)
         self.assertEqual(command[command.index("--max-turns") + 1], "42")
@@ -76,6 +77,7 @@ class AgentLabConfigurationTests(unittest.TestCase):
         )
         self.assertEqual(command[:2], ["hermes", "chat"])
         self.assertEqual(command[command.index("--model") + 1], "current-model")
+        self.assertEqual(command[command.index("--provider") + 1], "custom")
         self.assertEqual(command[command.index("--max-turns") + 1], "55")
         self.assertIn("file,terminal,mcp-sparkstudio,memory,skills,session_search", command)
         self.assertIn("--checkpoints", command)

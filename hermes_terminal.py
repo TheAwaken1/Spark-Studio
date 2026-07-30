@@ -154,6 +154,8 @@ def browser_tui_command(binary: str, model: str) -> list[str]:
         "--tui",
         "--model",
         model,
+        "--provider",
+        "custom",
         "--toolsets",
         agentlab.hermes_interactive_toolsets(),
     ]
