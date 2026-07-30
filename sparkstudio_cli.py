@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -241,6 +242,27 @@ def cmd_agent_chat(args: argparse.Namespace) -> int:
     )
 
 
+def cmd_agent_auth(args: argparse.Namespace) -> int:
+    """Run ``hermes auth`` against Spark Studio's isolated profile.
+
+    Bare ``hermes auth add <provider>`` writes to the personal ``~/.hermes``,
+    which the dashboard deliberately never reads. This wrapper targets the
+    profile that dashboard Chat and ``sparkstudio hermes`` actually use, so
+    ``/model`` can switch to the authenticated provider.
+    """
+    binary = agentlab.find_hermes()
+    if not binary:
+        raise RuntimeError(f"Hermes Agent is not installed. Run: {agentlab.HERMES_INSTALL}")
+    agentlab.HERMES_HOME.mkdir(parents=True, exist_ok=True)
+    env = os.environ.copy()
+    env["HERMES_HOME"] = str(agentlab.HERMES_HOME)
+    print(f"Isolated profile: {agentlab.HERMES_HOME}", flush=True)
+    completed = subprocess.run([binary, "auth", *args.auth_args], env=env, check=False)
+    if completed.returncode == 0 and args.auth_args[:1] == ["add"]:
+        print("Credential saved. Restart Hermes Chat (or /model in a new session) to use it.")
+    return completed.returncode
+
+
 def _print_agent_run(result: dict[str, Any]) -> None:
     print(f"Run: {result['id']} · {result['status']}")
     print(f"Model: {result['model']}")
@@ -409,6 +431,18 @@ def build_parser() -> argparse.ArgumentParser:
     agent_chat.set_defaults(func=cmd_agent_chat)
     cases = agent_commands.add_parser("cases", help="list deterministic evaluation cases")
     cases.set_defaults(func=cmd_agent_cases)
+
+    auth = agent_commands.add_parser(
+        "auth",
+        help="manage provider credentials for the dashboard's isolated Hermes profile",
+    )
+    auth.add_argument(
+        "auth_args",
+        nargs=argparse.REMAINDER,
+        metavar="args",
+        help="passed through to `hermes auth` (e.g. `add openai-codex`, `list`)",
+    )
+    auth.set_defaults(func=cmd_agent_auth)
 
     run = agent_commands.add_parser("run", help="run Hermes on a repository task")
     run.add_argument("task")

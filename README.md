@@ -308,6 +308,19 @@ PTY lifecycle, and type `/model` inside Hermes to move between the local model
 and any authenticated Claude or Codex provider.
 The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
 are shared with `sparkstudio hermes`, so both entry points behave consistently.
+
+To make Claude, Codex, or Copilot available to `/model` inside Hermes Chat,
+authenticate the **isolated profile** — not your personal one:
+
+```bash
+sparkstudio agent auth add openai-codex   # or anthropic-claude, copilot, …
+```
+
+Bare `hermes auth add <provider>` writes to your personal `~/.hermes`, which
+the dashboard deliberately never reads, so credentials added that way will
+still show "needs setup" in `/model`. `sparkstudio agent auth` wraps
+`hermes auth` with the dashboard's `HERMES_HOME`; use it for `list` and other
+auth subcommands too. The local model needs no credentials at all.
 Spark Studio prefers the WebSocket bridge and automatically falls back to a
 same-origin HTTPS terminal transport when a browser, certificate policy, or
 network proxy rejects WSS. The fallback carries the same PTY bytes, keyboard
