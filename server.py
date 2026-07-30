@@ -2481,21 +2481,14 @@ def _studio_url_for_websocket(ws: WebSocket) -> str:
 
 
 
-def _require_hermes_addon_access(request: Request) -> None:
-    allowed, _, reason = _terminal_access_policy(
-        request.client.host if request.client else "",
-        request.url.scheme,
-    )
-    if not allowed:
-        raise HTTPException(403, reason)
-
-
 def _lan_peer_allowed(peer: str) -> bool:
     """The dashboard's normal trust boundary: loopback or the private LAN.
 
     Unlike ``_terminal_access_policy`` this does not demand HTTPS — it matches
     what every other dashboard action (start engines, edit recipes) already
-    permits. Reserved for actions with fixed behavior and no shell access.
+    permits. Every Hermes add-on surface except the interactive shell itself
+    (learning settings, pending-write approvals, Skin Studio) uses this gate;
+    the PTY transports keep the encrypted-transport policy.
     """
     if peer in {"localhost", "testclient"}:
         return True
@@ -2542,14 +2535,14 @@ class HermesLearningReq(BaseModel):
 @app.get("/api/agentlab/learning")
 def agentlab_learning_status(request: Request):
     """Learning preferences for Spark Studio's isolated Hermes profile."""
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     return agentlab.hermes_learning_status()
 
 
 @app.put("/api/agentlab/learning")
 def update_agentlab_learning(req: HermesLearningReq, request: Request):
     """Update learning preferences; active sessions apply them after restart."""
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     try:
         settings = agentlab.update_hermes_learning_settings(
             req.model_dump(exclude_none=True)
@@ -2567,7 +2560,7 @@ def update_agentlab_learning(req: HermesLearningReq, request: Request):
 @app.get("/api/agentlab/pending")
 def agentlab_pending_writes(request: Request):
     """Pending isolated-profile memory and skill writes for dashboard review."""
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     pending = agentlab.hermes_pending_writes()
     return {
         "pending": pending,
@@ -2582,7 +2575,7 @@ async def resolve_agentlab_pending(
     subsystem: str, pending_id: str, action: str, request: Request
 ):
     """Approve or reject one staged Hermes write after an explicit UI action."""
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     try:
         return await asyncio.to_thread(
             agentlab.resolve_hermes_pending, subsystem, pending_id, action
@@ -2599,13 +2592,13 @@ async def resolve_agentlab_pending(
 
 @app.get("/api/hermes-mod/status")
 async def hermes_mod_status(request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     return await hermes_mod_service.status()
 
 
 @app.post("/api/hermes-mod/install")
 async def hermes_mod_install(request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     result = await hermes_mod_service.install()
     if not result["installed"]:
         raise HTTPException(500, result.get("error") or "Skin Studio installation failed")
@@ -2614,7 +2607,7 @@ async def hermes_mod_install(request: Request):
 
 @app.post("/api/hermes-mod/start")
 async def hermes_mod_start(request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     result = await hermes_mod_service.start()
     if not result["healthy"]:
         raise HTTPException(503, result.get("error") or "Skin Studio did not start")
@@ -2623,19 +2616,19 @@ async def hermes_mod_start(request: Request):
 
 @app.post("/api/hermes-mod/stop")
 async def hermes_mod_stop(request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     return await hermes_mod_service.stop()
 
 
 @app.post("/api/hermes-mod/skins/default")
 async def hermes_mod_use_original_skin(request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     return await asyncio.to_thread(hermes_mod_service.use_original_skin)
 
 
 @app.delete("/api/hermes-mod/skins/{skin_name}")
 async def hermes_mod_delete_skin(skin_name: str, request: Request):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     try:
         return await asyncio.to_thread(hermes_mod_service.delete_user_skin, skin_name)
     except FileNotFoundError as exc:
@@ -2667,7 +2660,7 @@ def _hermes_mod_cors_headers() -> dict[str, str]:
     methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
 )
 async def hermes_mod_proxy(request: Request, path: str = ""):
-    _require_hermes_addon_access(request)
+    _require_lan_access(request)
     cors = _hermes_mod_cors_headers()
     if request.method == "OPTIONS":
         return Response(status_code=204, headers=cors)
