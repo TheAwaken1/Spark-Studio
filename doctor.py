@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import os
 import platform
+import re
 import shutil
 import socket
 import subprocess
@@ -74,6 +75,23 @@ def _lan_ips() -> list[str]:
     except Exception:  # noqa: BLE001
         pass
     return ips
+
+
+def _https_urls() -> list[str]:
+    """Site addresses of the optional Caddy HTTPS front end, if installed.
+
+    The proxy is provisioned outside this repo; its user unit names the
+    Caddyfile, whose site addresses are the exact URLs browsers should use.
+    """
+    unit = Path.home() / ".config" / "systemd" / "user" / "spark-studio-https.service"
+    try:
+        match = re.search(r"--config\s+(\S+)", unit.read_text(encoding="utf-8"))
+        if not match:
+            return []
+        caddyfile = Path(match.group(1)).read_text(encoding="utf-8")
+    except OSError:
+        return []
+    return re.findall(r"^\s*(https://[^\s{]+)", caddyfile, re.MULTILINE)
 
 
 def _port_in_use(port: int) -> bool:
@@ -351,6 +369,7 @@ def run_checks(port: int = DEFAULT_PORT) -> dict[str, Any]:
         "urls": {
             "local": f"http://127.0.0.1:{port}",
             "lan": [f"http://{ip}:{port}" for ip in lan],
+            "https": _https_urls(),
         },
     }
 
@@ -369,6 +388,10 @@ def format_cli(report: dict[str, Any]) -> str:
     lines.append(f"Local:   {report['urls']['local']}")
     for u in report["urls"]["lan"]:
         lines.append(f"LAN:     {u}")
+    for u in report["urls"].get("https", []):
+        lines.append(f"HTTPS:   {u}")
+    if report["urls"].get("https"):
+        lines.append("         (use the https address from other devices for Hermes Chat)")
     return "\n".join(lines)
 
 

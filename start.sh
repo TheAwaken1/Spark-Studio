@@ -260,6 +260,21 @@ if [[ "$HOST" == "0.0.0.0" ]]; then
         _url "Network:" "http://$ip:$PORT"
     done
 fi
+# The optional Caddy HTTPS front end is provisioned outside this repo; its
+# user unit names the Caddyfile, whose site addresses are the URLs to print.
+HTTPS_UNIT="$HOME/.config/systemd/user/spark-studio-https.service"
+if [[ -f "$HTTPS_UNIT" ]]; then
+    CADDYFILE="$(sed -n 's/.*--config \([^ ]*\).*/\1/p' "$HTTPS_UNIT" | head -1)"
+    if [[ -n "$CADDYFILE" && -f "$CADDYFILE" ]]; then
+        FOUND_HTTPS=0
+        while IFS= read -r addr; do
+            _url "HTTPS:  " "$addr"
+            FOUND_HTTPS=1
+        done < <(grep -oE '^[[:space:]]*https://[^[:space:]{]+' "$CADDYFILE" | tr -d '[:space:]')
+        [[ "$FOUND_HTTPS" == "1" ]] \
+            && echo "  (use the https address from other devices for Hermes Chat)"
+    fi
+fi
 
 # Desktop session (not headless, not SSH): open the dashboard in the browser
 # once the server answers. Opt out with --no-open or SPARK_STUDIO_NO_OPEN=1.
