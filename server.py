@@ -16,6 +16,7 @@ import re
 import secrets
 import shlex
 import sys
+import threading
 import time
 import urllib.parse
 from pathlib import Path
@@ -981,9 +982,15 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
         raise HTTPException(
             400, "sparkrun is not installed — run `uvx sparkrun setup` in a terminal first"
         )
-    ref = ref.strip()
+    # Runs adopted before bundled recipes gained stable @studio refs persisted
+    # the absolute YAML path.  Canonicalize those trusted local paths so their
+    # saved Run button remains launchable instead of reporting a missing ref.
+    ref = sparkrun_service.canonical_recipe_ref(ref)
     if not re.fullmatch(r"@?[\w.-]+(?:/[\w.-]+)?", ref):
         raise HTTPException(400, f"invalid sparkrun recipe ref: {ref!r}")
+    launch_target = sparkrun_service.resolve_recipe_target(ref)
+    if ref.startswith("@studio/") and launch_target == ref:
+        raise HTTPException(404, f"bundled sparkrun recipe not found: {ref}")
     # Always pass --tp: recipes carry their own tensor_parallel default (often
     # 2+), which would silently override a single-node launch otherwise.
     tp = max(1, int(tp or 1))
@@ -1002,7 +1009,7 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
             spark_opts = ((rec or {}).get("args") or {}).get("_sparkrun") or {}
         except Exception:  # noqa: BLE001
             spark_opts = {}
-    cmd = f"sparkrun run {shlex.quote(ref)} --tp {tp}"
+    cmd = f"sparkrun run {shlex.quote(launch_target)} --tp {tp}"
     if spark_opts.get("max_model_len"):
         cmd += f" --max-model-len {int(spark_opts['max_model_len'])}"
     for k, v in (spark_opts.get("overrides") or {}).items():
@@ -1012,7 +1019,7 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
     # The full ref is the fallback (bare workload names aren't resolvable);
     # once the job id is known the runner/watchdog tightens this to a
     # jobid-scoped `sparkrun stop` that can't hit other jobs.
-    stop_sh = f"sparkrun stop {shlex.quote(ref)}"
+    stop_sh = f"sparkrun stop {shlex.quote(launch_target)}"
     run = runner.start(
         engine="sparkrun",
         args={},
@@ -1915,6 +1922,105 @@ async def agents_login(which: str, request: Request):
     return EventSourceResponse(gen())
 
 
+# ----- OpenAI-compatible view of the active run -----------------------------
+
+# Engine paths the passthrough will forward. Everything else vLLM exposes under
+# /v1 (LoRA loading, sleep/wake, profiling) stays off the dashboard's surface.
+_ENGINE_PROXY_PATHS = {
+    "models",
+    "chat/completions",
+    "completions",
+    "embeddings",
+    "rerank",
+}
+
+
+async def _retarget_engine_model(base: str, body: bytes) -> bytes:
+    """Repoint a stale model id at whatever the active engine actually serves.
+
+    A model selected before a recipe swap no longer exists upstream, and vLLM
+    rejects the request outright. This base URL means "the active engine", so
+    retargeting is the honest reading of the request rather than a 404.
+    """
+    import httpx
+
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, UnicodeDecodeError):
+        return body
+    if not isinstance(payload, dict) or not payload.get("model"):
+        return body
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            response = await client.get(f"{base}/v1/models")
+        served = [m.get("id") for m in (response.json().get("data") or []) if m.get("id")]
+    except Exception:  # noqa: BLE001 - upstream decides; don't rewrite blind
+        return body
+    if not served or payload["model"] in served:
+        return body
+    payload["model"] = served[0]
+    return json.dumps(payload).encode()
+
+
+@app.api_route("/api/engine/v1/{path:path}", methods=["GET", "POST"])
+async def engine_openai_proxy(path: str, request: Request):
+    """A stable OpenAI-compatible base URL for whichever engine is live.
+
+    Recipes come and go on different ports, so anything holding a direct engine
+    URL goes stale the moment one is swapped. Hermes' ``/model`` picker is
+    pointed here instead of at a concrete port, which is what makes a recipe
+    launched mid-session discoverable and selectable from inside the TUI.
+    """
+    import httpx
+
+    path = path.strip("/")
+    if path not in _ENGINE_PROXY_PATHS:
+        raise HTTPException(404, f"not proxied to the engine: /v1/{path}")
+    run = runner.active()
+    if not run or not run.url:
+        raise HTTPException(503, "no engine is currently loaded")
+    base = run.url.rstrip("/").replace("://0.0.0.0", "://127.0.0.1")
+
+    body = await request.body()
+    if body and path in {"chat/completions", "completions"}:
+        body = await _retarget_engine_model(base, body)
+
+    # read=None: generation streams for as long as the engine needs.
+    client = httpx.AsyncClient(
+        timeout=httpx.Timeout(connect=10.0, read=None, write=60.0, pool=10.0)
+    )
+    upstream_request = client.build_request(
+        request.method,
+        f"{base}/v1/{path}",
+        content=body or None,
+        params=request.query_params,
+        headers={
+            key: value
+            for key, value in request.headers.items()
+            if key.lower() in {"content-type", "accept"}
+        },
+    )
+    try:
+        upstream = await client.send(upstream_request, stream=True)
+    except Exception as exc:  # noqa: BLE001
+        await client.aclose()
+        raise HTTPException(502, f"engine at {base} is unreachable: {exc}") from exc
+
+    async def relay():
+        try:
+            async for chunk in upstream.aiter_raw():
+                yield chunk
+        finally:
+            await upstream.aclose()
+            await client.aclose()
+
+    return StreamingResponse(
+        relay(),
+        status_code=upstream.status_code,
+        media_type=upstream.headers.get("content-type"),
+    )
+
+
 # ----- Chat proxy to the active run ----------------------------------------
 
 async def _count_prompt_tokens(base: str, model: str, messages: list) -> int | None:
@@ -2417,6 +2523,9 @@ def agentlab_terminal_status(request: Request):
             "access_mode": access_mode,
             "access_reason": access_reason,
             "workspace": str(APP_DIR),
+            # What Chat launches with when no engine is loaded — a provider the
+            # user picked with /model keeps the card startable through a swap.
+            "hermes_model": agentlab.hermes_model_binding(),
             "active": {
                 "id": active.id,
                 "model": active_model,
@@ -2479,16 +2588,32 @@ def _websocket_same_origin(ws: WebSocket) -> bool:
     return _origin_matches_request(origin, ws.headers)
 
 
+def _internal_studio_port(scope_server: tuple | None) -> int:
+    """Loopback port other local processes should dial to reach this app.
+
+    ``scope["server"]`` is NOT trustworthy behind the HTTPS proxy: uvicorn's
+    proxy-headers middleware rewrites it from X-Forwarded-Host, and Caddy
+    forwards the host without a port — so it decays to 80 (or 443). A Hermes
+    provider row written with that URL points at a port nothing listens on,
+    and every /models probe fails from then on. Treat proxy default ports as
+    the artifact they are; SPARK_STUDIO_INTERNAL_URL overrides for setups that
+    genuinely serve on 80/443.
+    """
+    try:
+        port = int((scope_server or ("127.0.0.1", 7860))[1] or 7860)
+    except (TypeError, ValueError):
+        return 7860
+    return 7860 if port in (80, 443) else port
+
+
 def _studio_url_for_websocket(ws: WebSocket) -> str:
     override = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
     if override:
         return override.rstrip("/")
-    server = ws.scope.get("server") or ("127.0.0.1", 7860)
-    port = int(server[1] or 7860)
     # Caddy terminates HTTPS/WSS and forwards to this loopback HTTP port. The
     # Hermes MCP child runs beside Spark Studio, so it must dial the backend,
     # not try TLS against uvicorn just because the browser used HTTPS.
-    return f"http://127.0.0.1:{port}"
+    return f"http://127.0.0.1:{_internal_studio_port(ws.scope.get('server'))}"
 
 
 
@@ -2721,8 +2846,14 @@ class HttpTerminalInputReq(BaseModel):
 
 
 _HTTP_TERMINAL_HEADER = "X-Spark-Studio-Terminal"
-_HTTP_TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
+# Leased PTYs, shared by both transports. A session outlives the socket that
+# created it so a page reload reattaches to the running Hermes instead of
+# killing it and spawning a new one.
+_TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
 _HTTP_TERMINAL_TTL_SECONDS = 600.0
+# Output retained while no client is attached. The tail is what a reattaching
+# terminal renders, so an overflow drops from the front.
+_TERMINAL_BUFFER_LIMIT = 262144
 
 
 def _require_http_terminal_access(request: Request) -> None:
@@ -2740,49 +2871,147 @@ def _prune_http_terminal_sessions() -> None:
     cutoff = time.monotonic() - _HTTP_TERMINAL_TTL_SECONDS
     stale = [
         session_id
-        for session_id, session in _HTTP_TERMINAL_SESSIONS.items()
+        for session_id, session in _TERMINAL_SESSIONS.items()
         if session["last_seen"] < cutoff
+        or (session["closed"] and not session["buffer"])
     ]
     for session_id in stale:
-        session = _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
+        session = _TERMINAL_SESSIONS.pop(session_id, None)
         if session:
+            # Closing the pty makes the pump's next read return EOF, so it
+            # unwinds on its own — no cross-thread task cancellation needed.
+            session["closed"] = True
             session["bridge"].close()
 
 
 def _http_terminal_session(session_id: str) -> dict[str, Any]:
     _prune_http_terminal_sessions()
-    session = _HTTP_TERMINAL_SESSIONS.get(session_id)
+    session = _TERMINAL_SESSIONS.get(session_id)
     if not session:
         raise HTTPException(404, "Hermes terminal session not found")
     session["last_seen"] = time.monotonic()
     return session
 
 
+def _pump_terminal_session(session: dict[str, Any]) -> None:
+    """Drain the pty for the whole life of the lease, attached or not.
+
+    Runs on its own thread rather than an asyncio task on purpose: a task
+    created while serving the socket gets cancelled when that connection's
+    scope unwinds, which would close the pty on the very disconnect the lease
+    exists to survive. A thread outlives the connection, as the lease must.
+
+    Draining unattended matters as much as staying alive — nothing else reads
+    this fd, so a paused pump would fill the 64K pipe and block Hermes
+    mid-turn, leaving the reattached terminal wedged.
+    """
+    bridge = session["bridge"]
+    try:
+        while True:
+            payload = bridge.read(0.2)
+            if payload is None:
+                return
+            if session["attached"]:
+                session["last_seen"] = time.monotonic()
+            if not payload:
+                continue
+            with session["lock"]:
+                buffer = session["buffer"]
+                buffer += payload
+                if len(buffer) > _TERMINAL_BUFFER_LIMIT:
+                    del buffer[: len(buffer) - _TERMINAL_BUFFER_LIMIT]
+            session["ready"].set()
+    finally:
+        session["closed"] = True
+        session["ready"].set()
+        bridge.close()
+
+
+def _new_terminal_session(bridge: hermes_terminal.PtyBridge) -> str:
+    """Register a leased PTY and start draining it."""
+    session_id = secrets.token_urlsafe(32)
+    session: dict[str, Any] = {
+        "bridge": bridge,
+        "last_seen": time.monotonic(),
+        "buffer": bytearray(),
+        "lock": threading.Lock(),
+        # Threading primitives, not asyncio ones: a lease outlives the
+        # connection that made it, and may well be read from a different event
+        # loop than the one it was created on.
+        "ready": threading.Event(),
+        "attached": False,
+        "closed": False,
+        # Bumped on every attach so a superseded socket's forwarder retires
+        # instead of racing the new one for the same buffer.
+        "generation": 0,
+    }
+    _TERMINAL_SESSIONS[session_id] = session
+    session["pump"] = threading.Thread(
+        target=_pump_terminal_session,
+        args=(session,),
+        name=f"hermes-pty-{session_id[:8]}",
+        daemon=True,
+    )
+    session["pump"].start()
+    return session_id
+
+
+def _take_terminal_output(session: dict[str, Any], timeout: float) -> bytes:
+    """Block briefly for pty output, then take whatever accumulated."""
+    with session["lock"]:
+        pending = bool(session["buffer"])
+    if not pending and not session["closed"]:
+        session["ready"].wait(timeout)
+    with session["lock"]:
+        payload = bytes(session["buffer"])
+        session["buffer"].clear()
+        # Clear only once drained, and under the same lock as the drain, so a
+        # concurrent append is either taken here or still followed by its set().
+        session["ready"].clear()
+    return payload
+
+
+async def _await_terminal_output(session: dict[str, Any], timeout: float) -> bytes:
+    return await asyncio.to_thread(_take_terminal_output, session, timeout)
+
+
+async def _resolve_terminal_endpoint() -> dict[str, Any]:
+    """Bind Chat to the live engine when there is one, else run detached.
+
+    Chat must survive a recipe swap: the engine it was bound to disappears for
+    the whole load, and a hosted provider picked with ``/model`` never needed it
+    in the first place. A probe failure is treated the same as no engine.
+    """
+    active = runner.active()
+    if active and active.url and active.ready:
+        try:
+            return await asyncio.to_thread(
+                agentlab.discover_endpoint, base_url=active.url
+            )
+        except Exception:  # noqa: BLE001 - engine vanished mid-swap
+            pass
+    return agentlab.detached_endpoint()
+
+
 async def _spawn_http_terminal(
     request: Request,
     req: HttpTerminalSessionReq,
 ) -> hermes_terminal.PtyBridge:
-    active = runner.active()
-    if not active or not active.url:
-        raise HTTPException(409, "No model is loaded. Start an engine first.")
-    if not active.ready:
-        raise HTTPException(409, "The active model is still loading.")
     workspace = Path(req.workspace or str(APP_DIR)).expanduser().resolve()
-    endpoint = await asyncio.to_thread(
-        agentlab.discover_endpoint,
-        base_url=active.url,
-    )
-    server = request.scope.get("server") or ("127.0.0.1", 7860)
+    endpoint = await _resolve_terminal_endpoint()
     internal_url = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
     endpoint["studio_url"] = internal_url.rstrip("/") or (
-        f"http://127.0.0.1:{int(server[1] or 7860)}"
+        f"http://127.0.0.1:{_internal_studio_port(request.scope.get('server'))}"
     )
-    command, env = await asyncio.to_thread(
-        hermes_terminal.prepare_browser_tui,
-        endpoint,
-        workspace,
-        max_turns=max(1, min(int(req.max_turns), 1000)),
-    )
+    try:
+        command, env = await asyncio.to_thread(
+            hermes_terminal.prepare_browser_tui,
+            endpoint,
+            workspace,
+            max_turns=max(1, min(int(req.max_turns), 1000)),
+        )
+    except RuntimeError as exc:
+        raise HTTPException(409, str(exc)) from exc
     return await asyncio.to_thread(
         hermes_terminal.PtyBridge.spawn,
         command,
@@ -2799,12 +3028,7 @@ async def create_http_terminal_session(req: HttpTerminalSessionReq, request: Req
     _require_http_terminal_access(request)
     _prune_http_terminal_sessions()
     bridge = await _spawn_http_terminal(request, req)
-    session_id = secrets.token_urlsafe(32)
-    _HTTP_TERMINAL_SESSIONS[session_id] = {
-        "bridge": bridge,
-        "last_seen": time.monotonic(),
-    }
-    return {"session_id": session_id, "transport": "https"}
+    return {"session_id": _new_terminal_session(bridge), "transport": "https"}
 
 
 @app.get("/api/agentlab/terminal/sessions/{session_id}")
@@ -2819,12 +3043,10 @@ async def inspect_http_terminal_session(session_id: str, request: Request):
 async def poll_http_terminal_output(session_id: str, request: Request):
     _require_http_terminal_access(request)
     session = _http_terminal_session(session_id)
-    bridge = session["bridge"]
-    payload = await asyncio.to_thread(bridge.read, 0.75)
+    payload = await _await_terminal_output(session, 0.75)
     session["last_seen"] = time.monotonic()
-    if payload is None:
-        _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
-        await asyncio.to_thread(bridge.close)
+    if not payload and session["closed"]:
+        _TERMINAL_SESSIONS.pop(session_id, None)
         return {"data": "", "closed": True}
     return {
         "data": base64.b64encode(payload).decode("ascii") if payload else "",
@@ -2856,8 +3078,9 @@ async def write_http_terminal_input(
 @app.delete("/api/agentlab/terminal/sessions/{session_id}", status_code=204)
 async def close_http_terminal_session(session_id: str, request: Request):
     _require_http_terminal_access(request)
-    session = _HTTP_TERMINAL_SESSIONS.pop(session_id, None)
+    session = _TERMINAL_SESSIONS.pop(session_id, None)
     if session:
+        session["closed"] = True
         await asyncio.to_thread(session["bridge"].close)
     return Response(status_code=204)
 
@@ -2879,15 +3102,9 @@ async def agentlab_terminal(ws: WebSocket):
             reason=access_reason,
         )
         return
-    bridge: hermes_terminal.PtyBridge | None = None
+    session: dict[str, Any] | None = None
     reader_task: asyncio.Task | None = None
     try:
-        active = runner.active()
-        if not active or not active.url:
-            raise RuntimeError("No model is loaded. Start an engine first.")
-        if not active.ready:
-            raise RuntimeError("The active model is still loading.")
-
         raw_workspace = ws.query_params.get("workspace") or str(APP_DIR)
         workspace = Path(raw_workspace).expanduser().resolve()
         try:
@@ -2896,42 +3113,62 @@ async def agentlab_terminal(ws: WebSocket):
             )
         except ValueError:
             max_turns = 90
-        endpoint = await asyncio.to_thread(
-            agentlab.discover_endpoint,
-            base_url=active.url,
-        )
-        endpoint["studio_url"] = _studio_url_for_websocket(ws)
-        command, env = await asyncio.to_thread(
-            hermes_terminal.prepare_browser_tui,
-            endpoint,
-            workspace,
-            max_turns=max_turns,
-        )
-        bridge = await asyncio.to_thread(
-            hermes_terminal.PtyBridge.spawn,
-            command,
-            cwd=workspace,
-            env=env,
+
+        # Reattach to a lease the browser still holds — a reload should find the
+        # same Hermes, mid-turn if need be, rather than restart the agent.
+        _prune_http_terminal_sessions()
+        requested = ws.query_params.get("session") or ""
+        session_id = requested if requested in _TERMINAL_SESSIONS else ""
+        resumed = bool(session_id)
+        if session_id:
+            session = _TERMINAL_SESSIONS[session_id]
+        else:
+            endpoint = await _resolve_terminal_endpoint()
+            endpoint["studio_url"] = _studio_url_for_websocket(ws)
+            command, env = await asyncio.to_thread(
+                hermes_terminal.prepare_browser_tui,
+                endpoint,
+                workspace,
+                max_turns=max_turns,
+            )
+            bridge = await asyncio.to_thread(
+                hermes_terminal.PtyBridge.spawn,
+                command,
+                cwd=workspace,
+                env=env,
+            )
+            session_id = _new_terminal_session(bridge)
+            session = _TERMINAL_SESSIONS[session_id]
+
+        session["attached"] = True
+        session["last_seen"] = time.monotonic()
+        session["generation"] += 1
+        generation = session["generation"]
+        # Text frames are the control channel; the pty stream is always binary,
+        # so the client can tell them apart without framing of its own.
+        await ws.send_text(
+            json.dumps({"type": "session", "id": session_id, "resumed": resumed})
         )
 
         async def pump_output() -> None:
-            assert bridge is not None
+            assert session is not None
             try:
-                while True:
-                    payload = await asyncio.to_thread(bridge.read, 0.2)
-                    if payload is None:
-                        return
+                while session["generation"] == generation:
+                    payload = await _await_terminal_output(session, 0.2)
                     if payload:
                         await ws.send_bytes(payload)
-                    else:
-                        await asyncio.sleep(0)
+                    elif session["closed"]:
+                        _TERMINAL_SESSIONS.pop(session_id, None)
+                        return
             finally:
-                try:
-                    await ws.close(code=4410, reason="Hermes exited")
-                except Exception:  # noqa: BLE001
-                    pass
+                if session["generation"] == generation:
+                    try:
+                        await ws.close(code=4410, reason="Hermes exited")
+                    except Exception:  # noqa: BLE001
+                        pass
 
         reader_task = asyncio.create_task(pump_output())
+        bridge: hermes_terminal.PtyBridge = session["bridge"]
         while True:
             message = await ws.receive()
             if message.get("type") == "websocket.disconnect":
@@ -2964,8 +3201,12 @@ async def agentlab_terminal(ws: WebSocket):
                 await reader_task
             except (asyncio.CancelledError, Exception):
                 pass
-        if bridge:
-            await asyncio.to_thread(bridge.close)
+        # Detach, never kill: the lease is the whole point. The pty keeps
+        # draining in the background and the TTL janitor reaps it if the
+        # browser never comes back. Stop and Restart close it explicitly.
+        if session is not None:
+            session["attached"] = False
+            session["last_seen"] = time.monotonic()
 
 
 @app.get("/api/agentlab/history")
@@ -3658,7 +3899,7 @@ async def _background_registry_sync():
 
 
 async def _http_terminal_session_janitor():
-    """Reap HTTPS PTYs whose browser never returned to close or resume them."""
+    """Reap leased PTYs whose browser never returned to close or resume them."""
     while True:
         await asyncio.sleep(30)
         await asyncio.to_thread(_prune_http_terminal_sessions)
@@ -3667,9 +3908,10 @@ async def _http_terminal_session_janitor():
 @app.on_event("shutdown")
 async def _shutdown_hermes_mod():
     """The optional editor is app-owned; never leave its Node child behind."""
-    sessions = list(_HTTP_TERMINAL_SESSIONS.values())
-    _HTTP_TERMINAL_SESSIONS.clear()
+    sessions = list(_TERMINAL_SESSIONS.values())
+    _TERMINAL_SESSIONS.clear()
     for session in sessions:
+        session["closed"] = True
         await asyncio.to_thread(session["bridge"].close)
     await hermes_mod_service.stop()
 
@@ -3729,7 +3971,9 @@ def _adopt_sparkrun_job(job: dict, row: dict | None) -> None:
         prev_meta = {}
     load_stats = {k: prev_meta[k] for k in ("load_secs", "ram_delta_gb") if prev_meta.get(k) is not None}
     recipe_id = (row or {}).get("recipe_id")
-    if not recipe_id:
+    # A docker-recovered orphan may have no ref at all — don't mint a
+    # nameless My Recipes row for it.
+    if not recipe_id and ref:
         try:
             recipe_id = _ensure_sparkrun_recipe(ref)
         except Exception:  # noqa: BLE001
@@ -3758,8 +4002,8 @@ def _adopt_sparkrun_job(job: dict, row: dict | None) -> None:
         started_at=(row or {}).get("started_at"),
         pump_cmd=sparkrun_service.tail_pump_cmd(jobid, container),
         meta={**load_stats, "ref": ref, "tp": job.get("tp"), "jobid": jobid},
-        cmd_desc=f"sparkrun run {ref}",
-        label=(export or {}).get("model") or ref,
+        cmd_desc=f"sparkrun run {ref}" if ref else f"[adopted] sparkrun job {jobid}",
+        label=(export or {}).get("model") or ref or jobid,
     )
     if not run:
         return
@@ -4031,3 +4275,35 @@ async def _watchdog_tick(tick: int) -> None:
         if run.detached and run.proc is not None and run.proc.poll() is not None:
             if time.time() - (run.meta.get("tail_spawned_at") or 0) > 60:
                 await asyncio.to_thread(runner.respawn_tail, run)
+
+    await _sync_hermes_engine_models()
+
+
+async def _sync_hermes_engine_models() -> None:
+    """Mirror the active engine's served models into Hermes' provider row.
+
+    The TUI's /model open renders the Spark Studio row from its declared
+    ``models:`` list — Hermes only live-probes the *current* provider on a
+    normal open (``build_model_options_payload`` probe policy), so while Chat
+    runs on a hosted provider nothing else keeps that row honest across a
+    recipe swap. Idempotent: `update_studio_provider_models` rewrites the
+    profile only when the list actually changed.
+    """
+    import httpx
+
+    active = runner.active()
+    ids: list[str] = []
+    if active and active.ready and active.url:
+        base = active.url.rstrip("/").replace("://0.0.0.0", "://127.0.0.1")
+        try:
+            async with httpx.AsyncClient(timeout=4) as client:
+                r = await client.get(f"{base}/v1/models")
+            if r.status_code != 200:
+                return  # transient — keep the last written list
+            ids = [str(m.get("id")) for m in (r.json().get("data") or []) if m.get("id")]
+        except Exception:  # noqa: BLE001
+            return  # transient — keep the last written list
+    try:
+        await asyncio.to_thread(agentlab.update_studio_provider_models, ids)
+    except Exception:  # noqa: BLE001
+        pass

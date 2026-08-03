@@ -949,7 +949,7 @@ async function refreshRecipes() {
         openLaunchModal(r);
       } else {
         const body = r.raw_cmd
-          ? { engine: r.engine, raw_cmd: r.raw_cmd, env: r.env || {}, recipe_id: r.id }
+          ? { engine: r.engine, raw_cmd: r.raw_cmd, args: r.args || {}, env: r.env || {}, recipe_id: r.id }
           : { engine: r.engine, args: { model: r.model, ...r.args }, env: r.env || {}, recipe_id: r.id };
         const run = await api('/runs', { method: 'POST', body });
         toast(`Started run ${run.id}`);
@@ -3953,6 +3953,23 @@ function rememberHermesHttpSession(sessionId) {
   } catch { /* storage may be disabled; the live in-memory session still works */ }
 }
 
+// The WSS lease survives this page, so its id has to outlive it too. Kept
+// separate from the HTTPS one: the two transports lease independently and a
+// reload must not hand a WSS id to the HTTPS fallback.
+const HERMES_WS_SESSION_KEY = 'spark-studio-hermes-ws-session';
+
+function storedHermesWsSession() {
+  try { return window.sessionStorage.getItem(HERMES_WS_SESSION_KEY) || ''; }
+  catch { return ''; }
+}
+
+function rememberHermesWsSession(sessionId) {
+  try {
+    if (sessionId) window.sessionStorage.setItem(HERMES_WS_SESSION_KEY, sessionId);
+    else window.sessionStorage.removeItem(HERMES_WS_SESSION_KEY);
+  } catch { /* storage may be disabled; the live in-memory session still works */ }
+}
+
 const hermesMod = {
   busy: false,
   iframeLoaded: false,
@@ -4047,7 +4064,10 @@ async function refreshHermesTui(autoStart = false) {
     const status = await api('/agentlab/terminal/status');
     if (!$('#hermesWorkspace').value) $('#hermesWorkspace').value = status.workspace || '';
     const active = status.active;
-    $('#hermesTuiModel').textContent = active?.model || 'No loaded model';
+    // Chat runs detached when no engine is loaded, on whatever provider the
+    // profile carries — so a recipe swap no longer takes the terminal down.
+    const saved = status.hermes_model?.model || '';
+    $('#hermesTuiModel').textContent = active?.model || saved || 'No loaded model';
     const accessLabels = {
       local: '<i class="fa-solid fa-shield-halved"></i> Local browser',
       private_https: '<i class="fa-solid fa-lock"></i> Encrypted private LAN',
@@ -4056,7 +4076,8 @@ async function refreshHermesTui(autoStart = false) {
     $('#hermesTuiSecurity').innerHTML = accessLabels[status.access_mode]
       || '<i class="fa-solid fa-lock"></i> Terminal access restricted';
     const accessAllowed = status.access_allowed !== false;
-    const ready = status.installed && status.pty && active?.ready && accessAllowed;
+    const hasModel = Boolean(active?.ready || saved);
+    const ready = status.installed && status.pty && hasModel && accessAllowed;
     const running = Boolean(hermesTui.socket || hermesTui.httpSession || hermesTui.httpStarting);
     const install = $('#hermesInstall');
     install.hidden = status.installed;
@@ -4069,9 +4090,23 @@ async function refreshHermesTui(autoStart = false) {
     if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
     else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
     else if (!accessAllowed) setHermesTuiState(httpsHint || status.access_reason || 'Terminal access denied', 'error');
-    else if (!active) setHermesTuiState('Load a model to connect Hermes', 'error');
-    else if (!active.ready) setHermesTuiState('Waiting for the model to finish loading…');
-    else if (!running) setHermesTuiState('Ready to connect to the loaded model');
+    else if (!hasModel) {
+      setHermesTuiState(
+        active
+          ? 'Waiting for the model to finish loading…'
+          : 'Load a model to connect Hermes, then pick any provider with /model',
+        'error',
+      );
+    } else if (!running) {
+      // Detached on a local binding means the engine behind it is gone —
+      // startable, but the user has to /model onto a reachable provider.
+      const hosted = status.hermes_model?.studio_owned === false;
+      setHermesTuiState(active?.ready
+        ? 'Ready to connect to the loaded model'
+        : hosted
+          ? `Ready — Hermes stays on ${saved}`
+          : `Ready — ${saved} is not loaded; switch provider with /model`);
+    }
     document.querySelector('#hermesTuiStart').disabled = !ready || running;
     if (autoStart && ready && !running && !hermesTui.autoStarted) {
       hermesTui.autoStarted = true;
@@ -4286,12 +4321,16 @@ function startHermesTui({ retryCount = 0 } = {}) {
     return;
   }
   if (hermesTui.socket) hermesTui.socket.close(1000, 'restart');
+  const resuming = storedHermesWsSession();
   hermesTui.terminal.reset();
-  hermesTui.terminal.write('\x1b[38;2;118;199;255mStarting Hermes TUI…\x1b[0m\r\n');
+  hermesTui.terminal.write(resuming
+    ? '\x1b[38;2;118;199;255mReattaching to Hermes…\x1b[0m\r\n'
+    : '\x1b[38;2;118;199;255mStarting Hermes TUI…\x1b[0m\r\n');
   try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
   const workspace = $('#hermesWorkspace').value.trim();
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const params = new URLSearchParams({ workspace, max_turns: '90' });
+  if (resuming) params.set('session', resuming);
   const socket = new WebSocket(`${protocol}//${window.location.host}/api/agentlab/terminal?${params}`);
   let opened = false;
   socket.binaryType = 'arraybuffer';
@@ -4314,7 +4353,24 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (hermesTui.socket !== socket) return;
     if (event.data instanceof ArrayBuffer) hermesTui.terminal.write(new Uint8Array(event.data));
     else if (event.data instanceof Blob) hermesTui.terminal.write(new Uint8Array(await event.data.arrayBuffer()));
-    else hermesTui.terminal.write(event.data);
+    else {
+      // Text frames carry lease control. Anything that isn't control JSON is
+      // a server-side message meant for the user (e.g. a startup failure).
+      let control = null;
+      try { control = JSON.parse(event.data); } catch { /* not control */ }
+      if (control?.type === 'session') {
+        rememberHermesWsSession(control.id);
+        if (control.resumed) setHermesTuiState('Reattached to the running Hermes', 'ready');
+        else if (resuming) {
+          // The lease expired or the dashboard restarted — say so rather than
+          // leaving "Reattaching…" over what is actually a new agent.
+          hermesTui.terminal.write('\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
+          setHermesTuiState('Hermes is running', 'ready');
+        }
+      } else {
+        hermesTui.terminal.write(event.data);
+      }
+    }
   });
   socket.addEventListener('close', (event) => {
     if (hermesTui.socket !== socket) return;
@@ -4344,6 +4400,9 @@ function startHermesTui({ retryCount = 0 } = {}) {
       startHermesHttpFallback(0);
       return;
     }
+    // 4410 means the agent itself exited, so the lease is spent. Every other
+    // close leaves it standing — that is what a reload reattaches to.
+    if (event.code === 4410 || event.code === 1011) rememberHermesWsSession('');
     const expected = event.code === 1000 || event.code === 4410;
     const reason = event.reason || (expected
       ? 'Hermes exited'
@@ -4364,8 +4423,21 @@ function stopHermesTui() {
   }
   const socket = hermesTui.socket;
   stopHermesHttpTui();
+  // Stop means stop: end the lease server-side, or the pty would keep running
+  // headless until the TTL and a later reload would reattach to it.
+  endHermesWsLease();
   if (socket) socket.close(1000, 'Stopped from Spark Studio');
   else setHermesControls(false);
+}
+
+function endHermesWsLease() {
+  const sessionId = storedHermesWsSession();
+  rememberHermesWsSession('');
+  if (!sessionId) return Promise.resolve();
+  return fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(sessionId)}`, {
+    method: 'DELETE',
+    headers: { 'X-Spark-Studio-Terminal': '1' },
+  }).catch(() => { /* already reaped server-side */ });
 }
 
 function restartHermesTui() {
@@ -4374,11 +4446,17 @@ function restartHermesTui() {
     return;
   }
   const socket = hermesTui.socket;
+  // Restart means a fresh agent, so drop the lease rather than reattaching.
+  const ended = endHermesWsLease();
   if (!socket) {
-    startHermesTui();
+    ended.finally(() => startHermesTui());
     return;
   }
-  socket.addEventListener('close', () => setTimeout(startHermesTui, 120), { once: true });
+  socket.addEventListener(
+    'close',
+    () => ended.finally(() => setTimeout(startHermesTui, 120)),
+    { once: true },
+  );
   socket.close(1000, 'Restarted from Spark Studio');
 }
 
@@ -4387,10 +4465,10 @@ $('#hermesTuiStart').addEventListener('click', startHermesTui);
 $('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);
 window.addEventListener('beforeunload', () => {
-  // A WSS PTY belongs to its socket and is reaped server-side on disconnect.
-  // Keep an HTTPS fallback lease alive so this tab can reattach after opening
-  // a preview, navigating back, or reloading. The Stop button still closes it
-  // immediately, and the server janitor reaps abandoned sessions.
+  // Both transports lease their PTY, so closing the socket only detaches it.
+  // The agent keeps running and this tab reattaches by session id after a
+  // preview, a back-navigation, or a reload. Stop closes it immediately, and
+  // the server janitor reaps leases the browser never comes back to.
   if (hermesTui.socket) hermesTui.socket.close(1000, 'Dashboard page unloaded');
 });
 
@@ -4686,6 +4764,17 @@ function renderHermesPending(result) {
       text.textContent = item.repair_notes.join(' ');
       repair.append(text);
       main.append(repair);
+    }
+    if (item.skill_scope) {
+      // Bundled Studio skills live in the repo, not the profile — approving
+      // one edits a file under version control.
+      const scope = document.createElement('div');
+      scope.className = 'hermes-pending-scope';
+      scope.innerHTML = '<i class="fa-solid fa-folder-open"></i>';
+      const text = document.createElement('span');
+      text.textContent = item.skill_scope;
+      scope.append(text);
+      main.append(scope);
     }
     if (item.blocked_reason) {
       const blocked = document.createElement('div');

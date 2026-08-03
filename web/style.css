@@ -1034,6 +1034,7 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
 }
 .hermes-pending-truncated { margin-top: 4px; color: var(--muted); font-size: 9px; }
 .hermes-pending-repair,
+.hermes-pending-scope,
 .hermes-pending-blocked,
 .hermes-pending-error {
   display: flex;
@@ -1049,6 +1050,12 @@ label.checkbox { flex-direction: row; align-items: center; gap: 8px; color: var(
   color: #a4dbff;
   border: 1px solid rgba(118, 199, 255, 0.2);
   background: rgba(118, 199, 255, 0.07);
+}
+.hermes-pending-scope {
+  color: var(--muted);
+  border: 1px solid rgba(148, 163, 184, 0.22);
+  background: rgba(148, 163, 184, 0.07);
+  word-break: break-all;
 }
 .hermes-pending-blocked {
   color: #ffd08a;

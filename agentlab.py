@@ -296,6 +296,25 @@ def discover_endpoint(
     }
 
 
+def detached_endpoint(studio_url: str = "http://127.0.0.1:7860") -> dict[str, Any]:
+    """Endpoint shape for a Hermes session with no local engine behind it.
+
+    Chat keeps working while a recipe is swapping out — or while the user is on
+    a hosted provider picked with ``/model`` — so the TUI must be startable with
+    nothing loaded. The caller resolves the model from the isolated profile
+    instead of from a live ``/v1/models`` probe.
+    """
+    return {
+        "studio_url": studio_url.rstrip("/"),
+        "base_url": None,
+        "model": None,
+        "context_length": None,
+        "active_run": None,
+        "models": [],
+        "detached": True,
+    }
+
+
 def hermes_status(endpoint: dict[str, Any] | None = None) -> dict[str, Any]:
     binary = find_hermes()
     status: dict[str, Any] = {
@@ -596,11 +615,67 @@ def _prepare_pending_record(
     return prepared, notes, ""
 
 
-def _installed_skill_names() -> set[str]:
-    root = HERMES_HOME / "skills"
-    if not root.is_dir():
-        return set()
-    return {path.parent.name for path in root.rglob("SKILL.md")}
+def _external_skill_dirs() -> list[Path]:
+    """Extra skill roots from ``skills.external_dirs`` in the isolated profile."""
+    path = HERMES_HOME / "config.yaml"
+    with _CONFIG_LOCK:
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return []
+    skills = config.get("skills") if isinstance(config, dict) else None
+    entries = skills.get("external_dirs") if isinstance(skills, dict) else None
+    roots: list[Path] = []
+    for entry in entries or []:
+        try:
+            root = Path(os.path.expandvars(str(entry))).expanduser()
+        except (TypeError, ValueError):
+            continue
+        if root.is_dir() and root not in roots:
+            roots.append(root)
+    return roots
+
+
+def _installed_skills() -> dict[str, Path]:
+    """Skill names Hermes can resolve, mapped to the directory holding each.
+
+    Hermes' own ``_find_skill`` searches ``skills.external_dirs`` alongside the
+    profile, and Spark Studio registers its bundled ``agent-skills/`` there.
+    Scanning only the profile made every edit to a Studio skill look like an
+    edit to a skill that does not exist, which blocked the card and greyed out
+    Approve for a change Hermes was right to stage.
+    """
+    found: dict[str, Path] = {}
+    for root in [HERMES_HOME / "skills", *_external_skill_dirs()]:
+        if not root.is_dir():
+            continue
+        for skill_md in root.rglob("SKILL.md"):
+            found.setdefault(skill_md.parent.name, skill_md.parent)
+    return found
+
+
+def _external_skill_scope(
+    name: str,
+    installed: dict[str, Path],
+    external_roots: list[Path],
+) -> str:
+    """Warn when approving would edit a skill outside the Hermes profile.
+
+    Spark Studio's bundled skills live in the repository, not in the isolated
+    profile, so approving one of these writes changes a file under version
+    control. Hermes permits that for user-directed edits — the user should just
+    know which file they are agreeing to change.
+    """
+    directory = installed.get(name)
+    if directory is None:
+        return ""
+    for root in external_roots:
+        try:
+            directory.relative_to(root)
+        except ValueError:
+            continue
+        return f"Applies to {directory} — a shared skills folder outside the Hermes profile."
+    return ""
 
 
 def _pending_create_ids(records: list[dict[str, Any]]) -> dict[str, str]:
@@ -616,7 +691,7 @@ def _pending_create_ids(records: list[dict[str, Any]]) -> dict[str, str]:
 
 
 def _pending_skill_block(
-    record: dict[str, Any], installed: set[str], creates: dict[str, str]
+    record: dict[str, Any], installed: dict[str, Path], creates: dict[str, str]
 ) -> tuple[str, str]:
     payload = record.get("payload")
     payload = payload if isinstance(payload, dict) else {}
@@ -658,7 +733,8 @@ def hermes_pending_writes() -> list[dict[str, Any]]:
                 prepared, repair_notes, blocked_reason = _prepare_pending_record(record)
                 prepared_records.append((prepared, repair_notes, blocked_reason))
 
-    installed = _installed_skill_names()
+    installed = _installed_skills()
+    external_roots = _external_skill_dirs()
     creates = _pending_create_ids([item[0] for item in prepared_records])
     records: list[dict[str, Any]] = []
     for record, repair_notes, blocked_reason in prepared_records:
@@ -670,6 +746,9 @@ def hermes_pending_writes() -> list[dict[str, Any]]:
             )
         else:
             depends_on = ""
+        skill_scope = _external_skill_scope(
+            str(payload.get("name") or ""), installed, external_roots
+        )
         preview, truncated = _pending_preview(record)
         try:
             created_at = float(record.get("created_at") or 0)
@@ -691,6 +770,7 @@ def hermes_pending_writes() -> list[dict[str, Any]]:
                 "repair_notes": repair_notes,
                 "blocked_reason": blocked_reason,
                 "depends_on": depends_on,
+                "skill_scope": skill_scope,
             }
         )
     records.sort(key=lambda item: item["created_at"])
@@ -765,7 +845,7 @@ def resolve_hermes_pending(
                         other_records.append(_prepare_pending_record(other)[0])
                 blocked_reason, _ = _pending_skill_block(
                     prepared,
-                    _installed_skill_names(),
+                    _installed_skills(),
                     _pending_create_ids(other_records),
                 )
             if blocked_reason:
@@ -818,36 +898,194 @@ def resolve_hermes_pending(
     }
 
 
+# Providers Spark Studio binds itself. A ``model:`` block on any other
+# provider was written by the user's in-TUI ``/model`` switch, so it survives a
+# config rewrite the same way ``display.skin`` does — otherwise every relaunch
+# would drag Chat back onto the local engine.
+_STUDIO_OWNED_PROVIDERS = {"", "custom", "local", "openai-compatible"}
+
+
+# Display name of the provider row Spark Studio registers inside Hermes. Hermes
+# derives its slug from this ("custom:spark-studio") and writes discovered
+# models back into the entry, so the name is the stable identity we manage by.
+_STUDIO_PROVIDER_NAME = "Spark Studio"
+# Not a credential. The passthrough is same-host and unauthenticated; this only
+# marks the row as one Hermes should keep live-probing. See _studio_custom_providers.
+_STUDIO_PROVIDER_TOKEN = "spark-studio-local"
+
+
+def _studio_custom_providers(
+    existing: list[Any],
+    studio_url: str,
+    model: str | None = None,
+) -> list[Any]:
+    """Register the engine passthrough as a browsable Hermes provider.
+
+    Pointing at ``/api/engine/v1`` rather than a concrete engine port is what
+    lets ``/model`` list a recipe that was launched mid-session: the URL is
+    stable across swaps and always resolves to the active run.
+
+    The declared ``models:`` list is what the picker shows on a normal open —
+    Hermes deliberately probes only the *current* provider then
+    (``build_model_options_payload`` passes ``probe_current_custom_provider``),
+    so a non-current Spark Studio row is never live-probed while Chat runs on a
+    hosted provider. Probing cannot keep this row truthful; writing to it can.
+    The bound model is declared here at launch, and the dashboard watchdog
+    rewrites the list whenever the active engine changes
+    (:func:`update_studio_provider_models`). The placeholder api_key still
+    marks the row probe-able on explicit refresh; it authenticates nothing and
+    is never forwarded.
+
+    Entries the user or Hermes itself added are preserved untouched.
+    """
+    kept = [
+        entry
+        for entry in existing
+        if not (
+            isinstance(entry, dict)
+            and str(entry.get("name") or "").strip().lower()
+            == _STUDIO_PROVIDER_NAME.lower()
+        )
+    ]
+    row: dict[str, Any] = {
+        "name": _STUDIO_PROVIDER_NAME,
+        "base_url": f"{studio_url.rstrip('/')}/api/engine/v1",
+        "api_key": _STUDIO_PROVIDER_TOKEN,
+    }
+    if model:
+        row["models"] = [model]
+    return kept + [row]
+
+
+def update_studio_provider_models(models: list[str]) -> bool:
+    """Reflect the active engine's served model ids into the Spark Studio row.
+
+    Called by the dashboard watchdog on ready/swap/exit transitions. This is
+    the only mechanism that keeps the row truthful mid-session: the picker's
+    normal open never probes a non-current custom provider, so it renders
+    exactly this declared list. Returns True when the config changed.
+    """
+    path = HERMES_HOME / "config.yaml"
+    with _CONFIG_LOCK:
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            return False
+        rows = config.get("custom_providers") if isinstance(config, dict) else None
+        if not isinstance(rows, list):
+            return False
+        desired = [m for m in models if m]
+        changed = False
+        for entry in rows:
+            if not (
+                isinstance(entry, dict)
+                and str(entry.get("name") or "").strip().lower()
+                == _STUDIO_PROVIDER_NAME.lower()
+            ):
+                continue
+            declared = entry.get("models")
+            if isinstance(declared, dict):  # Hermes' own writer stores a dict
+                declared = list(declared)
+            if desired:
+                if declared != desired:
+                    entry["models"] = desired
+                    changed = True
+            elif "models" in entry:
+                # No engine loaded: an empty row is the truth, and dropping the
+                # key re-enables probe-if-current via has_explicit_models.
+                del entry["models"]
+                changed = True
+        if not changed:
+            return False
+        payload = yaml.safe_dump(config, sort_keys=False)
+        temporary = HERMES_HOME / f"config-{threading.get_ident()}.tmp"
+        temporary.write_text(payload, encoding="utf-8")
+        temporary.replace(path)
+    return True
+
+
+def _model_block_is_studio_owned(block: Any) -> bool:
+    if not isinstance(block, dict):
+        return True
+    return str(block.get("provider") or "").strip().lower() in _STUDIO_OWNED_PROVIDERS
+
+
+def _resolve_model_block(
+    existing: Any,
+    base_url: str | None,
+    model: str | None,
+    *,
+    respect_user_provider: bool = False,
+) -> dict[str, Any] | None:
+    """Pick the ``model:`` block for a config rewrite.
+
+    Headless and CLI runs always bind to the live endpoint — they pass
+    ``--provider custom`` on argv, so a foreign provider in the config would
+    just contradict them. Only Chat sets ``respect_user_provider``, because it
+    is the one surface where the user picks a provider with ``/model`` and
+    expects it to survive both a relaunch and a recipe swap.
+    """
+    studio_block = (
+        {
+            "provider": "custom",
+            "default": model,
+            "base_url": api_base(base_url),
+            "api_key": "",
+        }
+        if base_url and model
+        else None
+    )
+    user_block = existing if isinstance(existing, dict) and existing.get("default") else None
+    keep_user = (
+        respect_user_provider
+        and user_block is not None
+        and not _model_block_is_studio_owned(user_block)
+    )
+    if studio_block and not keep_user:
+        return studio_block
+    return user_block or studio_block
+
+
 def _write_hermes_config(
-    base_url: str,
-    model: str,
+    base_url: str | None,
+    model: str | None,
     max_turns: int,
     *,
     studio_url: str = "http://127.0.0.1:7860",
     enable_search: bool = False,
+    respect_user_provider: bool = False,
 ) -> Path:
     HERMES_HOME.mkdir(parents=True, exist_ok=True)
     path = HERMES_HOME / "config.yaml"
     with _CONFIG_LOCK:
         learning = _load_learning_settings_unlocked()
-        # Spark Studio owns the model/tool configuration in this isolated
-        # profile, while Hermes Mod owns display.skin. Preserve that user-facing
-        # selection whenever Chat refreshes the active model endpoint.
+        # Spark Studio owns the tool configuration in this isolated profile,
+        # while Hermes Mod owns display.skin and the user owns any provider they
+        # picked with /model. Preserve both whenever Chat refreshes the endpoint.
         preserved_display = None
+        existing_model = None
+        existing_providers: list[Any] = []
         try:
             existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-            if isinstance(existing, dict) and isinstance(existing.get("display"), dict):
-                preserved_display = existing["display"]
+            if isinstance(existing, dict):
+                if isinstance(existing.get("display"), dict):
+                    preserved_display = existing["display"]
+                existing_model = existing.get("model")
+                if isinstance(existing.get("custom_providers"), list):
+                    existing_providers = existing["custom_providers"]
         except (OSError, yaml.YAMLError):
             pass
 
-        config = {
-            "model": {
-                "provider": "custom",
-                "default": model,
-                "base_url": api_base(base_url),
-                "api_key": "",
-            },
+        model_block = _resolve_model_block(
+            existing_model,
+            base_url,
+            model,
+            respect_user_provider=respect_user_provider,
+        )
+        config: dict[str, Any] = {}
+        if model_block:
+            config["model"] = model_block
+        config |= {
             "terminal": {"backend": "local"},
             "approvals": {
                 "mode": "smart",
@@ -856,6 +1094,9 @@ def _write_hermes_config(
             },
             "agent": {"max_turns": max_turns},
         }
+        config["custom_providers"] = _studio_custom_providers(
+            existing_providers, studio_url, model
+        )
         _apply_learning_config(config, learning)
         if preserved_display:
             config["display"] = preserved_display
@@ -884,6 +1125,31 @@ def _write_hermes_config(
         temporary.write_text(payload, encoding="utf-8")
         temporary.replace(path)
     return path
+
+
+def hermes_model_binding() -> dict[str, str]:
+    """Return the model/provider the isolated profile will actually launch with.
+
+    Read back after :func:`_write_hermes_config` so the launcher and the
+    dashboard agree on what Chat runs — the profile is authoritative once the
+    user has switched providers with ``/model``.
+    """
+    path = HERMES_HOME / "config.yaml"
+    with _CONFIG_LOCK:
+        try:
+            config = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        except (OSError, yaml.YAMLError):
+            config = {}
+    block = config.get("model") if isinstance(config, dict) else None
+    if not isinstance(block, dict):
+        return {"model": "", "provider": "", "studio_owned": True}
+    return {
+        "model": str(block.get("default") or "").strip(),
+        "provider": str(block.get("provider") or "custom").strip() or "custom",
+        # False once the user has moved Chat onto a hosted provider — that
+        # binding stays reachable with no engine loaded, a local one does not.
+        "studio_owned": _model_block_is_studio_owned(block),
+    }
 
 
 def active_hermes_skin() -> str:
