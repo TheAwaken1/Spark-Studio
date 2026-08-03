@@ -133,7 +133,10 @@ QUANT_PROFILES: dict[str, dict[str, Any]] = {
         "container": "vllm-node",
         "build_args": [],
         "extra_flags": [
-            "--moe-backend cutlass",
+            # The fast Unsloth Qwen3.6 NVFP4 recipe explicitly recommends
+            # native vLLM/Triton rather than Marlin (and avoids the older
+            # FlashInfer NVFP4 path on GB10).
+            "--moe-backend triton",
             "--kv-cache-dtype fp8",
             "--attention-backend TRITON_ATTN",
         ],
@@ -450,6 +453,14 @@ def synthesize_recipe(
         add(f"--chat-template {fprof['chat_template']}")
     for f in fprof.get("extra_flags") or []:
         add(f)
+
+    # Unsloth's Qwen3.6 NVFP4-Fast checkpoint ships an MTP head and its
+    # published vLLM launch recipe enables two speculative tokens.
+    repo_lower = str(repo).lower()
+    if "qwen3.6-35b-a3b-nvfp4-fast" in repo_lower:
+        # Double braces are required because run-recipe.py formats the final
+        # command with str.format before launching it.
+        add("--speculative-config '{{\"method\": \"mtp\", \"num_speculative_tokens\": 2}}'")
 
     # Sizing flags. When the native context is unknown (gated config we
     # couldn't read), OMIT --max-model-len so vLLM derives the model's real

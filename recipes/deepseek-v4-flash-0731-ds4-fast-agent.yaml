@@ -1,0 +1,49 @@
+recipe_version: "2"
+name: DeepSeek V4 Flash 0731 — ds4 Fast Agent
+model: antirez/deepseek-v4-gguf:DeepSeek-V4-Flash-IQ2XXS-w2Q2K-AProjQ8-SExpQ8-OutQ8-chat-v2-imatrix-0731
+runtime: llama-cpp
+min_nodes: 1
+max_nodes: 1
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly@sha256:e0e9bc2392290c0655d98bd3d5e692e40736f0c6c21a88638a8c0e0ec9b45816
+
+metadata:
+  description: >-
+    Entrpi ds4 v0.5.3 on one DGX Spark/GB10 with the 0731 IQ2XXS/Q2K
+    imatrix quant and matching Q2K DSpark drafter. Continuous batching,
+    prefix/KV reuse, OpenAI-compatible chat and Responses APIs, reasoning,
+    and native DSML function/tool calling for daily agent workloads.
+  maintainer: Spark Studio local recipe
+  model_params: 284B
+  model_dtype: iq2_xxs
+  model_vram: 88
+  kv_dtype: fp8
+
+mods:
+  - mods/ds4-deepseek-v4-0731
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  max_model_len: 262144
+  ds4_ref: v0.5.3
+
+env:
+  DS4_CONT_MTP_MODE: "2"
+  DS4_CONT_DSPARK: "1"
+  DS4_DSPARK_MODEL: /cache/huggingface/ds4-assets/DSpark-drafter-Q2K-Q8-0731.gguf
+  DS4_SERVER_COALESCE_MAX: "12"
+
+command: |
+  /cache/huggingface/ds4-engine/ds4-server \
+    --cuda \
+    -m {model} \
+    -c {max_model_len} \
+    --host {host} \
+    --port {port}
+
+benchmark:
+  framework: llama-benchy
+  pp: [2048]
+  depth: [0, 4096]
+  prefix_caching: true

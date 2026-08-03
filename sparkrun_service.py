@@ -14,7 +14,14 @@ import shutil
 import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Any
+
+import yaml
+
+
+BUNDLED_RECIPES_DIR = Path(__file__).resolve().parent / "recipes"
+BUNDLED_RECIPE_NAMESPACE = "studio"
 
 # Community recipe refs look like @official/name or @experimental/name.
 REF_RE = re.compile(r"@[\w][\w.-]*/[\w][\w.-]*")
@@ -33,7 +40,7 @@ CONTAINER_RE = re.compile(r"sparkrun_([0-9a-f]{6,}(?:_[0-9a-f]{4,})*)_([A-Za-z][
 _JOB_LINE_RE = re.compile(r"^Job:\s+(\S+)\s+\(tp=(\d+)[^)]*\)\s+\[([0-9a-f]+(?:_[0-9a-f]+)*)\]")
 _HOST_LINE_RE = re.compile(r"^\s+(\S+)\s+(\d{1,3}(?:\.\d{1,3}){3})\s+(.*)$")
 # Engine process names that count as "the model is being served (or loaded)".
-_ENGINE_PROC_RE = re.compile(r"\b(vllm|sglang|llama|trtllm|lmdeploy|mlc)\b", re.I)
+_ENGINE_PROC_RE = re.compile(r"\b(vllm|sglang|llama|ds4|trtllm|lmdeploy|mlc)\b", re.I)
 
 
 def sparkrun_bin() -> str | None:
@@ -134,17 +141,97 @@ def start_update(channel: str | None, timeout: int = 900) -> dict[str, Any]:
     return update_status()
 
 
+def _bundled_recipes() -> list[dict[str, Any]]:
+    """Recipes shipped with Spark Studio but not published in a registry yet."""
+    out: list[dict[str, Any]] = []
+    if not BUNDLED_RECIPES_DIR.is_dir():
+        return out
+    for path in sorted(BUNDLED_RECIPES_DIR.glob("*.y*ml")):
+        try:
+            doc = yaml.safe_load(path.read_text(encoding="utf-8"))
+        except (OSError, yaml.YAMLError):
+            continue
+        if not isinstance(doc, dict):
+            continue
+        if not doc.get("model") or not doc.get("command"):
+            continue
+        raw_metadata = doc.get("metadata")
+        metadata: dict[str, Any] = raw_metadata if isinstance(raw_metadata, dict) else {}
+        raw_defaults = doc.get("defaults")
+        defaults: dict[str, Any] = raw_defaults if isinstance(raw_defaults, dict) else {}
+        try:
+            min_nodes = int(doc.get("min_nodes") or defaults.get("tensor_parallel") or 1)
+        except (TypeError, ValueError):
+            min_nodes = 1
+        try:
+            max_nodes = int(doc["max_nodes"]) if doc.get("max_nodes") is not None else None
+        except (TypeError, ValueError):
+            max_nodes = None
+        out.append({
+            "ref": f"@{BUNDLED_RECIPE_NAMESPACE}/{path.stem}",
+            "workload": path.stem,
+            "namespace": BUNDLED_RECIPE_NAMESPACE,
+            "name": doc.get("name") or path.stem,
+            "model": doc.get("model"),
+            "engine": doc.get("runtime") or "vllm",
+            "description": doc.get("description") or metadata.get("description") or "",
+            "min_nodes": min_nodes,
+            "max_nodes": max_nodes,
+            "path": str(path),
+        })
+    return out
+
+
+def resolve_recipe_target(ref: str) -> str:
+    """Map a synthetic @studio ref to its trusted bundled recipe path."""
+    prefix = f"@{BUNDLED_RECIPE_NAMESPACE}/"
+    if not ref.startswith(prefix):
+        return ref
+    stem = ref.removeprefix(prefix)
+    if not re.fullmatch(r"[\w][\w.-]*", stem):
+        return ref
+    candidate = (BUNDLED_RECIPES_DIR / f"{stem}.yaml").resolve()
+    try:
+        candidate.relative_to(BUNDLED_RECIPES_DIR.resolve())
+    except ValueError:
+        return ref
+    return str(candidate) if candidate.is_file() else ref
+
+
+def canonical_recipe_ref(ref: str) -> str:
+    """Convert a bundled recipe file path to its stable ``@studio`` ref.
+
+    Older adopted runs were saved with the absolute local YAML path as their
+    sparkrun ref.  The launch API intentionally accepts only recipe names/refs,
+    so normalize trusted files under our bundled recipe directory before that
+    validation runs.  Paths outside that directory are left unchanged.
+    """
+    ref = ref.strip()
+    if not ref or ref.startswith("@"):
+        return ref
+    try:
+        candidate = Path(ref).expanduser().resolve()
+        candidate.relative_to(BUNDLED_RECIPES_DIR.resolve())
+    except (OSError, ValueError):
+        return ref
+    if candidate.is_file() and candidate.suffix.lower() in {".yaml", ".yml"}:
+        return f"@{BUNDLED_RECIPE_NAMESPACE}/{candidate.stem}"
+    return ref
+
+
 def list_recipes(timeout: int = 30) -> list[dict[str, Any]]:
     """`sparkrun list --json` → every launchable recipe across ALL configured
     registries (official, eugr, transitional, …) — far more complete than our
-    local mirror of two repos. [] when sparkrun is missing or predates --json."""
+    local mirror of two repos. Bundled @studio recipes are included even when
+    the CLI listing is unavailable."""
+    bundled = _bundled_recipes()
     exe = sparkrun_bin()
     if not exe:
-        return []
+        return bundled
     try:
         res = subprocess.run([exe, "list", "--json"], capture_output=True, text=True, timeout=timeout)
         if res.returncode != 0 or not (res.stdout or "").lstrip().startswith("["):
-            return []
+            return bundled
         out = []
         for r in json.loads(res.stdout):
             ref = r.get("name") or ""
@@ -163,11 +250,13 @@ def list_recipes(timeout: int = 30) -> list[dict[str, Any]]:
                 "engine": r.get("runtime"),
                 "description": r.get("description") or "",
                 "min_nodes": min_nodes,
-                "max_nodes": None,
+                "max_nodes": r.get("max_nodes"),
             })
+        known_refs = {recipe["ref"] for recipe in out}
+        out.extend(recipe for recipe in bundled if recipe["ref"] not in known_refs)
         return out
     except Exception:  # noqa: BLE001
-        return []
+        return bundled
 
 
 def _jobs_from_cluster_status(doc: dict[str, Any]) -> list[dict[str, Any]]:
@@ -262,6 +351,67 @@ def find_recipes_by_model(model: str, timeout: int = 30) -> list[dict[str, Any]]
     return out
 
 
+# jobid -> recovered ref, so the docker fallback pays the export + recipe-list
+# cost once per orphaned job, not on every watchdog sweep.
+_ORPHAN_REF_CACHE: dict[str, str] = {}
+
+
+def _jobs_from_docker(timeout: int = 15) -> list[dict[str, Any]]:
+    """Last-resort job discovery straight from `docker ps`.
+
+    sparkrun's state store can lose a job whose container is still up and
+    serving (`cluster status --json` reports zero jobs and the host as idle
+    while `sparkrun_<jobid>_solo` answers /v1/models). The containers are the
+    ground truth: without this, the dashboard adopts nothing, `runner.active()`
+    stays None, and everything downstream — chat, the engine passthrough,
+    Hermes' /model row — reports no model while one is plainly running.
+
+    Local-only by construction (docker ps sees this host), which matches how
+    adoption uses the result: host networking on 127.0.0.1.
+    """
+    docker = shutil.which("docker")
+    if not docker:
+        return []
+    try:
+        res = subprocess.run([docker, "ps", "--format", "{{.Names}}"],
+                             capture_output=True, text=True, timeout=timeout)
+    except Exception:  # noqa: BLE001
+        return []
+    if res.returncode != 0:
+        return []
+    grouped: dict[str, list[str]] = {}
+    for name in (res.stdout or "").split():
+        m = CONTAINER_RE.fullmatch(name.strip())
+        if m:
+            grouped.setdefault(m.group(1), []).append(m.group(2))
+    jobs: list[dict[str, Any]] = []
+    for jobid, roles in grouped.items():
+        # The container name carries no ref; recover it through the model the
+        # job is serving. Best-effort — an adopted job works without a ref
+        # (jobid-scoped stop, exported port, model label), it just loses the
+        # My Recipes linkage.
+        if jobid not in _ORPHAN_REF_CACHE:
+            ref = ""
+            try:
+                export = export_running_recipe(jobid)
+                model = (export or {}).get("model") or ""
+                if model:
+                    matches = find_recipes_by_model(model)
+                    ref = matches[0]["ref"] if matches else ""
+            except Exception:  # noqa: BLE001
+                ref = ""
+            _ORPHAN_REF_CACHE[jobid] = ref
+        roles.sort(key=lambda role: (role != "head", role != "solo", role))
+        jobs.append({
+            "ref": _ORPHAN_REF_CACHE[jobid],
+            "tp": len(roles),
+            "jobid": jobid,
+            "hosts": [{"role": role, "ip": "127.0.0.1", "status": "Up"} for role in roles],
+            "containers": [f"sparkrun_{jobid}_{role}" for role in roles],
+        })
+    return jobs
+
+
 def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
     """Parse sparkrun's container status into
     [{ref, tp, jobid, hosts: [{role, ip, status}], containers: [...]}].
@@ -269,7 +419,8 @@ def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
     Primary source: `sparkrun cluster status --json` (the `status` alias
     doesn't accept --json, but the underlying command does — thanks to the
     spark-arena admin for the pointer). Text parsing of `sparkrun status`
-    remains as the fallback for older builds."""
+    remains as the fallback for older builds; live sparkrun_* containers that
+    sparkrun itself no longer reports are the fallback of last resort."""
     exe = sparkrun_bin()
     if not exe:
         return []
@@ -277,15 +428,15 @@ def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
         res = subprocess.run([exe, "cluster", "status", "--json"],
                              capture_output=True, text=True, timeout=timeout)
         if res.returncode == 0 and (res.stdout or "").lstrip().startswith("{"):
-            return _jobs_from_cluster_status(json.loads(res.stdout))
+            return _jobs_from_cluster_status(json.loads(res.stdout)) or _jobs_from_docker()
     except Exception:  # noqa: BLE001
         pass  # fall through to the text parser
     try:
         res = subprocess.run([exe, "status"], capture_output=True, text=True, timeout=timeout)
     except Exception:  # noqa: BLE001
-        return []
+        return _jobs_from_docker()
     if res.returncode != 0:
-        return []
+        return _jobs_from_docker()
     jobs: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     for line in (res.stdout or "").splitlines():
@@ -306,7 +457,7 @@ def parse_status(timeout: int = 25) -> list[dict[str, Any]]:
                 role = m.group(1)
                 current["hosts"].append({"role": role, "ip": m.group(2), "status": m.group(3).strip()})
                 current["containers"].append(f"sparkrun_{current['jobid']}_{role}")
-    return jobs
+    return jobs or _jobs_from_docker()
 
 
 def export_running_recipe(jobid: str, timeout: int = 25) -> dict[str, Any] | None:

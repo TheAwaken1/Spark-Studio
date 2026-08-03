@@ -1,0 +1,77 @@
+recipe_version: "2"
+name: Qwen3.5-122B-A10B Hybrid INT4+FP8 (DFlash)
+model: bleysg/Qwen3.5-122B-A10B-int4-fp8-hybrid
+runtime: vllm
+min_nodes: 1
+max_nodes: 1
+container: ghcr.io/aeon-7/aeon-vllm-ultimate:2026-06-18-v0.23.0-dflashfix
+
+# The pinned image declares ENTRYPOINT ["/bin/bash"]. Clear it so sparkrun's
+# generated `bash -c ...` command is not misread as a script filename. The mod
+# also patches root-owned vLLM package files, so it must run as root.
+executor_config:
+  entrypoint: ""
+  user: root
+
+metadata:
+  description: >-
+    DGX Spark/GB10 profile for the hybrid INT4 routed experts + FP8 shared
+    experts checkpoint, with the required vLLM 0.23 hybrid dispatch fixes,
+    INT8 lm-head optimization, DFlash speculative decoding, prefix caching,
+    Hermes-compatible Qwen tool calls, and reasoning extraction.
+  maintainer: Spark Studio local recipe
+  model_params: 122B
+  model_dtype: int4
+  model_vram: 72
+  kv_dtype: bfloat16
+
+mods:
+  - mods/qwen35-122b-hybrid-dflash
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.875
+  # The upstream 262K profile does not fit this host's measured post-warmup KV
+  # budget. vLLM measured a 22,400-token ceiling at this utilization, so keep a
+  # conservative margin for the API server and concurrent dashboard activity.
+  max_model_len: 20000
+  max_num_seqs: 3
+  max_num_batched_tokens: 8192
+  served_model_name: qwen
+  attention_backend: flash_attn
+  tool_call_parser: qwen3_xml
+  reasoning_parser: qwen3
+  draft_model: z-lab/Qwen3.5-122B-A10B-DFlash
+  speculative_tokens: 12
+  speculative_config: '{"method":"dflash","model":"z-lab/Qwen3.5-122B-A10B-DFlash","num_speculative_tokens":12,"attention_backend":"FLASH_ATTN"}'
+
+env:
+  VLLM_MEMORY_PROFILER_ESTIMATE_CUDAGRAPHS: "0"
+
+command: |
+  vllm serve {model} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --load-format fastsafetensors \
+    --attention-backend {attention_backend} \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser} \
+    --speculative-config '{speculative_config}'
+
+benchmark:
+  framework: llama-benchy
+  pp: [2048]
+  depth: [0, 4096]
+  prefix_caching: true

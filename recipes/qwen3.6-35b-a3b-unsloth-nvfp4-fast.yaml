@@ -1,0 +1,64 @@
+recipe_version: "2"
+name: Qwen3.6-35B-A3B Unsloth NVFP4 Fast
+model: unsloth/Qwen3.6-35B-A3B-NVFP4-Fast
+model_revision: 1c3f884bc99aac2524f6d49bcbac8c88401afd66
+runtime: vllm
+min_nodes: 1
+max_nodes: 1
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly@sha256:e0e9bc2392290c0655d98bd3d5e692e40736f0c6c21a88638a8c0e0ec9b45816
+
+metadata:
+  description: >-
+    DGX Spark/GB10 throughput profile for Unsloth's Qwen3.6 35B-A3B
+    NVFP4-Fast checkpoint. Uses native SM12x FlashInfer B12x kernels; Marlin
+    is intentionally avoided because Unsloth reports it is about 2x slower.
+  maintainer: Spark Studio local recipe
+  model_params: 35B
+  model_dtype: nvfp4
+  model_vram: 22.1
+  kv_dtype: fp8
+
+defaults:
+  model_revision: 1c3f884bc99aac2524f6d49bcbac8c88401afd66
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.8
+  max_model_len: 262144
+  max_num_seqs: 4
+  max_num_batched_tokens: 16384
+  served_model_name: qwen3.6-35b-a3b-nvfp4-fast
+  kv_cache_dtype: fp8
+  moe_backend: flashinfer_b12x
+  tool_call_parser: qwen3_coder
+  reasoning_parser: qwen3
+
+env:
+  # Required by Unsloth for native NVFP4 kernels on DGX Spark (SM 12.1).
+  CUTE_DSL_ARCH: sm_121a
+
+command: |
+  vllm serve {model} \
+    --revision {model_revision} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --moe-backend {moe_backend} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser}
+
+benchmark:
+  framework: llama-benchy
+  pp: [2048]
+  depth: [0, 4096]
+  prefix_caching: true
