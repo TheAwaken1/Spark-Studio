@@ -1,23 +1,25 @@
-"""Keep the dashboard alive when unified memory fills up.
+"""Garde le dashboard en vie quand la mémoire unifiée se remplit.
 
-On a DGX Spark the `sparkrun setup` wizard installs earlyoom with
-`--prefer '(...|python3|python)'`. Spark Studio's server is a plain `python`
-process, so earlyoom treats the ~100 MB dashboard as a preferred kill target —
-right alongside the multi-GB model. A model load that fills the 128 GB unified
-memory can then take the control plane down with it (SIGKILL → the bare
-`Killed` in the terminal).
+Sur une DGX Spark, l'assistant `sparkrun setup` installe earlyoom avec
+`--prefer '(...|python3|python)'`. Le serveur de Spark Studio est un simple
+process `python`, donc earlyoom traite le dashboard ~100 MB comme une cible
+de kill préférée — au même titre que le modèle multi-GB. Un chargement de
+modèle qui remplit les 128 GB de mémoire unifiée peut alors faire tomber
+le control plane avec lui (SIGKILL → le `Killed` brut dans le terminal).
 
-Two best-effort mitigations, neither requiring privilege at launch:
+Deux mitigations best-effort, sans privilège au lancement :
 
-- protect_self(): try to lower our own oom_score_adj. An unprivileged process
-  can *raise* but not *lower* its score, so this only takes effect when the app
-  runs with privilege (e.g. a systemd unit with `OOMScoreAdjust=-500`). It logs
-  the outcome either way so the operator knows where they stand.
+- protect_self() : tente d'abaisser notre propre oom_score_adj. Un process
+  non privilégié peut *augmenter* mais pas *abaisser* son score, donc cela ne
+  prend effet que si l'app tourne avec privilège (par ex. une unit systemd
+  avec `OOMScoreAdjust=-500`). Le résultat est loggé dans les deux cas pour
+  que l'opérateur sache où il en est.
 
-- deprioritize(pid): raise a spawned engine's oom_score_adj so the *model* is
-  the OOM victim ahead of the dashboard. Raising the score of a process you own
-  is always permitted, so this is the mitigation that actually works on a normal
-  unprivileged launch — for engine subprocesses we start directly.
+- deprioritize(pid) : augmente l'oom_score_adj d'un engine spawné pour que
+  le *modèle* soit la victime OOM avant le dashboard. Augmenter le score
+  d'un process qu'on possède est toujours permis, donc c'est la mitigation
+  qui marche réellement sur un lancement non privilégié normal — pour les
+  sous-processus d'engine que nous démarrons directement.
 
 The robust, box-wide fix is removing `python` from earlyoom's --prefer list;
 see the README (Memory / OOM section).

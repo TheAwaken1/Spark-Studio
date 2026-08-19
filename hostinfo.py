@@ -1,19 +1,20 @@
-"""Probe DGX Spark host capacity and Spark-mesh state.
+"""Sonde la capacité de l'hôte DGX Spark et l'état du mesh Spark.
 
-Single source of truth so:
+Source unique de vérité pour que :
 
-  - the UI header can show "1× GB10 · 128 GB"
-  - Forge can badge each recipe with fits / needs-cluster / too-big
-  - prepare_run can pre-flight a recipe before launching (and the UI can
-    explain *why* a recipe will or won't run on this box)
+  - le header de l'UI puisse afficher « 1× GB10 · 128 GB »
+  - Forge puisse badgeer chaque recipe avec fits / needs-cluster / too-big
+  - prepare_run puisse pré-flécher une recipe avant de la lancer (et l'UI
+    peut expliquer *pourquoi* une recipe va ou ne va pas tourner sur cette box)
 
-DGX Spark layout in practice: one GB10 GPU per box (128 GB unified memory),
-multi-box runs go through spark-vllm-docker's autodiscover, which writes
-``CLUSTER_NODES`` into ``data/registry/spark-vllm-docker/.env``. We treat
-that file as authoritative for mesh size; if it is missing or empty we
-assume a 1-Spark deployment.
+Layout DGX Spark en pratique : un GPU GB10 par box (128 GB mémoire unifiée),
+les runs multi-box passent par l'autodiscover de spark-vllm-docker, qui écrit
+``CLUSTER_NODES`` dans ``data/registry/spark-vllm-docker/.env``. Nous traitons
+ce fichier comme autoritaire pour la taille du mesh ; s'il est absent ou vide
+on suppose un déploiement 1-Spark.
 
-Cached in-process for ``_TTL`` seconds; call ``refresh()`` to invalidate.
+Mis en cache in-process pour ``_TTL`` secondes ; appelez ``refresh()`` pour
+invalider.
 """
 
 from __future__ import annotations

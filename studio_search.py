@@ -1,4 +1,4 @@
-"""Small client for Spark Studio's SearXNG/DuckDuckGo search pipeline."""
+"""Petit client pour le pipeline de recherche SearXNG/DuckDuckGo de Spark Studio."""
 
 from __future__ import annotations
 

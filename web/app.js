@@ -34,7 +34,7 @@ const api = async (path, opts = {}) => {
   if (r.status === 507 && opts.method === 'POST' && !opts._forced) {
     let detail = await r.text();
     try { detail = JSON.parse(detail).detail || detail; } catch { /* keep raw */ }
-    if (confirm(`${detail}\n\nLaunch anyway?`)) {
+    if (confirm(`${detail}\n\nLancer quand même ?`)) {
       const body = typeof opts.body === 'string' ? JSON.parse(opts.body || '{}') : (opts.body || {});
       return api(path, { ...opts, _forced: true, body: { ...body, force: true } });
     }
@@ -113,9 +113,9 @@ async function refreshSystem() {
       api('/host').catch(() => null),
     ]);
     window._hostInfo = host;
-    $('#sysVllm').innerHTML = sys.engines.vllm ? '<span class="badge ok">ok</span>' : '<span class="badge no">missing</span>';
-    $('#sysSglang').innerHTML = sys.engines.sglang ? '<span class="badge ok">ok</span>' : '<span class="badge no">missing</span>';
-    $('#sysLlama').innerHTML = sys.engines.llamacpp ? '<span class="badge ok">ok</span>' : '<span class="badge no">missing</span>';
+    $('#sysVllm').innerHTML = sys.engines.vllm ? '<span class="badge ok">ok</span>' : '<span class="badge no">manquant</span>';
+    $('#sysSglang').innerHTML = sys.engines.sglang ? '<span class="badge ok">ok</span>' : '<span class="badge no">manquant</span>';
+    $('#sysLlama').innerHTML = sys.engines.llamacpp ? '<span class="badge ok">ok</span>' : '<span class="badge no">manquant</span>';
     const hostBlock = host && host.gpu_count ? `
       <div><strong>${escapeHtml(host.summary)}</strong></div>
       ${host.mesh_size > 1 ? `<div class="muted">Mesh: ${host.cluster_nodes.length} Sparks (${host.cluster_nodes.map(escapeHtml).join(', ')})</div>` : '<div class="muted">Solo (no Spark mesh configured)</div>'}
@@ -149,10 +149,10 @@ async function refreshSystem() {
   try {
     const a = await api('/agents/status');
     const agentBadge = (s) => s.logged_in
-      ? '<span class="badge ok" title="Logged in and ready">ready</span>'
+      ? '<span class="badge ok" title="Connecté et prêt">prêt</span>'
       : (s.installed
-        ? '<span class="badge warn" title="Installed — log in on the Agents tab">log in</span>'
-        : '<span class="badge no" title="CLI not installed — see Agents tab">missing</span>');
+        ? '<span class="badge warn" title="Installé — connectez-vous depuis l&apos;onglet Agents">se connecter</span>'
+        : '<span class="badge no" title="CLI non installé — voir l&apos;onglet Agents">manquant</span>');
     $('#sysClaude').innerHTML = agentBadge(a.claude);
     $('#sysCodex').innerHTML = agentBadge(a.codex);
     $('#sysHuggingface').innerHTML = agentBadge(a.huggingface);
@@ -516,7 +516,7 @@ function buildEnginePanel(panel) {
   ui.querySelector('[data-ext="connect"]').addEventListener('click', async () => {
     const name = ui.querySelector('[data-ext="name"]').value.trim() || `external-${engine}`;
     const url = ui.querySelector('[data-ext="url"]').value.trim();
-    if (!url) { toast('Enter a URL', 'danger'); return; }
+    if (!url) { toast('Saisissez une URL', 'danger'); return; }
     try {
       const r = await api('/external', { method: 'POST', body: { engine, name, url } });
       toast(`Connected ${name} (${r.id})`);
@@ -634,7 +634,7 @@ function buildEnginePanel(panel) {
         if (!validation.ok) throw new Error(validation.error);
         openRecipeModal({ engine, raw_cmd: rawEditor.value, name: `${engine} · docker recipe` });
       } else {
-        let args; try { args = JSON.parse(editor.value); } catch (e) { toast('Invalid JSON', 'danger'); return; }
+        let args; try { args = JSON.parse(editor.value); } catch (e) { toast('JSON invalide', 'danger'); return; }
         openRecipeModal({ engine, model: args.model, args, name: `${engine} · ${args.model || 'untitled'}` });
       }
     } catch (e) { toast(e.message, 'danger'); }
@@ -722,7 +722,7 @@ function streamInstall(engine, bannerEl) {
     st.active = false;
     st.code = st.code ?? -1;
     st.lines.push('[install stream disconnected — the pip process may still be running; re-check in a minute]');
-    toast('Install stream disconnected', 'danger');
+    toast('Stream d\'install déconnecté', 'danger');
     refreshEnginePanel(engine);
   });
 }
@@ -877,7 +877,7 @@ function toggleFav(key, id) {
   return favs.has(id);
 }
 function favBtn(key, id, isFav) {
-  return `<button class="btn fav-btn${isFav ? ' active' : ''}" data-fav-key="${key}" data-fav-id="${escapeHtml(String(id))}" title="${isFav ? 'Unfavorite' : 'Favorite — pins it to the top'}">${isFav ? '★' : '☆'}</button>`;
+  return `<button class="btn fav-btn${isFav ? ' active' : ''}" data-fav-key="${key}" data-fav-id="${escapeHtml(String(id))}" title="${isFav ? 'Retirer des favoris' : 'Favori — l\'épingle en haut'}">${isFav ? '★' : '☆'}</button>`;
 }
 function bindFavButtons(listSel, refresh) {
   $$(`${listSel} [data-fav-key]`).forEach((b) => b.addEventListener('click', (ev) => {
@@ -994,7 +994,7 @@ async function refreshRecipes() {
     } catch (e) { toast(e.message, 'danger'); }
   }));
   $$('#recipesList [data-del]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Delete recipe?')) return;
+    if (!confirm('Supprimer la recipe ?')) return;
     await api(`/recipes/${b.dataset.del}`, { method: 'DELETE' });
     refreshRecipes();
   }));
@@ -1109,7 +1109,7 @@ function watchSparkrunUpdate() {
 $('#sparkrunUpdate').addEventListener('click', async () => {
   const channel = $('#sparkrunChannel').value || null;
   if ((channel === 'alpha' || channel === 'yolo' || channel === 'beta')
-      && !confirm(`Switch sparkrun to the ${channel === 'beta' ? 'beta (develop)' : 'alpha (bleeding edge)'} channel?\n\nPreview builds install from git and the channel is remembered for future updates. Going back to Stable later may downgrade.`)) return;
+      && !confirm(`Basculer sparkrun sur le canal ${channel === 'beta' ? 'beta (develop)' : 'alpha (bleeding edge)'} ?\n\nLes previews s'installent depuis git et le canal est mémorisé pour les futures MAJ. Revenir à Stable plus tard peut downgrader.`)) return;
   try {
     await api('/sparkrun/update', { method: 'POST', body: { channel } });
     toast(`sparkrun update started${channel ? ` on --${channel}` : ''}…`);
@@ -1119,7 +1119,7 @@ $('#sparkrunUpdate').addEventListener('click', async () => {
 
 $('#recSearch').addEventListener('input', refreshRecipes);
 $('#recPaste').addEventListener('click', () => {
-  const text = prompt('Paste a shared recipe (JSON/YAML), a spark-arena link, an HF id, or a @ref:');
+  const text = prompt('Collez une recipe partagée (JSON/YAML), un lien spark-arena, un id HF, ou un @ref :');
   if (!text) return;
   try {
     openRecipeModal(JSON.parse(text));
@@ -1332,7 +1332,7 @@ async function saveRecipeFromModal(thenRun) {
       $('.tab[data-tab="logs"]').click();
       setTimeout(() => window.selectRun(run.id), 50);
     } else {
-      toast('Recipe saved');
+      toast('Recipe sauvegardée');
     }
   } catch (e) { toast(e.message, 'danger'); }
 }
@@ -1436,10 +1436,10 @@ function renderFitBadge(fit) {
   if (!fit || !fit.verdict) return '';
   const verdict = fit.verdict;
   const labels = {
-    fits: 'Fits this Spark',
-    needs_cluster: `Needs ${fit.required_gpus || '?'} GPUs · have ${fit.available_gpus ?? 0}`,
-    too_big: 'Too big for GPU memory',
-    unknown: 'Hardware unknown',
+    fits: 'Tient sur ce Spark',
+    needs_cluster: `Nécessite ${fit.required_gpus || '?'} GPUs · disponible ${fit.available_gpus ?? 0}`,
+    too_big: 'Trop gros pour la mémoire GPU',
+    unknown: 'Hardware inconnu',
   };
   const tip = fit.reason ? ` title="${escapeHtml(fit.reason)}"` : '';
   return `<span class="rc-fit ${verdict}"${tip}>${labels[verdict] || verdict}</span>`;
@@ -1450,9 +1450,9 @@ function renderForgeCard(r, i) {
   const reg = r.registry;
   const sourceLabel = source === 'sparkrun' ? `Community-validated (${escapeHtml(r.sparkrun?.registry || 'sparkrun')})`
     : source === 'registry' ? 'Spark-validated'
-    : source === 'similar' ? 'Adapted from registry'
-    : source === 'synth' ? 'Synthesized for your hardware'
-    : 'Heuristic guess';
+    : source === 'similar' ? 'Adapté du registry'
+    : source === 'synth' ? 'Synthétisé pour votre hardware'
+    : 'Estimation heuristique';
   const meta = reg && reg.origin ? `${escapeHtml(reg.origin.repo)}/${escapeHtml(reg.origin.path)}` : '';
   const synth = reg && reg.synth_profile;
   const synthBlock = synth ? `
@@ -1577,7 +1577,7 @@ async function refreshLocalModels() {
   }));
   $$('#modelsList [data-del-model]').forEach((b) => b.addEventListener('click', async () => {
     const repo = b.dataset.delRepo;
-    if (!confirm(`Delete ${repo} (${b.dataset.delSize} GB) from the HF cache?\n\nStop any run serving it first — a running engine keeps the files alive until it exits. You can re-download it later from HuggingFace.`)) return;
+    if (!confirm(`Supprimer ${repo} (${b.dataset.delSize} GB) du cache HF ?\n\nArrêtez d'abord tout run qui le sert — un engine en cours garde les fichiers jusqu'à sa sortie. Vous pourrez le re-télécharger depuis HuggingFace.`)) return;
     b.disabled = true;
     try {
       const res = await api(`/models/local?path=${encodeURIComponent(b.dataset.delModel)}`, { method: 'DELETE' });
@@ -1671,7 +1671,7 @@ function updateLogsRecovery(run, lines) {
   box.hidden = false;
   if (run.status === 'running') {
     box.classList.add('is-running');
-    title.textContent = 'Recipe is running';
+    title.textContent = 'Recipe en cours';
     text.textContent = currentRunRecipe?.id
       ? `Saved recipe ${currentRunRecipe.name || currentRunRecipe.id} is active. You can still open it or ask an agent to optimize it.`
       : 'This run came from an ad hoc command. Save it as a recipe if you want to keep, edit, or optimize it.';
@@ -1680,12 +1680,12 @@ function updateLogsRecovery(run, lines) {
     title.textContent = 'Run failed. Fix it in-app and save the repaired recipe.';
     text.textContent = summarizeRunFailure(run, lines) || `Run exited with code ${run.exit_code}. Ask Claude or Codex to patch and save the recipe.`;
   } else if (runOutcome(run) === 'stopped') {
-    title.textContent = 'Run stopped';
+    title.textContent = 'Run stoppé';
     text.textContent = currentRunRecipe?.id
       ? 'You stopped this run. Relaunch its recipe any time, or ask an agent to optimize it first.'
       : 'You stopped this ad hoc run. Save it as a recipe if you want to launch it again later.';
   } else {
-    title.textContent = 'Run completed';
+    title.textContent = 'Run terminé';
     text.textContent = currentRunRecipe?.id
       ? 'This recipe completed cleanly. You can reopen it, duplicate it, or ask an agent to optimize it.'
       : 'This ad hoc run completed cleanly. Save it as a recipe if you want to keep it.';
@@ -1783,7 +1783,7 @@ function setAutofixButtons(disabled) {
 function startAgentLoop(agentName, kind) {
   if (!currentRunId) return;
   if (autofixES) { autofixES.close(); autofixES = null; }
-  const label = kind === 'optimize' ? 'Optimize Speed' : 'Auto-Fix & Retry';
+  const label = kind === 'optimize' ? 'Optimiser le throughput' : 'Auto-Fix & Relancer';
   const endpoint = kind === 'optimize'
     ? `/api/agents/optimize/${currentRunId}?agent=${agentName}&attempts=2`
     : `/api/agents/autofix/${currentRunId}?agent=${agentName}&attempts=3`;
@@ -1864,15 +1864,15 @@ function setFixBusy(isBusy, which = 'agent') {
     if (el) el.disabled = isBusy;
   });
   $('#fixTitle').textContent = isBusy
-    ? `${which === 'claude' ? 'Claude' : 'Codex'} is analyzing…`
-    : `${which === 'claude' ? 'Claude' : 'Codex'} suggestion`;
+    ? `${which === 'claude' ? 'Claude' : 'Codex'} analyse…`
+    : `Suggestion ${which === 'claude' ? 'Claude' : 'Codex'}`;
 }
 
 async function openAgentModal(which) {
   if (!currentRunId) return;
   const r = await api(`/runs/${currentRunId}`);
   const recipe = currentRunRecipe || await recipeFromRun(r);
-  $('#fixTitle').textContent = `${which === 'claude' ? 'Claude' : 'Codex'} assistant`;
+  $('#fixTitle').textContent = `Assistant ${which === 'claude' ? 'Claude' : 'Codex'}`;
   $('#fixGoal').value = '';
   $('#fixDiagnosis').innerHTML = '<div class="muted">Choose Fix Recipe, Optimize, or write your own instruction and send it.</div>';
   $('#fixPatched').value = '';
@@ -1997,7 +1997,7 @@ function openLaunchModal(r) {
   _launchRecipe = r;
   const reg = r.args._registry;
   const d = reg.defaults || {};
-  $('#launchModalTitle').textContent = `Launch: ${r.name || r.model || 'Recipe'}`;
+  $('#launchModalTitle').textContent = `Lancement : ${r.name || r.model || 'Recipe'}`;
   $('#launchModalDesc').textContent = r.model || '';
   $('#lsMaxModelLen').value = d.max_model_len ?? 131072;
   $('#lsGpuMem').value = d.gpu_memory_utilization ?? 0.90;
@@ -2191,7 +2191,7 @@ function runCanvasPreview() {
 function stopCanvasPreview() {
   canvasPreviewDoc = CANVAS_STOP_DOC;
   $('#canvasPreview').srcdoc = CANVAS_STOP_DOC;
-  $('#canvasStatus').textContent = 'Preview stopped';
+  $('#canvasStatus').textContent = 'Preview stoppée';
   if (canvasPopup && !canvasPopup.closed) {
     canvasPopup.document.open();
     canvasPopup.document.write(CANVAS_STOP_DOC);
@@ -2202,14 +2202,14 @@ function stopCanvasPreview() {
 function popoutCanvasPreview() {
   const doc = canvasPreviewDoc || ($('#canvasPreview').srcdoc || '');
   if (!doc) {
-    toast('Nothing to preview yet', 'danger');
+    toast('Rien à prévisualiser pour le moment', 'danger');
     return;
   }
   canvasPopup = (canvasPopup && !canvasPopup.closed)
     ? canvasPopup
     : window.open('about:blank', 'spark-studio-canvas-preview');
   if (!canvasPopup) {
-    toast('Popup blocked', 'danger');
+    toast('Popup bloqué', 'danger');
     return;
   }
   canvasPopup.document.open();
@@ -3988,7 +3988,7 @@ function setHermesTuiState(message, state = '') {
 function ensureHermesTerminal() {
   if (hermesTui.terminal) return true;
   if (!window.Terminal || !window.FitAddon?.FitAddon) {
-    setHermesTuiState('Browser terminal assets are missing', 'error');
+    setHermesTuiState('Assets du terminal navigateur manquants', 'error');
     return false;
   }
   const terminal = new window.Terminal({
@@ -4067,7 +4067,7 @@ async function refreshHermesTui(autoStart = false) {
     // Chat runs detached when no engine is loaded, on whatever provider the
     // profile carries — so a recipe swap no longer takes the terminal down.
     const saved = status.hermes_model?.model || '';
-    $('#hermesTuiModel').textContent = active?.model || saved || 'No loaded model';
+    $('#hermesTuiModel').textContent = active?.model || saved || 'Aucun modèle chargé';
     const accessLabels = {
       local: '<i class="fa-solid fa-shield-halved"></i> Local browser',
       private_https: '<i class="fa-solid fa-lock"></i> Encrypted private LAN',
@@ -4087,9 +4087,9 @@ async function refreshHermesTui(autoStart = false) {
     const httpsHint = status.access_mode === 'private_http_denied'
       ? `Hermes Chat needs the encrypted dashboard from this device — open https://${window.location.hostname}:8443`
       : '';
-    if (!status.installed) setHermesTuiState('Hermes is not installed', 'error');
-    else if (!status.pty) setHermesTuiState('A POSIX terminal is unavailable', 'error');
-    else if (!accessAllowed) setHermesTuiState(httpsHint || status.access_reason || 'Terminal access denied', 'error');
+    if (!status.installed) setHermesTuiState('Hermes n\'est pas installé', 'error');
+    else if (!status.pty) setHermesTuiState('Pas de terminal POSIX disponible', 'error');
+    else if (!accessAllowed) setHermesTuiState(httpsHint || status.access_reason || 'Accès au terminal refusé', 'error');
     else if (!hasModel) {
       setHermesTuiState(
         active
@@ -4190,7 +4190,7 @@ async function pollHermesHttpOutput(sessionId) {
         hermesTui.httpSession = null;
         rememberHermesHttpSession('');
         setHermesControls(false);
-        setHermesTuiState('Hermes exited');
+        setHermesTuiState('Hermes est sorti');
         return;
       }
     }
@@ -4233,7 +4233,7 @@ async function startHermesHttpFallback(attempt = 0) {
         hermesTui.httpStarting = false;
         hermesTui.httpSession = savedSession;
         setHermesControls(true);
-        setHermesTuiState('Hermes reconnected over HTTPS', 'ready');
+        setHermesTuiState('Hermes reconnecté via HTTPS', 'ready');
         sendHermesHttpInput({
           type: 'resize',
           cols: hermesTui.terminal.cols,
@@ -4270,7 +4270,7 @@ async function startHermesHttpFallback(attempt = 0) {
     hermesTui.httpSession = result.session_id;
     rememberHermesHttpSession(result.session_id);
     setHermesControls(true);
-    setHermesTuiState('Hermes is running over HTTPS', 'ready');
+    setHermesTuiState('Hermes tourne via HTTPS', 'ready');
     hermesTui.terminal.focus();
     pollHermesHttpOutput(result.session_id);
   } catch (error) {
@@ -4341,7 +4341,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (hermesTui.socket !== socket) return;
     opened = true;
     hermesTui.preferHttp = false;
-    setHermesTuiState('Hermes is running', 'ready');
+    setHermesTuiState('Hermes tourne', 'ready');
     socket.send(JSON.stringify({
       type: 'resize',
       cols: hermesTui.terminal.cols,
@@ -4360,12 +4360,12 @@ function startHermesTui({ retryCount = 0 } = {}) {
       try { control = JSON.parse(event.data); } catch { /* not control */ }
       if (control?.type === 'session') {
         rememberHermesWsSession(control.id);
-        if (control.resumed) setHermesTuiState('Reattached to the running Hermes', 'ready');
+        if (control.resumed) setHermesTuiState('Réattaché au Hermes en cours', 'ready');
         else if (resuming) {
           // The lease expired or the dashboard restarted — say so rather than
           // leaving "Reattaching…" over what is actually a new agent.
           hermesTui.terminal.write('\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
-          setHermesTuiState('Hermes is running', 'ready');
+          setHermesTuiState('Hermes tourne', 'ready');
         }
       } else {
         hermesTui.terminal.write(event.data);
@@ -4405,14 +4405,14 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (event.code === 4410 || event.code === 1011) rememberHermesWsSession('');
     const expected = event.code === 1000 || event.code === 4410;
     const reason = event.reason || (expected
-      ? 'Hermes exited'
+      ? 'Hermes est sorti'
       : `connection closed (${event.code})`);
     hermesTui.terminal.write(`\r\n\x1b[${expected ? '33' : '31'}m${reason}\x1b[0m\r\n`);
     setHermesTuiState(reason, expected ? '' : 'error');
     refreshHermesTui(false);
   });
   socket.addEventListener('error', () => {
-    if (hermesTui.socket === socket) setHermesTuiState('Terminal connection failed', 'error');
+    if (hermesTui.socket === socket) setHermesTuiState('Connexion au terminal échouée', 'error');
   });
 }
 
@@ -4426,7 +4426,7 @@ function stopHermesTui() {
   // Stop means stop: end the lease server-side, or the pty would keep running
   // headless until the TTL and a later reload would reattach to it.
   endHermesWsLease();
-  if (socket) socket.close(1000, 'Stopped from Spark Studio');
+  if (socket) socket.close(1000, 'Arrêté depuis Spark Studio');
   else setHermesControls(false);
 }
 
@@ -4457,7 +4457,7 @@ function restartHermesTui() {
     () => ended.finally(() => setTimeout(startHermesTui, 120)),
     { once: true },
   );
-  socket.close(1000, 'Restarted from Spark Studio');
+  socket.close(1000, 'Redémarré depuis Spark Studio');
 }
 
 $('#hermesInstall').addEventListener('click', installHermes);
@@ -4469,7 +4469,7 @@ window.addEventListener('beforeunload', () => {
   // The agent keeps running and this tab reattaches by session id after a
   // preview, a back-navigation, or a reload. Stop closes it immediately, and
   // the server janitor reaps leases the browser never comes back to.
-  if (hermesTui.socket) hermesTui.socket.close(1000, 'Dashboard page unloaded');
+  if (hermesTui.socket) hermesTui.socket.close(1000, 'Page dashboard déchargée');
 });
 
 
@@ -4507,7 +4507,7 @@ function renderHermesModSkinOptions(status) {
   const skins = Array.isArray(status.user_skins) ? status.user_skins : [];
   select.innerHTML = '';
   if (!skins.length) {
-    select.appendChild(new Option('No custom skins', ''));
+    select.appendChild(new Option('Aucune skin custom', ''));
   } else {
     skins.forEach((skin) => {
       const label = skin.name === status.active_skin ? `${skin.name} (active)` : skin.name;
@@ -4543,7 +4543,7 @@ function renderHermesModStatus(status) {
     setHermesModState('Node.js and npm are required', 'error');
     unloadHermesModFrame('Install Node.js and npm, then reopen Skin Studio.');
   } else if (!status.skin_engine_found) {
-    setHermesModState('Hermes Agent is required');
+    setHermesModState('Hermes Agent est requis');
     unloadHermesModFrame('Click Install Hermes + add-on; Spark Studio handles both steps.');
   } else if (!status.installed) {
     setHermesModState(`Add-on ${status.pinned_version} is not installed`);
@@ -4671,7 +4671,7 @@ async function refreshHermesLearning() {
     $('#hermesLearningSessions').checked = settings.session_search_enabled;
     $('#hermesLearningApproval').checked = settings.write_approval;
     $('#hermesLearningProfile').textContent = settings.profile || 'data/agent-lab/hermes';
-    setHermesLearningState('Learning is configured', 'ready');
+    setHermesLearningState('Apprentissage configuré', 'ready');
   } catch (error) {
     setHermesLearningState(`Learning settings unavailable: ${error.message}`, 'error');
   } finally {
@@ -4740,7 +4740,7 @@ function renderHermesPending(result) {
     const age = document.createElement('span');
     age.textContent = item.created_at
       ? new Date(item.created_at * 1000).toLocaleString()
-      : 'Pending';
+      : 'En attente';
     meta.append(kind, title, age);
 
     const summary = document.createElement('p');
@@ -5188,7 +5188,7 @@ async function sendWg() {
     if (e.name === 'AbortError') {
       if (reply.textContent) renderChatContent(reply, reply.textContent);
       else reply.textContent = '(stopped)';
-      $('#wgSettingsStatus').textContent = 'Server chat stopped';
+      $('#wgSettingsStatus').textContent = 'Chat serveur stoppé';
     } else {
       reply.textContent = `Error: ${e.message}`;
     }
@@ -5579,7 +5579,7 @@ $('#vitalsToggle').addEventListener('click', () => {
     if (reconnectNotice) clearTimeout(reconnectNotice);
     reconnectNotice = null;
     $('#vitalsWidget').classList.remove('telemetry-reconnecting');
-    $('#vitalsToggle').title = 'Click to expand live vitals';
+    $('#vitalsToggle').title = 'Cliquez pour étendre les signes vitaux live';
   };
   es.addEventListener('open', markHealthy);
   es.addEventListener('vitals', (ev) => {
@@ -5659,8 +5659,8 @@ async function refreshCluster() {
   try {
     const c = await api('/cluster');
     $('#clusterTitle').textContent = c.mesh
-      ? `${c.cluster_name || 'Cluster'} — ${c.online_nodes}/${c.nodes.length} nodes online`
-      : `${c.cluster_name || 'Cluster'} — Single Node`;
+      ? `${c.cluster_name || 'Cluster'} — ${c.online_nodes}/${c.nodes.length} nœuds en ligne`
+      : `${c.cluster_name || 'Cluster'} — Nœud unique`;
     $('#clusterSoloCta').hidden = c.mesh;
     $('#clusterNodes').innerHTML = c.nodes.map((n) => {
       const dot = n.online ? '🟢' : '🔴';
@@ -5866,7 +5866,7 @@ $('#recoverResetDb')?.addEventListener('click', async () => {
   try {
     const r = await api('/recovery/reset-db', { method: 'POST', body: { confirm: true } });
     recoveryReport('Database reset: ' + Object.entries(r.deleted).map(([t, n]) => `${t} ${n}`).join(' · '));
-    toast('Database reset');
+    toast('Base réinitialisée');
     refreshRecipes(); refreshRuns(); refreshOverview();
   } catch (e) { toast(e.message, 'danger'); }
 });

@@ -1,10 +1,11 @@
-"""Live DGX Spark hardware telemetry.
+"""Télémétrie hardware DGX Spark en live.
 
-Streams GPU + unified-memory stats every 2 s via an async generator.
+Stream les stats GPU + mémoire unifiée toutes les 2 s via un générateur async.
 
-The GB10 SoC exposes its 128 GB unified memory as ordinary system RAM;
-nvidia-smi covers GPU utilisation, temperature, power, and clock.
-nvidia-smi mem fields return [N/A] on the GB10, so psutil is used instead.
+Le SoC GB10 expose sa mémoire unifiée de 128 GB comme de la RAM système
+classique ; nvidia-smi couvre utilisation GPU, température, puissance, et clock.
+Les champs mem de nvidia-smi renvoient [N/A] sur le GB10, donc psutil est
+utilisé à la place.
 """
 from __future__ import annotations
 

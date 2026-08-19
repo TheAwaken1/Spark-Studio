@@ -1,10 +1,10 @@
-"""Local HuggingFace cache scanner + deleter.
+"""Scanner + suppresseur de cache HuggingFace local.
 
-Models can live in several places on a Spark box: the default
-``~/.cache/huggingface/hub``, an ``HF_HOME``/``HF_HUB_CACHE`` override in the
-server's environment, or — most commonly here — a cache directory that only
-the *recipes* know about, delivered to engine containers via
-``-e HF_HUB_CACHE=...`` flags in their raw commands. We scan all of them.
+Les modèles peuvent vivre à plusieurs endroits sur une box Spark : le
+``~/.cache/huggingface/hub`` par défaut, un override ``HF_HOME``/``HF_HUB_CACHE``
+dans l'environnement du serveur, ou — plus courant ici — un répertoire de cache
+que seules les *recipes* connaissent, passé aux containers d'engine via des
+flags ``-e HF_HUB_CACHE=...`` dans leurs raw commands. Nous scannons tout ça.
 """
 
 from __future__ import annotations

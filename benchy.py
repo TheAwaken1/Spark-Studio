@@ -1,7 +1,7 @@
-"""Wrapper around eugr/llama-benchy for OpenAI-compatible endpoint benchmarking.
+"""Wrapper autour de eugr/llama-benchy pour le benchmark d'endpoints OpenAI-compatibles.
 
-Spawns the `llama-benchy` CLI as a subprocess, streams its stdout line-by-line
-to a callback, and returns the parsed JSON result file.
+Lance la CLI `llama-benchy` en sous-process, streame son stdout ligne par ligne
+vers un callback, et retourne le fichier JSON de résultat parsé.
 """
 
 from __future__ import annotations
