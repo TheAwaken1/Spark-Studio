@@ -132,7 +132,7 @@ async function refreshSystem() {
       const lan = (sys.urls?.lan || [])[0];
       window._lanUrls = sys.urls || {};
       const upd = window._updateAvailable
-        ? ` · <span class="update-badge" title="Click for update options">⬆ v${escapeHtml(window._updateAvailable)}</span>` : '';
+        ? ` · <span class="update-badge" title="Cliquez pour les options de MAJ">⬆ v${escapeHtml(window._updateAvailable)}</span>` : '';
       meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}${upd}`;
       meta.style.cursor = 'pointer';
     }
@@ -143,7 +143,7 @@ async function refreshSystem() {
     if (rn) rn.hidden = !sys.restart_needed;
     if (sys.restart_needed && !window._restartNagged) {
       window._restartNagged = true;
-      toast('Update applied on disk — restart Spark Studio to finish (new features will 404 until then)', 'danger');
+      toast('MAJ appliquée sur disque — relancez Spark Studio pour terminer (les nouvelles features 404 tant que ce n&apos;est pas fait)', 'danger');
     }
   } catch (e) { console.error(e); }
   try {
@@ -173,13 +173,13 @@ async function refreshOverview() {
   const active = await api('/active').catch(() => null);
   $('#activeRunCard').innerHTML = active
     ? `<div style="font-weight:600;overflow-wrap:anywhere">${escapeHtml(runLabel(active))}</div>
-       <div style="margin-top:4px"><span class="badge ok">${active.engine}</span> <code title="${escapeHtml(active.cmd)}">${active.id.slice(0, 8)}</code>${active.ready ? '' : ' <span class="muted">starting…</span>'}</div>
+       <div style="margin-top:4px"><span class="badge ok">${active.engine}</span> <code title="${escapeHtml(active.cmd)}">${active.id.slice(0, 8)}</code>${active.ready ? '' : ' <span class="muted">démarrage…</span>'}</div>
        ${loadStats(active) ? `<div class="muted" style="margin-top:4px"><i class="fa-solid fa-gauge"></i> ${loadStats(active)}</div>` : ''}
        <div style="margin-top:8px"><a class="btn" href="${active.url}/v1/models" target="_blank">/v1/models</a>
-       <button class="btn danger" onclick="window.sparkStop('${active.id}')">Stop</button></div>`
-    : 'No engine running.';
+       <button class="btn danger" onclick="window.sparkStop('${active.id}')">Arrêter</button></div>`
+    : 'Aucun engine en cours.';
   const runs = await api('/runs').catch(() => []);
-  $('#overviewRuns').innerHTML = runs.slice(0, 6).map(renderRunRow).join('') || '<div class="muted">No runs yet.</div>';
+  $('#overviewRuns').innerHTML = runs.slice(0, 6).map(renderRunRow).join('') || '<div class="muted">Aucun run pour l&apos;instant.</div>';
 }
 
 function runOutcome(r) {
@@ -468,19 +468,19 @@ function buildEnginePanel(panel) {
     <div class="card">
       <div class="toolbar" style="margin-bottom:14px">
         <button class="btn" data-mode="spark"><i class="fa-solid fa-bolt"></i> Spark recipe (YAML)</button>
-        <button class="btn" data-mode="args">Args mode (JSON)</button>
-        <button class="btn" data-mode="raw">Raw command</button>
+        <button class="btn" data-mode="args">Mode Args (JSON)</button>
+        <button class="btn" data-mode="raw">Commande brute</button>
       </div>
       <div class="engine-launch">
         <div>
           <div data-slot="spark-mode">
-            <div class="muted" style="margin-bottom:8px">Paste a recipe YAML from <a href="https://spark-arena.com/leaderboard" target="_blank">spark-arena.com/leaderboard</a>, <a href="https://github.com/eugr/spark-vllm-docker/tree/main/recipes" target="_blank">spark-vllm-docker</a>, or <a href="https://github.com/spark-arena/recipe-registry" target="_blank">recipe-registry</a>. Spark Studio expands <code>{placeholders}</code>, drops empty flags, and wraps it in <code>docker run</code> + <code>docker exec</code> against the recipe's <code>container</code>.</div>
+            <div class="muted" style="margin-bottom:8px">Collez une recipe YAML depuis <a href="https://spark-arena.com/leaderboard" target="_blank">spark-arena.com/leaderboard</a>, <a href="https://github.com/eugr/spark-vllm-docker/tree/main/recipes" target="_blank">spark-vllm-docker</a>, ou <a href="https://github.com/spark-arena/recipe-registry" target="_blank">recipe-registry</a>. Spark Studio développe les <code>{placeholders}</code>, retire les flags vides, et l'enveloppe dans <code>docker run</code> + <code>docker exec</code> contre le <code>container</code> de la recipe.</div>
             <div class="dropzone" data-engine="${engine}">
-              <i class="fa-solid fa-file-arrow-down"></i> Drop a recipe YAML here, or paste below
+              <i class="fa-solid fa-file-arrow-down"></i> Déposez une recipe YAML ici, ou collez ci-dessous
             </div>
             <textarea class="recipe-editor spark-editor" data-engine="${engine}" style="min-height:340px">${(SPARK_TEMPLATES[engine] || '').replace(/</g, '&lt;')}</textarea>
             <div class="toolbar" style="margin-top:8px">
-              <button class="btn" data-action="preview"><i class="fa-solid fa-eye"></i> Preview command</button>
+              <button class="btn" data-action="preview"><i class="fa-solid fa-eye"></i> Prévisualiser la commande</button>
             </div>
             <pre class="login-log" data-slot="preview" hidden></pre>
           </div>
@@ -488,28 +488,28 @@ function buildEnginePanel(panel) {
             <textarea class="recipe-editor" data-engine="${engine}" placeholder='{\n  "model": "…",\n  "max-model-len": 16384\n}'>${JSON.stringify(ENGINE_DEFAULTS[engine], null, 2)}</textarea>
           </div>
           <div data-slot="raw-mode" hidden>
-            <div class="muted" style="margin-bottom:8px">Full shell command. Run via <code>bash -lc</code>; ready when stdout shows <code>Application startup complete</code> or <code>Uvicorn running on</code>.</div>
+            <div class="muted" style="margin-bottom:8px">Commande shell complète. Lancée via <code>bash -lc</code> ; prête quand stdout affiche <code>Application startup complete</code> ou <code>Uvicorn running on</code>.</div>
             <textarea class="recipe-editor raw-editor" data-engine="${engine}" style="min-height:260px">${RAW_TEMPLATES[engine] || ''}</textarea>
           </div>
           <div class="toolbar" style="margin-top:10px">
-            <button class="btn primary" data-action="run">▶ Run</button>
-            <button class="btn" data-action="save">Save as recipe</button>
-            <select data-action="loadRecipe"><option value="">— load saved recipe —</option></select>
+            <button class="btn primary" data-action="run">▶ Lancer</button>
+            <button class="btn" data-action="save">Sauvegarder comme recipe</button>
+            <select data-action="loadRecipe"><option value="">— charger une recipe sauvegardée —</option></select>
           </div>
         </div>
         <div>
-          <h3 style="margin-top:0">Recent ${engine} runs</h3>
+          <h3 style="margin-top:0">Runs ${engine} récents</h3>
           <div data-slot="recent"></div>
         </div>
       </div>
     </div>
     <div class="card">
-      <h3><i class="fa-solid fa-link"></i> Connect existing ${engine} endpoint</h3>
-      <div class="muted" style="margin-bottom:10px">Already running ${engine} (e.g. <code>spark-vllm-docker</code> or another host)? Register it so chat, benchmarks, and Ask-Agent target it.</div>
+      <h3><i class="fa-solid fa-link"></i> Connecter un endpoint ${engine} existant</h3>
+      <div class="muted" style="margin-bottom:10px">${engine} déjà en cours (par ex. <code>spark-vllm-docker</code> ou un autre host) ? Enregistrez-le pour que le chat, les benchmarks et Ask-Agent le ciblent.</div>
       <div class="form-row">
-        <input data-ext="name" type="text" placeholder="Label (e.g. docker-vllm-8B)" style="flex:1" />
+        <input data-ext="name" type="text" placeholder="Libellé (ex. docker-vllm-8B)" style="flex:1" />
         <input data-ext="url" type="text" placeholder="http://127.0.0.1:8000" style="flex:2" />
-        <button class="btn primary" data-ext="connect"><i class="fa-solid fa-plug"></i> Connect</button>
+        <button class="btn primary" data-ext="connect"><i class="fa-solid fa-plug"></i> Connecter</button>
       </div>
     </div>
   `;
@@ -519,7 +519,7 @@ function buildEnginePanel(panel) {
     if (!url) { toast('Saisissez une URL', 'danger'); return; }
     try {
       const r = await api('/external', { method: 'POST', body: { engine, name, url } });
-      toast(`Connected ${name} (${r.id})`);
+      toast(`Connecté à ${name} (${r.id})`);
       refreshEnginePanel(engine);
       refreshOverview();
     } catch (e) { toast(e.message, 'danger'); }
@@ -598,18 +598,18 @@ function buildEnginePanel(panel) {
       const validation = validateRecipePayload(body);
       if (!validation.ok) throw new Error(validation.error);
       const run = await api('/runs', { method: 'POST', body });
-      toast(`Started ${engine} run ${run.id}${run.port ? ' on :' + run.port : ''}`);
+      toast(`Run ${engine} démarré ${run.id}${run.port ? ' sur :' + run.port : ''}`);
       updateTitle();
       $('.tab[data-tab="logs"]').click();
       setTimeout(() => window.selectRun(run.id), 50);
       setTimeout(async () => {
         try {
           const r = await api(`/runs/${run.id}`);
-          if (runOutcome(r) === 'failed') toast(`${engine} failed (code ${r.exit_code}). Click Ask Claude on Logs tab.`, 'danger');
-          else if (r.status === 'exited') toast(`${engine} exited.`);
+          if (runOutcome(r) === 'failed') toast(`${engine} a échoué (code ${r.exit_code}). Cliquez sur Ask Claude dans l'onglet Logs.`, 'danger');
+          else if (r.status === 'exited') toast(`${engine} terminé.`);
         } catch {}
       }, 4000);
-    } catch (e) { toast(`Run failed: ${e.message}`, 'danger'); }
+    } catch (e) { toast(`Échec du run : ${e.message}`, 'danger'); }
   });
   ui.querySelector('[data-action="save"]').addEventListener('click', () => {
     const mode = ui.dataset.mode || 'spark';
@@ -632,10 +632,10 @@ function buildEnginePanel(panel) {
       } else if (mode === 'raw') {
         const validation = validateRecipePayload({ raw_cmd: rawEditor.value });
         if (!validation.ok) throw new Error(validation.error);
-        openRecipeModal({ engine, raw_cmd: rawEditor.value, name: `${engine} · docker recipe` });
+        openRecipeModal({ engine, raw_cmd: rawEditor.value, name: `${engine} · recipe docker` });
       } else {
         let args; try { args = JSON.parse(editor.value); } catch (e) { toast('JSON invalide', 'danger'); return; }
-        openRecipeModal({ engine, model: args.model, args, name: `${engine} · ${args.model || 'untitled'}` });
+        openRecipeModal({ engine, model: args.model, args, name: `${engine} · ${args.model || 'sans titre'}` });
       }
     } catch (e) { toast(e.message, 'danger'); }
   });
@@ -664,14 +664,14 @@ async function refreshEnginePanel(engine) {
     const running = !!st?.active;
     const failed = !!st && !st.active && st.code !== 0 && st.code !== null;
     banner.innerHTML = `<div class="card" style="border-color:var(--warn);background:rgba(255,183,74,0.08)">
-      <h3 style="color:var(--warn)"><i class="fa-solid fa-triangle-exclamation"></i> ${engine} is not installed</h3>
-      <div class="muted" style="margin-bottom:10px">Spark Studio can't find <code>${engine === 'llamacpp' ? 'llama-server' : engine}</code> in this launcher's environment.</div>
+      <h3 style="color:var(--warn)"><i class="fa-solid fa-triangle-exclamation"></i> ${engine} n&apos;est pas installé</h3>
+      <div class="muted" style="margin-bottom:10px">Spark Studio ne trouve pas <code>${engine === 'llamacpp' ? 'llama-server' : engine}</code> dans l&apos;environnement de ce launcher.</div>
       ${engine === 'llamacpp'
-        ? `<div class="muted">Install via conda or build from source:</div>
+        ? `<div class="muted">Installez via conda ou compilez depuis les sources :</div>
            <pre class="mono" style="background:var(--bg);padding:10px;border-radius:6px">conda install -c conda-forge llama.cpp</pre>`
         : `${running
-              ? `<div><span class="badge">⏳ installing… this can take several minutes (large downloads)</span></div>`
-              : `<button class="btn primary" data-install="${engine}"><i class="fa-solid fa-download"></i> ${failed ? `Retry install (last attempt exited ${st.code})` : `Install ${engine}`}</button>`}
+              ? `<div><span class="badge">⏳ installation… peut prendre plusieurs minutes (gros téléchargements)</span></div>`
+              : `<button class="btn primary" data-install="${engine}"><i class="fa-solid fa-download"></i> ${failed ? `Réessayer l&apos;install (la dernière tentative a exit ${st.code})` : `Installer ${engine}`}</button>`}
            <pre class="login-log" data-slot="install-log" ${st?.lines.length ? '' : 'hidden'}></pre>`
       }
     </div>`;
@@ -683,10 +683,10 @@ async function refreshEnginePanel(engine) {
     banner.innerHTML = '';
   }
   const sel = ui.querySelector('[data-action="loadRecipe"]');
-  sel.innerHTML = '<option value="">— load saved recipe —</option>' +
+  sel.innerHTML = '<option value="">— charger une recipe sauvegardée —</option>' +
     recipes.filter((r) => r.engine === engine).map((r) => `<option value="${r.id}">${r.name}</option>`).join('');
   const runs = (await api('/runs').catch(() => [])).filter((r) => r.engine === engine).slice(0, 5);
-  ui.querySelector('[data-slot="recent"]').innerHTML = runs.map(renderRunRow).join('') || '<div class="muted">None yet.</div>';
+  ui.querySelector('[data-slot="recent"]').innerHTML = runs.map(renderRunRow).join('') || '<div class="muted">Aucun pour l&apos;instant.</div>';
 }
 
 // Engine installs in flight — keyed by engine so state survives re-renders.
@@ -721,7 +721,7 @@ function streamInstall(engine, bannerEl) {
     es.close();
     st.active = false;
     st.code = st.code ?? -1;
-    st.lines.push('[install stream disconnected — the pip process may still be running; re-check in a minute]');
+    st.lines.push('[stream d\'install déconnecté — le process pip tourne peut-être encore ; revérifiez dans une minute]');
     toast('Stream d\'install déconnecté', 'danger');
     refreshEnginePanel(engine);
   });
@@ -735,7 +735,7 @@ function tryReformat(text) {
 
 function validateRawCommand(raw) {
   const cmd = (raw || '').trim();
-  if (!cmd) return { ok: false, error: 'Command is empty.' };
+  if (!cmd) return { ok: false, error: 'La commande est vide.' };
 
   const hf = cmd.match(/--hf-overrides\s+(['"])(.*?)\1/s);
   if (!hf) return { ok: true };
@@ -744,7 +744,7 @@ function validateRawCommand(raw) {
   if (payload.includes('{{') || payload.includes('}}')) {
     return {
       ok: false,
-      error: 'Invalid --hf-overrides JSON: found doubled braces like `{{` / `}}`. Use normal JSON braces only.',
+      error: 'JSON --hf-overrides invalide : accolades doublées détectées (`{{` / `}}`). Utilisez uniquement des accolades JSON normales.',
     };
   }
   try {
@@ -752,7 +752,7 @@ function validateRawCommand(raw) {
   } catch (e) {
     return {
       ok: false,
-      error: `Invalid --hf-overrides JSON: ${e.message}`,
+      error: `JSON --hf-overrides invalide : ${e.message}`,
     };
   }
   return { ok: true };
@@ -911,9 +911,9 @@ async function refreshRecipes() {
     const isFailed  = tagList.includes('fix') && !isWorking;
     const displayTags = tagList.filter((t) => t !== 'working' && t !== 'fix');
     const statusBadge = isWorking
-      ? '<span class="rc-status-badge working" title="Last run succeeded">✓ working</span>'
+      ? '<span class="rc-status-badge working" title="Dernier run réussi">✓ working</span>'
       : isFailed
-        ? '<span class="rc-status-badge failed" title="Last run failed">✗ failed</span>'
+        ? '<span class="rc-status-badge failed" title="Dernier run échoué">✗ failed</span>'
         : '';
     return `
     <div class="recipe-card${activeByRecipe.has(Number(r.id)) ? ' is-running' : ''}${isFav ? ' is-fav' : ''}">
@@ -922,24 +922,24 @@ async function refreshRecipes() {
         <div style="display:flex;gap:4px;align-items:center">
           ${favBtn('recipeFavs', r.id, isFav)}
           ${statusBadge}
-          ${isDocker ? '<span class="rc-source registry" title="Runs via spark-vllm-docker pipeline">Docker</span>' : ''}
+          ${isDocker ? '<span class="rc-source registry" title="Tourne via la pipeline spark-vllm-docker">Docker</span>' : ''}
           <div class="rc-engine">${r.engine}</div>
         </div>
       </div>
-      ${activeByRecipe.has(Number(r.id)) ? `<div class="rc-running"><span class="badge ok">Running</span><span class="mono">${escapeHtml(activeByRecipe.get(Number(r.id)).id)}</span><button class="btn danger" data-stop-run="${activeByRecipe.get(Number(r.id)).id}" title="Stop run">■ Stop</button></div>` : ''}
+      ${activeByRecipe.has(Number(r.id)) ? `<div class="rc-running"><span class="badge ok">En cours</span><span class="mono">${escapeHtml(activeByRecipe.get(Number(r.id)).id)}</span><button class="btn danger" data-stop-run="${activeByRecipe.get(Number(r.id)).id}" title="Arrêter le run">■ Stop</button></div>` : ''}
       <div class="rc-model">${escapeHtml(r.model || '—')}</div>
       ${r._details?.length ? `<div class="rc-notes">${escapeHtml(r._details.join(' · '))}</div>` : ''}
       ${r.notes ? `<div class="rc-notes">${escapeHtml(r.notes)}</div>` : ''}
       ${displayTags.length ? `<div class="rc-tags">${displayTags.map((t) => `<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
       <div class="rc-actions">
-        <button class="btn primary" data-run="${r.id}">▶ Run</button>
-        <button class="btn" data-edit="${r.id}">Edit</button>
-        <button class="btn" data-share="${r.id}" title="Copy recipe in the community spark-arena YAML format (falls back to JSON for pipeline recipes)">⧉ Share</button>
-        <button class="btn danger" data-del="${r.id}">Del</button>
+        <button class="btn primary" data-run="${r.id}">▶ Lancer</button>
+        <button class="btn" data-edit="${r.id}">Éditer</button>
+        <button class="btn" data-share="${r.id}" title="Copie la recipe au format spark-arena YAML communautaire (JSON pour les recipes pipeline si besoin)">⧉ Partager</button>
+        <button class="btn danger" data-del="${r.id}">Suppr</button>
       </div>
     </div>
   `}).join('');
-  $('#recipesList').innerHTML = html || '<div class="muted">No recipes yet. Create one or Forge from an HF model.</div>';
+  $('#recipesList').innerHTML = html || '<div class="muted">Aucune recipe pour l&apos;instant. Créez-en une ou Forgez depuis un modèle HF.</div>';
   bindFavButtons('#recipesList', refreshRecipes);
   $$('#recipesList [data-run]').forEach((b) => b.addEventListener('click', async () => {
     try {
@@ -952,7 +952,7 @@ async function refreshRecipes() {
           ? { engine: r.engine, raw_cmd: r.raw_cmd, args: r.args || {}, env: r.env || {}, recipe_id: r.id }
           : { engine: r.engine, args: { model: r.model, ...r.args }, env: r.env || {}, recipe_id: r.id };
         const run = await api('/runs', { method: 'POST', body });
-        toast(`Started run ${run.id}`);
+        toast(`Run démarré ${run.id}`);
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
       }
@@ -967,14 +967,14 @@ async function refreshRecipes() {
       // Community sparkrun recipes: the @ref itself is the share format.
       if (r.args?._sparkrun?.ref) {
         await copyText(r.args._sparkrun.ref);
-        toast(`Copied ${r.args._sparkrun.ref} — paste it into any Spark Studio or run it with sparkrun`);
+        toast(`${r.args._sparkrun.ref} copié — collez-le dans n'importe quel Spark Studio ou exécutez-le avec sparkrun`);
         return;
       }
       // Prefer the community spark-arena YAML format when the recipe maps to it.
       const yaml = buildSparkYaml(r);
       if (yaml) {
         await copyText(yaml);
-        toast('Recipe copied as spark-arena YAML — share it anywhere; Paste on the Recipes tab imports it');
+        toast('Recipe copiée en spark-arena YAML — partagez-la n&apos;importe où ; Coller dans l&apos;onglet Recipes l&apos;importe');
         return;
       }
       // Strip local-only state: the DB id and the working/fix status tags.
@@ -990,7 +990,7 @@ async function refreshRecipes() {
         raw_cmd: r.raw_cmd || null,
       };
       await copyText(JSON.stringify(shareable, null, 2));
-      toast('Recipe copied as JSON — others can add it with Import or Paste on their Recipes tab');
+      toast('Recipe copiée en JSON — d&apos;autres peuvent l&apos;ajouter via Import ou Coller dans leur onglet Recipes');
     } catch (e) { toast(e.message, 'danger'); }
   }));
   $$('#recipesList [data-del]').forEach((b) => b.addEventListener('click', async () => {
@@ -1002,7 +1002,7 @@ async function refreshRecipes() {
     ev.stopPropagation();
     try {
       await api(`/runs/${b.dataset.stopRun}/stop?force=true`, { method: 'POST' });
-      toast(`Stopping run ${b.dataset.stopRun}…`);
+      toast(`Arrêt du run ${b.dataset.stopRun}…`);
       setTimeout(refreshRecipes, 2500);
     } catch (e) { toast(e.message, 'danger'); }
   }));
@@ -1043,30 +1043,30 @@ async function refreshSparkrun() {
           <div class="rc-name mono">${escapeHtml(r.ref)}</div>
           <div style="display:flex;gap:4px;align-items:center">
             ${favBtn('communityFavs', r.ref, favs.has(r.ref))}
-            ${(r.min_nodes || 1) > 1 ? `<span class="badge" title="Requires ${r.min_nodes} DGX Sparks (tensor parallelism)">${r.min_nodes}× Spark</span>` : ''}
-            <span class="rc-source registry" title="Runs on your Spark mesh via sparkrun">${escapeHtml(r.namespace)}</span>
+            ${(r.min_nodes || 1) > 1 ? `<span class="badge" title="Nécessite ${r.min_nodes} DGX Sparks (tensor parallelism)">${r.min_nodes}× Spark</span>` : ''}
+            <span class="rc-source registry" title="Tourne sur votre mesh Spark via sparkrun">${escapeHtml(r.namespace)}</span>
             <div class="rc-engine">${escapeHtml(r.engine || '')}</div>
           </div>
         </div>
         <div class="rc-model">${escapeHtml(r.model || '—')}</div>
         ${r.description ? `<div class="rc-notes">${escapeHtml(r.description)}</div>` : ''}
         <div class="rc-actions">
-          <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Install sparkrun first"'}>▶ Run via sparkrun</button>
+          <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Installez sparkrun d&apos;abord"'}>▶ Lancer via sparkrun</button>
         </div>
-      </div>`).join('') || `<div class="muted">No recipes fit ${tp} node${tp > 1 ? 's' : ''}${q ? ' matching your search' : ''}. Raise Nodes (TP) to see multi-Spark recipes.</div>`;
+      </div>`).join('') || `<div class="muted">Aucune recipe pour ${tp} node${tp > 1 ? 's' : ''}${q ? ' correspondant à votre recherche' : ''}. Augmentez Nodes (TP) pour voir les recipes multi-Spark.</div>`;
     bindFavButtons('#sparkrunList', refreshSparkrun);
     $$('#sparkrunList [data-sparkrun]').forEach((btn) => btn.addEventListener('click', async () => {
       try {
         const tp = Number($('#sparkrunTp').value) || 1;
         const run = await api('/sparkrun/run', { method: 'POST', body: { ref: btn.dataset.sparkrun, tp } });
-        toast(`Started ${run.id} — ${btn.dataset.sparkrun}${tp > 1 ? ` on ${tp} nodes` : ''}${run.recipe_id ? ' · saved to My Recipes' : ''}`);
+        toast(`${run.id} démarré — ${btn.dataset.sparkrun}${tp > 1 ? ` sur ${tp} nodes` : ''}${run.recipe_id ? ' · sauvegardé dans Mes Recipes' : ''}`);
         refreshRecipes();
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
       } catch (e) { toast(e.message, 'danger'); }
     }));
   } catch (e) {
-    state.textContent = `sparkrun status unavailable: ${e.message}`;
+    state.textContent = `sparkrun indispo : ${e.message}`;
   }
 }
 $('#sparkrunSearch').addEventListener('input', refreshSparkrun);
@@ -1084,7 +1084,7 @@ function watchSparkrunUpdate() {
     try {
       const st = await api('/sparkrun/update/status');
       if (st.running) {
-        state.textContent = `updating sparkrun${st.channel ? ` (--${st.channel})` : ''}…`;
+        state.textContent = `MAJ sparkrun${st.channel ? ` (--${st.channel})` : ''}…`;
         return;
       }
       clearInterval(_sparkrunUpdatePoll);
@@ -1093,10 +1093,10 @@ function watchSparkrunUpdate() {
       if (st.ok) {
         const moved = st.version_after && st.version_after !== st.version_before;
         toast(moved
-          ? `sparkrun updated: ${st.version_before || '?'} → ${st.version_after}`
-          : `sparkrun is up to date (${st.version_after || st.version_before || '?'})`);
+          ? `sparkrun MAJ : ${st.version_before || '?'} → ${st.version_after}`
+          : `sparkrun est à jour (${st.version_after || st.version_before || '?'})`);
       } else if (st.ok === false) {
-        toast(`sparkrun update failed — ${(st.log || []).slice(-3).join(' · ') || 'see server logs'}`, 'danger');
+        toast(`MAJ sparkrun échouée — ${(st.log || []).slice(-3).join(' · ') || 'voir les logs serveur'}`, 'danger');
       }
       // The Community list is served from the app's own registry mirror, not
       // sparkrun's registries — re-sync it too so new recipes actually appear.
@@ -1112,7 +1112,7 @@ $('#sparkrunUpdate').addEventListener('click', async () => {
       && !confirm(`Basculer sparkrun sur le canal ${channel === 'beta' ? 'beta (develop)' : 'alpha (bleeding edge)'} ?\n\nLes previews s'installent depuis git et le canal est mémorisé pour les futures MAJ. Revenir à Stable plus tard peut downgrader.`)) return;
   try {
     await api('/sparkrun/update', { method: 'POST', body: { channel } });
-    toast(`sparkrun update started${channel ? ` on --${channel}` : ''}…`);
+    toast(`MAJ sparkrun démarrée${channel ? ` sur --${channel}` : ''}…`);
     watchSparkrunUpdate();
   } catch (e) { toast(e.message, 'danger'); }
 });
@@ -1361,8 +1361,8 @@ async function refreshForgeSuggest() {
   } catch {}
   const chip = (m) => `<button class="forge-chip" data-chip="${escapeHtml(m)}">${escapeHtml(m)}</button>`;
   box.innerHTML =
-    (recent.length ? `<div class="forge-suggest-row"><span class="forge-suggest-label">Recent</span>${recent.map(chip).join('')}</div>` : '') +
-    (popular.length ? `<div class="forge-suggest-row"><span class="forge-suggest-label">Spark-validated</span>${popular.map(chip).join('')}</div>` : '');
+    (recent.length ? `<div class="forge-suggest-row"><span class="forge-suggest-label">Récents</span>${recent.map(chip).join('')}</div>` : '') +
+    (popular.length ? `<div class="forge-suggest-row"><span class="forge-suggest-label">Validés Spark</span>${popular.map(chip).join('')}</div>` : '');
   $$('#forgeSuggest [data-chip]').forEach((b) => b.addEventListener('click', () => {
     $('#forgeRepo').value = b.dataset.chip;
     $('#forgeGenerate').click();
@@ -1373,7 +1373,7 @@ $('#forgeCheck').addEventListener('click', async () => {
   const repo = $('#forgeRepo').value.trim();
   if (!repo) return;
   pushForgeRecent(repo);
-  $('#forgeReport').innerHTML = '<div class="muted">Checking…</div>';
+  $('#forgeReport').innerHTML = '<div class="muted">Vérification…</div>';
   try {
     const rep = await api(`/hf/check?repo=${encodeURIComponent(repo)}`);
     $('#forgeReport').innerHTML = renderVerdict(rep);
@@ -1448,8 +1448,8 @@ function renderFitBadge(fit) {
 function renderForgeCard(r, i) {
   const source = r.source || 'heuristic';
   const reg = r.registry;
-  const sourceLabel = source === 'sparkrun' ? `Community-validated (${escapeHtml(r.sparkrun?.registry || 'sparkrun')})`
-    : source === 'registry' ? 'Spark-validated'
+  const sourceLabel = source === 'sparkrun' ? `Validé par la communauté (${escapeHtml(r.sparkrun?.registry || 'sparkrun')})`
+    : source === 'registry' ? 'Validé Spark'
     : source === 'similar' ? 'Adapté du registry'
     : source === 'synth' ? 'Synthétisé pour votre hardware'
     : 'Estimation heuristique';
@@ -1558,14 +1558,14 @@ async function refreshLocalModels() {
   const list = await api('/models/local').catch(() => []);
   const totalGb = list.reduce((s, m) => s + (m.size_gb || 0), 0);
   $('#modelsList').innerHTML = list.length ? `
-    <div class="muted" style="margin:8px 0">${list.length} model${list.length > 1 ? 's' : ''} · ${totalGb.toFixed(1)} GB on disk</div>
-    <table><tr><th>Repo</th><th>Size</th><th>Cache</th><th></th></tr>
+    <div class="muted" style="margin:8px 0">${list.length} model${list.length > 1 ? 's' : ''} · ${totalGb.toFixed(1)} GB sur disque</div>
+    <table><tr><th>Repo</th><th>Taille</th><th>Cache</th><th></th></tr>
     ${list.map((m) => `<tr><td class="mono">${escapeHtml(m.repo)}</td><td>${m.size_gb} GB</td>
     <td class="mono muted" style="font-size:11px">${escapeHtml(m.cache || '')}</td>
-    <td><button class="btn" data-model="${escapeHtml(m.repo)}">Serve with vLLM</button>
-        <button class="btn" data-forge="${escapeHtml(m.repo)}">Forge</button>
-        <button class="btn danger" data-del-model="${escapeHtml(m.path)}" data-del-repo="${escapeHtml(m.repo)}" data-del-size="${m.size_gb}">Del</button></td></tr>`).join('')}</table>`
-    : '<div class="muted" style="margin:8px 0">No cached models found in any known HF cache.</div>';
+    <td><button class="btn" data-model="${escapeHtml(m.repo)}">Servir avec vLLM</button>
+        <button class="btn" data-forge="${escapeHtml(m.repo)}">Forger</button>
+        <button class="btn danger" data-del-model="${escapeHtml(m.path)}" data-del-repo="${escapeHtml(m.repo)}" data-del-size="${m.size_gb}">Suppr</button></td></tr>`).join('')}</table>`
+    : '<div class="muted" style="margin:8px 0">Aucun modèle en cache trouvé dans les caches HF connus.</div>';
   $$('#modelsList [data-model]').forEach((b) => b.addEventListener('click', () => {
     $(`.panel[data-panel="vllm"] .recipe-editor`).value = JSON.stringify({ model: b.dataset.model, 'max-model-len': 16384 }, null, 2);
     $('.tab[data-tab="vllm"]').click();
@@ -1581,7 +1581,7 @@ async function refreshLocalModels() {
     b.disabled = true;
     try {
       const res = await api(`/models/local?path=${encodeURIComponent(b.dataset.delModel)}`, { method: 'DELETE' });
-      toast(`Deleted ${res.deleted} — freed ${res.freed_gb} GB`);
+      toast(`Supprimé ${res.deleted} — libéré ${res.freed_gb} GB`);
     } catch (e) { toast(e.message, 'danger'); }
     refreshLocalModels();
   }));
@@ -1624,22 +1624,22 @@ async function recipeFromRun(run) {
 function summarizeRunFailure(run, lines) {
   const text = lines.join('\n');
   if (/invalid reference format/i.test(text)) {
-    return 'Docker command is malformed. A mount path or image name was split incorrectly, often by spaces or uppercase path fragments.';
+    return 'La commande Docker est malformée. Un chemin de mount ou un nom d&apos;image a été coupé incorrectement, souvent par des espaces ou des fragments de chemin en majuscules.';
   }
   if (/includes invalid characters for a local volume name/i.test(text)) {
-    return 'Docker received a literal shell variable in a volume mount. The recipe needs an absolute expanded host path before `docker run`.';
+    return 'Docker a reçu une variable shell littérale dans un mount de volume. La recipe a besoin d&apos;un chemin hôte absolu étendu avant `docker run`.';
   }
   if (/No such container/i.test(text)) {
-    return 'The wrapper expected a container that never started. Fix the first `docker run` failure before applying container patch steps.';
+    return 'Le wrapper attendait un container qui n&apos;a jamais démarré. Corrigez le premier échec `docker run` avant d&apos;appliquer les étapes de patch container.';
   }
   if (/argument --hf-overrides/i.test(text)) {
-    return 'The recipe passed invalid JSON to `--hf-overrides`. The payload needs valid JSON with normal braces and correct quoting.';
+    return 'La recipe a passé du JSON invalide à `--hf-overrides`. Le payload doit être du JSON valide, avec des accolades normales et un quoting correct.';
   }
   if (/Engine core initialization failed/i.test(text) && /Failed core proc\(s\): \{\}/i.test(text)) {
-    return 'vLLM reached API server startup, but the engine subprocess died before surfacing a structured cause. Spark Studio now appends recent container logs after failure; check the `[container:...]` lines for the real error, which is usually an incompatible model/image/flag combination or a CUDA library mismatch inside the container.';
+    return 'vLLM a atteint le démarrage du serveur API, mais le sous-process engine est mort avant de remonter une cause structurée. Spark Studio ajoute maintenant les logs container récents après l&apos;échec ; regardez les lignes `[container:...]` pour la vraie erreur, qui est en général une combinaison modèle/image/flag incompatible ou un mismatch de lib CUDA dans le container.';
   }
   if (/tool-call-parser/i.test(text) && /qwen/i.test(text)) {
-    return 'This run is using a Qwen tool-call parser path. That can be unstable for plain chat recipes and may need a safer serving configuration.';
+    return 'Ce run utilise un chemin de parser tool-call Qwen. Cela peut être instable pour les recipes de chat simples et peut demander une config de serving plus sûre.';
   }
   if (run.status === 'exited' && run.exit_code) {
     const last = [...lines].reverse().find((line) => line.trim() && !line.startsWith('[cleanup]'));
@@ -1673,22 +1673,22 @@ function updateLogsRecovery(run, lines) {
     box.classList.add('is-running');
     title.textContent = 'Recipe en cours';
     text.textContent = currentRunRecipe?.id
-      ? `Saved recipe ${currentRunRecipe.name || currentRunRecipe.id} is active. You can still open it or ask an agent to optimize it.`
-      : 'This run came from an ad hoc command. Save it as a recipe if you want to keep, edit, or optimize it.';
+      ? `La recipe sauvegardée ${currentRunRecipe.name || currentRunRecipe.id} est active. Vous pouvez encore l&apos;ouvrir ou demander à un agent de l&apos;optimiser.`
+      : 'Ce run vient d&apos;une commande ad hoc. Sauvegardez-la comme recipe si vous voulez la garder, l&apos;éditer ou l&apos;optimiser.';
   } else if (runOutcome(run) === 'failed') {
     box.classList.add('is-error');
-    title.textContent = 'Run failed. Fix it in-app and save the repaired recipe.';
-    text.textContent = summarizeRunFailure(run, lines) || `Run exited with code ${run.exit_code}. Ask Claude or Codex to patch and save the recipe.`;
+    title.textContent = 'Run échoué. Corrigez-le dans l&apos;app et sauvegardez la recipe réparée.';
+    text.textContent = summarizeRunFailure(run, lines) || `Le run est sorti avec le code ${run.exit_code}. Demandez à Claude ou Codex de patcher et sauvegarder la recipe.`;
   } else if (runOutcome(run) === 'stopped') {
     title.textContent = 'Run stoppé';
     text.textContent = currentRunRecipe?.id
-      ? 'You stopped this run. Relaunch its recipe any time, or ask an agent to optimize it first.'
-      : 'You stopped this ad hoc run. Save it as a recipe if you want to launch it again later.';
+      ? 'Vous avez stoppé ce run. Relancez sa recipe à tout moment, ou demandez d&apos;abord à un agent de l&apos;optimiser.'
+      : 'Vous avez stoppé ce run ad hoc. Sauvegardez-le comme recipe si vous voulez le relancer plus tard.';
   } else {
     title.textContent = 'Run terminé';
     text.textContent = currentRunRecipe?.id
-      ? 'This recipe completed cleanly. You can reopen it, duplicate it, or ask an agent to optimize it.'
-      : 'This ad hoc run completed cleanly. Save it as a recipe if you want to keep it.';
+      ? 'Cette recipe s&apos;est terminée proprement. Vous pouvez la rouvrir, la dupliquer, ou demander à un agent de l&apos;optimiser.'
+      : 'Ce run ad hoc s&apos;est terminé proprement. Sauvegardez-le comme recipe si vous voulez le garder.';
   }
 
   const canEdit = !!(currentRunRecipe && (currentRunRecipe.raw_cmd || Object.keys(currentRunRecipe.args || {}).length || currentRunRecipe.model));
@@ -1728,7 +1728,7 @@ async function refreshRuns() {
       <div class="ri-top"><span class="ri-engine">${r.engine}</span><span class="ri-status ${runOutcome(r)}">${runOutcome(r)}</span></div>
       <div class="ri-name">${escapeHtml(runLabel(r))}</div>
       <div class="ri-id">${r.port ? ':' + r.port + ' · ' : ''}${r.id.slice(0, 8)} · ${fmtTime(r.started_at)}${loadStats(r) ? ' · ' + loadStats(r) : ''}</div>
-    </div>`).join('') || '<div class="muted">No runs yet.</div>';
+    </div>`).join('') || '<div class="muted">Aucun run pour l&apos;instant.</div>';
   $$('#runsList .run-item').forEach((el) => el.addEventListener('click', () => window.selectRun(el.dataset.id)));
 }
 
@@ -1874,7 +1874,7 @@ async function openAgentModal(which) {
   const recipe = currentRunRecipe || await recipeFromRun(r);
   $('#fixTitle').textContent = `Assistant ${which === 'claude' ? 'Claude' : 'Codex'}`;
   $('#fixGoal').value = '';
-  $('#fixDiagnosis').innerHTML = '<div class="muted">Choose Fix Recipe, Optimize, or write your own instruction and send it.</div>';
+  $('#fixDiagnosis').innerHTML = '<div class="muted">Choisissez Fix Recipe, Optimize, ou écrivez votre propre instruction puis envoyez.</div>';
   $('#fixPatched').value = '';
   $('#fixNotes').innerHTML = '';
   $('#fixModal').dataset.baseRecipe = JSON.stringify(recipe);
@@ -1890,7 +1890,7 @@ async function askAgent(goal = '') {
     const finalGoal = goal || $('#fixGoal').value.trim() || defaultAgentGoal('fix', recipe);
     $('#fixGoal').value = finalGoal;
     setFixBusy(true, which);
-    $('#fixDiagnosis').innerHTML = '<div class="muted">Thinking…</div>';
+    $('#fixDiagnosis').innerHTML = '<div class="muted">Réflexion…</div>';
     $('#fixPatched').value = '';
     $('#fixNotes').innerHTML = '';
     const res = await api('/agents/fix', {
@@ -1976,7 +1976,7 @@ $('#fixApply').addEventListener('click', async () => {
     try {
       const active = await api('/active').catch(() => null);
       if (active && active.id) {
-        toast('Stopping current engine…');
+        toast('Arrêt de l&apos;engine courant…');
         await api(`/runs/${active.id}/stop`, { method: 'POST' });
         // Give it a moment to release GPU memory before starting the new run.
         await new Promise((r) => setTimeout(r, 3000));
@@ -3424,7 +3424,7 @@ async function refreshBenchTab() {
     try {
       const { markdown } = await api(`/benchy/${el.dataset.benchShare}/export`);
       await copyText(markdown);
-      toast('Benchmark report copied as markdown — paste it anywhere to share');
+      toast('Rapport de benchmark copié en markdown — collez-le n&apos;importe où pour partager');
     } catch (e) { toast(e.message, 'danger'); }
   }));
   const cmpBoxes = $$('#benchyHistory [data-bench-cmp]');
@@ -3552,7 +3552,7 @@ $('#benchyGo').addEventListener('click', () => {
             try {
               const obj = JSON.parse(data);
               renderBenchyResult(obj.result);
-              toast('llama-benchy completed');
+              toast('llama-benchy terminé');
             } catch (e) { toast(`Result parse: ${e.message}`, 'danger'); }
           } else if (evt === 'error') {
             toast(`benchy error: ${data}`, 'danger');
@@ -5770,7 +5770,7 @@ async function refreshEngineImages() {
     box.innerHTML = d.images.map((im) => `
       <div class="img-row ${im.is_vllm_node ? 'is-node' : ''}" data-imgref="${escapeHtml(im.ref)}">
         <span class="mono">${escapeHtml(im.ref)}</span>
-        ${im.is_vllm_node ? '<span class="badge ok" title="This is what docker recipes launch">← vllm-node</span>' : ''}
+        ${im.is_vllm_node ? '<span class="badge ok" title="C&apos;est ce que les recipes docker lancent">← vllm-node</span>' : ''}
         <span class="muted">${escapeHtml(im.created)} · ${escapeHtml(im.size)}</span>
         <span class="img-vers muted mono">${im.versions
           ? (im.versions.error ? escapeHtml(im.versions.error)
@@ -5800,10 +5800,10 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
   if (_imgBuild.active) return;
   const mode = b.dataset.imgbuild;
   const flags = mode === 'advanced' ? ($('#imgFlags').value || '').trim() : '';
-  if (mode === 'advanced' && !flags) { toast('Enter build flags first (e.g. --vllm-ref v0.24.0)', 'danger'); return; }
+  if (mode === 'advanced' && !flags) { toast('Saisissez d&apos;abord des flags de build (ex. --vllm-ref v0.24.0)', 'danger'); return; }
   if (!confirm(mode === 'nightly'
-    ? 'Pull the tested nightly and retag vllm-node?\n\nUsually a few minutes. Running models keep serving their old image until relaunched.'
-    : 'Start an image build?\n\nSource builds can take 30–60+ minutes. It keeps running even if you close this page.')) return;
+    ? 'Pull la nightly testée et re-tag vllm-node ?\n\nQuelques minutes habituellement. Les models en cours continuent de servir leur ancienne image jusqu&apos;au relaunch.'
+    : 'Lancer un build d&apos;image ?\n\nLes builds depuis les sources peuvent prendre 30–60+ minutes. Le build continue même si vous fermez cette page.')) return;
   _imgBuild.active = true; _imgBuild.lines = [];
   refreshEngineImages();
   const log = $('#imgBuildLog'); log.hidden = false; log.textContent = '';
@@ -5818,7 +5818,7 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
     es.close();
     _imgBuild.active = false;
     const code = Number(ev.data);
-    toast(code === 0 ? 'Image updated — relaunch recipes to use it' : `Image build exited ${code} — see the log`, code === 0 ? undefined : 'danger');
+    toast(code === 0 ? 'Image MAJ — relancez les recipes pour l&apos;utiliser' : `Build d&apos;image exit ${code} — voir le log`, code === 0 ? undefined : 'danger');
     refreshEngineImages();
   });
   es.addEventListener('error', () => {
@@ -5827,11 +5827,11 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
     // No log line ever arrived → the endpoint didn't answer (404 on a stale
     // server process being the classic) — nothing is building.
     if (_imgBuild.lines.length === 0) {
-      _imgBuild.lines.push('[could not start — the server did not accept the request.'
-        + ' If you just updated, the running process is still on the old code: restart Spark Studio and retry.]');
-      toast('Build did not start — restart Spark Studio after an update, then retry', 'danger');
+      _imgBuild.lines.push('[impossible de démarrer — le serveur n&apos;a pas accepté la requête.'
+        + ' Si vous venez de mettre à jour, le process tourne encore sur l&apos;ancien code : relancez Spark Studio puis réessayez.]');
+      toast('Build non démarré — relancez Spark Studio après une MAJ puis réessayez', 'danger');
     } else {
-      _imgBuild.lines.push('[stream disconnected — the build continues server-side; revisit this tab to check]');
+      _imgBuild.lines.push('[stream déconnecté — le build continue côté serveur ; revisitez cet onglet pour vérifier]');
     }
     refreshEngineImages();
   });
@@ -5862,21 +5862,21 @@ $$('[data-recover]').forEach((b) => b.addEventListener('click', async () => {
   b.disabled = false;
 }));
 $('#recoverResetDb')?.addEventListener('click', async () => {
-  if (!confirm('Delete ALL saved recipes, run history, and benchmark history?\n\nDownloaded models are NOT deleted. A running model keeps serving.\n\nThere is no undo.')) return;
+  if (!confirm('Supprimer TOUTES les recipes sauvegardées, l&apos;historique de runs, et l&apos;historique de benchmarks ?\n\nLes modèles téléchargés ne sont PAS supprimés. Un modèle en cours continue de servir.\n\nPas de undo.')) return;
   try {
     const r = await api('/recovery/reset-db', { method: 'POST', body: { confirm: true } });
-    recoveryReport('Database reset: ' + Object.entries(r.deleted).map(([t, n]) => `${t} ${n}`).join(' · '));
+    recoveryReport('Base réinitialisée : ' + Object.entries(r.deleted).map(([t, n]) => `${t} ${n}`).join(' · '));
     toast('Base réinitialisée');
     refreshRecipes(); refreshRuns(); refreshOverview();
   } catch (e) { toast(e.message, 'danger'); }
 });
 async function copyBugReport(runId) {
   try {
-    toast('Building bug report…');
+    toast('Construction du rapport de bug…');
     const r = await api(`/bugreport${runId ? `?run_id=${runId}` : ''}`);
     await copyText(r.markdown);
-    toast('Bug report copied to clipboard 📋');
-  } catch (e) { toast(`Bug report failed: ${e.message}`, 'danger'); }
+    toast('Rapport de bug copié dans le presse-papier 📋');
+  } catch (e) { toast(`Échec du rapport de bug : ${e.message}`, 'danger'); }
 }
 $('#recoverBugReport')?.addEventListener('click', () => copyBugReport(null));
 $('#logsBugReport')?.addEventListener('click', () => copyBugReport(currentRunId));
