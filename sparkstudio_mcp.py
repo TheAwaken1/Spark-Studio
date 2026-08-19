@@ -1,4 +1,4 @@
-"""Read-only MCP bridge from Hermes to Spark Studio web search."""
+"""Pont MCP read-only de Hermes vers la recherche web de Spark Studio."""
 
 from __future__ import annotations
 

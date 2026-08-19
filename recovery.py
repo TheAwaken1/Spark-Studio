@@ -1,16 +1,18 @@
-"""Recovery actions — the "I broke it" safety net.
+"""Actions de récupération — le filet de sécurité « j'ai cassé un truc ».
 
-Every action here is deliberately conservative and reports exactly what it
-did, so beginners can click them without fear:
+Chaque action ici est délibérément conservatrice et rapporte exactement
+ce qu'elle a fait, pour que les débutants puissent cliquer sans crainte :
 
-  clear_finished_runs   drop exited runs from the live list (history stays in DB)
-  clean_containers      remove orphan sparkrun_* / spark-vllm-* containers that
-                        no live run owns — NEVER touches user-managed containers
-                        (vllm_node, spark-searxng, …) or jobs sparkrun still reports
-  reset_registry        wipe the registry mirror + forged YAML cache (resynced on
-                        demand / next boot)
-  wipe_db               delete saved recipes, run history, bench + eval history
-                        (models on disk are untouched)
+  clear_finished_runs   supprime les runs terminés de la liste live (l'historique reste en DB)
+  clean_containers      supprime les containers orphelins sparkrun_* / spark-vllm-* que
+                        aucun run live ne possède — ne touche JAMAIS aux containers
+                        user-managed (vllm_node, spark-searxng, …) ni aux jobs que
+                        sparkrun rapporte encore
+  reset_registry        efface le mirror registry + cache YAML forgé (resync à la
+                        demande / au prochain boot)
+  wipe_db               supprime les recipes sauvegardées, l'historique des runs,
+                        l'historique bench + eval
+                        (les modèles sur disque ne sont pas touchés)
 """
 
 from __future__ import annotations

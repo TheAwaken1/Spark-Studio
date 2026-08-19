@@ -1,13 +1,14 @@
-"""Hermes-backed Agent Lab for Spark Studio.
+"""Agent Lab propulsé par Hermes pour Spark Studio.
 
-The dashboard already measures inference speed and basic tool calling. Agent
-Lab answers the next question: can the served model complete real repository
-work through an agent harness?
+Le dashboard mesure déjà la vitesse d'inférence et l'appel d'outils basique.
+L'Agent Lab répond à la question suivante : le modèle servi peut-il mener à
+bien un vrai travail sur dépôt via un harnais d'agent ?
 
-Hermes runs with a Spark Studio-specific ``HERMES_HOME`` so the user's normal
-provider, memories, skills, sessions, and gateway are never overwritten.
-Benchmark cases are disposable Git repositories. Free-form runs default to a
-detached worktree (or a copied workspace for non-Git folders).
+Hermes s'exécute avec un ``HERMES_HOME`` spécifique à Spark Studio, pour que
+le provider, les memories, les skills, les sessions et la gateway habituels
+de l'utilisateur ne soient jamais écrasés. Les cas de benchmark sont des
+dépôts Git jetables. Les runs en free-form utilisent par défaut un worktree
+détaché (ou une copie du workspace pour les dossiers non-Git).
 """
 
 from __future__ import annotations

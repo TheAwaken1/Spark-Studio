@@ -1,17 +1,19 @@
-"""Tool Eval Bench — how *useful* is the served model, beyond raw speed?
+"""Tool Eval Bench — à quel point le modèle servi est-il *utile*, au-delà de la vitesse brute ?
 
-Runs a built-in suite of deterministic tool-calling and structured-output
-cases against any OpenAI-compatible endpoint and scores them pass/fail:
+Exécute une suite intégrée de cas déterministes d'appel d'outils et
+d'output structuré contre n'importe quel endpoint compatible OpenAI et
+les note pass/fail :
 
-  selection   pick the right tool among several
-  arguments   extract correct argument values from the request
-  restraint   answer directly when no tool is needed (no spurious calls)
-  multi_turn  actually use a tool result in the final answer
-  json_output emit strict JSON matching a requested shape
+  selection   choisir le bon outil parmi plusieurs
+  arguments   extraire les bonnes valeurs d'arguments de la requête
+  restraint   répondre directement quand aucun outil n'est nécessaire (pas d'appels parasites)
+  multi_turn  utiliser réellement un résultat d'outil dans la réponse finale
+  json_output émettre du JSON strict correspondant à un schéma demandé
 
-Scores are 0-100 (percent of cases passed), overall and per category.
-Mirrors the sparkrun_service update pattern: start_eval() kicks off a
-background thread, eval_status() reports progress, results persist to db.
+Les scores sont 0-100 (pourcentage de cas réussis), overall et par
+catégorie. Miroite le pattern d'update de sparkrun_service : start_eval()
+lance un thread en arrière-plan, eval_status() rapporte la progression,
+les résultats persistent en DB.
 """
 from __future__ import annotations
 

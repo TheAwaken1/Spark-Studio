@@ -1,21 +1,21 @@
-"""Recipe Forge: produce runnable recipes for an HF repo.
+"""Recipe Forge : produit des recipes exécutables pour un repo HF.
 
-Order of preference, highest leverage first:
+Ordre de préférence, du plus levier au plus générique :
 
-  1. Registry exact match — return the curated YAML verbatim.
-  2. Registry similar match — adapt the closest curated recipe (same family
-     / quant), substituting the requested HF repo into ``model:`` and
-     surfacing how we adapted it.
-  3. Synthesized recipe — recipe_brain assembles a real spark-vllm-docker
-     shaped YAML for the repo (right container variant for the quant, right
-     tool/reasoning parser for the family, the standard flag stack eugr's
-     curated recipes use). Goes through the docker path identically to a
-     registry match.
-  4. Heuristic fallback — flat-args presets for SGLang / llama.cpp paths
-     where the docker container set doesn't apply.
+  1. Match exact registry — retourne le YAML curated tel quel.
+  2. Match similaire registry — adapte la recipe curated la plus proche
+     (même famille / quant), en substituant le repo HF demandé dans
+     ``model:`` et en exposant comment on a adapté.
+  3. Recipe synthétisée — recipe_brain assemble un vrai YAML au format
+     spark-vllm-docker pour le repo (bonne variante de container pour le
+     quant, bon parser tool/reasoning pour la famille, le stack de flags
+     standard des recipes curées d'eugr). Passe par le chemin docker
+     identiquement à un match registry.
+  4. Fallback heuristique — presets à args plats pour les chemins SGLang
+     / llama.cpp où le set de containers docker ne s'applique pas.
 
-Each emitted recipe carries a ``source`` field (``registry`` / ``similar``
-/ ``synth`` / ``heuristic``) so the UI can badge it.
+Chaque recipe émise porte un champ ``source`` (``registry`` / ``similar``
+/ ``synth`` / ``heuristic``) pour que l'UI puisse la badger.
 """
 
 from __future__ import annotations

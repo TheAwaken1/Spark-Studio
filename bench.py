@@ -1,4 +1,4 @@
-"""Simple benchmark client against an OpenAI-compatible /v1/chat/completions endpoint."""
+"""Client de benchmark simple contre un endpoint /v1/chat/completions compatible OpenAI."""
 
 from __future__ import annotations
 

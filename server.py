@@ -1,6 +1,6 @@
-"""Spark Studio FastAPI backend.
+"""Backend FastAPI de Spark Studio.
 
-Serves the dashboard at / and exposes REST + SSE endpoints at /api/*.
+Sert le dashboard à / et expose des endpoints REST + SSE sous /api/*.
 """
 
 from __future__ import annotations

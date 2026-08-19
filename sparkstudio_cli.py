@@ -1,4 +1,4 @@
-"""Command-line client for Spark Studio and its Hermes Agent Lab."""
+"""Client en ligne de commande pour Spark Studio et son Hermes Agent Lab."""
 
 from __future__ import annotations
 

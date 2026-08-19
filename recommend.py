@@ -1,18 +1,19 @@
-"""Starter-model recommendations for the first-run wizard and Overview.
+"""Recommandations de modèles de départ pour l'assistant premier lancement et l'Overview.
 
-Ranks launchable candidates from what this box actually has — nothing is
-hardcoded to a model name, so recommendations don't rot as the registry moves:
+Classe les candidats lançables depuis ce que cette box a réellement —
+ rien n'est codé en dur sur un nom de modèle, donc les recommandations ne
+ périment pas quand le registry bouge :
 
-  1. Saved recipes tagged ✓ working   — proven on THIS machine (best signal)
-  2. Locally cached HF models          — real on-disk size, no download wait
-  3. Synced registry recipes (solo)    — community-validated for DGX Spark
+  1. Recipes sauvegardées taguées ✓ working — éprouvées sur CETTE machine (meilleur signal)
+  2. Modèles HF en cache local       — taille réelle sur disque, pas d'attente de download
+  3. Recipes du registry synchronisées (solo) — validées par la communauté pour DGX Spark
 
-Extra signals: quick-bench history (measured tok/s beats any estimate),
-MoE active-parameter counts (the speed lever on bandwidth-bound GB10),
-quant-aware weight estimates against unified memory, and
-recipe_brain.capabilities_for() for the tool-calling category.
+Signaux supplémentaires : historique quick-bench (tok/s mesuré bat toute
+estimation), nombre de paramètres actifs MoE (le levier de vitesse sur
+le GB10 bandwidth-bound), estimations de poids quant-aware vs mémoire
+unifiée, et recipe_brain.capabilities_for() pour la catégorie tool-calling.
 
-Categories: fastest · best_quality · coding · tool_calling · low_memory.
+Catégories : fastest · best_quality · coding · tool_calling · low_memory.
 """
 
 from __future__ import annotations

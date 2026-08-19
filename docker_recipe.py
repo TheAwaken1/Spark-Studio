@@ -1,15 +1,15 @@
-"""Render a registry-shaped recipe into a runnable raw_cmd.
+"""Convertit une recipe au format registry en raw_cmd exécutable.
 
-We delegate to spark-vllm-docker's canonical orchestrator (``run-recipe.sh``
-→ ``run-recipe.py``) instead of reinventing docker invocation. That script
-handles image build, model download, mod application, ray/solo cluster
-setup, and graceful shutdown — all things our launcher would otherwise
-have to reimplement.
+Nous déléguons à l'orchestrateur canonique de spark-vllm-docker
+(``run-recipe.sh`` → ``run-recipe.py``) au lieu de réinventer l'invocation
+docker. Ce script gère la build d'image, le téléchargement du modèle,
+l'application des mods, la mise en place du cluster ray/solo et l'arrêt
+propre — tout ce que notre launcher devrait sinon réimplémenter.
 
-Forge plants a ``_registry`` block inside ``args`` for any registry-sourced
-recipe. ``prepare_run`` recognises it, materialises the YAML on disk
-(adapting the model field if needed), and produces the raw shell command
-the runner will spawn.
+Forge plante un bloc ``_registry`` dans ``args`` pour toute recipe issue
+du registry. ``prepare_run`` le reconnaît, matérialise le YAML sur disque
+(en adaptant le champ model si besoin) et produit la commande shell brute
+que le runner va lancer.
 """
 
 from __future__ import annotations

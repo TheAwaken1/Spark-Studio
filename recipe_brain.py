@@ -1,21 +1,22 @@
-"""Synthesize spark-vllm-docker shaped recipes for arbitrary HF repos.
+"""Synthétise des recipes au format spark-vllm-docker pour des repos HF arbitraires.
 
-The eugr/spark-vllm-docker recipe set encodes tribal knowledge: which
-container variant pairs with which quant (``vllm-node-mxfp4`` for MXFP4,
-``vllm-node-tf5`` for transformers-5 models like GLM-4.7 / Gemma 4),
-which tool/reasoning parser belongs to which family, which mods unbreak
-which combo, which flag stack each quant needs (MXFP4's CUTLASS +
-FLASHINFER + kv-fp8 trio; NVFP4's MoE-cutlass + TRITON_ATTN; native FP8's
-flashinfer + fastsafetensors). Forge previously fell back to a flat
-``args`` dict when no registry match existed, which couldn't use the
-docker path at all. This module captures that knowledge as data and emits
-a real v1 spark-vllm-docker YAML for any repo so the same
-``run-recipe.sh`` pipeline drives it.
+Le set de recipes eugr/spark-vllm-docker encode de la connaissance tribale :
+quelle variante de container va avec quel quant (``vllm-node-mxfp4`` pour
+MXFP4, ``vllm-node-tf5`` pour les modèles transformers-5 comme GLM-4.7 /
+Gemma 4), quel parser tool/reasoning appartient à quelle famille, quels
+mods débloquent quelle combinaison, quel stack de flags chaque quant
+demande (le trio CUTLASS + FLASHINFER + kv-fp8 pour MXFP4 ;
+MoE-cutlass + TRITON_ATTN pour NVFP4 ; flashinfer + fastsafetensors pour
+FP8 natif). Forge retombait auparavant sur un ``args`` plat quand aucun
+match registry n'existait, ce qui ne pouvait pas utiliser le chemin docker.
+Ce module capture cette connaissance en tant que data et émet un vrai
+YAML spark-vllm-docker v1 pour n'importe quel repo, de sorte que la même
+pipeline ``run-recipe.sh`` le pilote.
 
-The output is intentionally shaped exactly like eugr's curated recipes:
-``recipe_version: "1"``, top-level ``name`` / ``description`` / ``model``
-/ ``container`` / ``defaults`` / ``env`` / ``command``, plus ``mods`` and
-``build_args`` when relevant.
+L'output est volontairement calibré exactement comme les recipes curées
+d'eugr : ``recipe_version: "1"``, top-level ``name`` / ``description`` /
+``model`` / ``container`` / ``defaults`` / ``env`` / ``command``, plus
+``mods`` et ``build_args`` quand pertinent.
 """
 
 from __future__ import annotations

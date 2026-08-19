@@ -1,14 +1,15 @@
-"""Spark-mesh (multi-node) view — a friendly UI over sparkrun's truth.
+"""Vue Spark-mesh (multi-node) — une UI conviviale par-dessus la vérité de sparkrun.
 
-Design rule (from the roadmap): sparkrun is the distributed runtime; Spark
-Studio only *reads* what sparkrun and the local box report. No SSH agents,
-no per-node daemons — remote nodes get a lightweight reachability probe and
-whatever `sparkrun status` says about them, nothing more.
+Règle de design (issue de la roadmap) : sparkrun est le runtime distribué ;
+Spark Studio ne fait que *lire* ce que sparkrun et la box locale rapportent.
+Pas d'agents SSH, pas de daemons par node — les nodes distants reçoivent
+une sonde de reachability légère et tout ce que `sparkrun status` dit d'eux,
+rien de plus.
 
-Sources:
-  sparkrun cluster list   → saved clusters + default (name, host list)
-  sparkrun status         → running jobs with per-host roles/states
-  hostinfo / psutil       → full detail for the local node only
+Sources :
+  sparkrun cluster list   → clusters sauvegardés + défaut (nom, liste de hosts)
+  sparkrun status         → jobs en cours avec rôles/états par host
+  hostinfo / psutil       → détail complet pour le node local uniquement
 """
 
 from __future__ import annotations

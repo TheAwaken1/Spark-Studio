@@ -1,15 +1,16 @@
-"""Local mirror of the curated DGX Spark recipe sources.
+"""Mirror local des sources de recipes DGX Spark curées.
 
-We shallow-clone three upstream repos into ``app/data/registry/`` and parse
-them into a single in-memory index that Forge and Fix can query offline:
+Nous shallow-clonons trois repos upstream dans ``app/data/registry/`` et
+les analysons en un index unique en mémoire que Forge et Fix peuvent
+interroger offline :
 
-  - spark-arena/recipe-registry  (official + experimental curated recipes)
-  - eugr/spark-vllm-docker        (reference recipes + per-model mods)
-  - spark-arena/sparkrun          (pinned image tags via versions.yaml)
+  - spark-arena/recipe-registry  (recipes curées officielles + expérimentales)
+  - eugr/spark-vllm-docker        (recipes de référence + mods par modèle)
+  - spark-arena/sparkrun          (tags d'images pinnés via versions.yaml)
 
-Forge looks up an HF repo here before falling back to heuristics. Fix
-inlines the matching recipe + relevant mods in the prompt instead of
-asking the agent to fetch URLs.
+Forge y cherche un repo HF avant de retomber sur l'heuristique. Fix
+inline la recipe correspondante + les mods pertinents dans le prompt
+au lieu de demander à l'agent de fetcher des URLs.
 """
 
 from __future__ import annotations

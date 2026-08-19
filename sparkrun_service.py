@@ -1,10 +1,11 @@
-"""Helpers for observing sparkrun-managed workloads.
+"""Helpers pour observer les workloads gérés par sparkrun.
 
-sparkrun workloads deliberately outlive their launcher process: the container
-runs `sleep infinity` and the serve command is `docker exec`'d separately,
-logging to /tmp/sparkrun_serve.log INSIDE the container. That means neither
-the launcher's exit code nor `docker ps` tells you whether the engine is
-actually alive — these helpers do.
+Les workloads sparkrun survivent volontairement à leur processus launcher :
+le container exécute `sleep infinity` et la commande serve est lancée
+séparément via `docker exec`, en loggant dans /tmp/sparkrun_serve.log À
+L'INTÉRIEUR du container. Cela signifie que ni le code de sortie du
+launcher ni `docker ps` ne vous disent si l'engine est réellement vivant
+— ces helpers le font.
 """
 from __future__ import annotations
 

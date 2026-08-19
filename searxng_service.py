@@ -1,14 +1,16 @@
-"""App-managed SearXNG search engine (Docker).
+"""Moteur de recherche SearXNG géré par l'app (Docker).
 
-Spark Studio's web search prefers a SearXNG meta-search backend over the fragile
-DuckDuckGo scraper. Rather than depend on a separately-installed instance, we run
-the official ``searxng/searxng`` image ourselves as a singleton container bound to
-localhost and hand its URL to the discovery code in ``server.py``.
+La recherche web de Spark Studio préfère un backend SearXNG meta-search au
+scraper fragile de DuckDuckGo. Plutôt que de dépendre d'une instance
+installée séparément, nous exécutons nous-mêmes l'image officielle
+``searxng/searxng`` comme container singleton lié à localhost et passons
+son URL au code de découverte dans ``server.py``.
 
-Lifecycle is best-effort: every function swallows its own errors and reflects the
-outcome through ``status()`` / module state instead of raising into the caller, so
-a missing/broken Docker never takes down the app. Auto-started from the FastAPI
-startup hook; also exposed via start/stop endpoints for manual recovery.
+Le cycle de vie est best-effort : chaque fonction avale ses propres
+erreurs et reflète le résultat via ``status()`` / l'état du module au
+lieu de raise vers l'appelant, pour qu'un Docker manquant/cassé ne fasse
+jamais tomber l'app. Auto-démarré depuis le hook de startup FastAPI ;
+exposé aussi via endpoints start/stop pour la récupération manuelle.
 """
 
 from __future__ import annotations

@@ -1,8 +1,9 @@
-"""Lifecycle and sandbox bridge for the optional Hermes Mod skin editor.
+"""Pont cycle de vie et sandbox pour l'éditeur de skin Hermes Mod optionnel.
 
-Spark Studio installs a pinned upstream npm package under data/, launches it on
-an unadvertised loopback port, and exposes it only through a sandboxed iframe.
-Its HERMES_HOME is always Agent Lab's isolated profile, never ~/.hermes.
+Spark Studio installe un paquet npm upstream pinné sous data/, le démarre
+sur un port loopback non annoncé, et ne l'expose qu'à travers un iframe
+sandboxé. Son HERMES_HOME est toujours le profil isolé de l'Agent Lab,
+jamais ~/.hermes.
 """
 
 from __future__ import annotations

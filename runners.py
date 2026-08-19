@@ -1,8 +1,9 @@
-"""Subprocess lifecycle manager for vLLM, SGLang, and llama.cpp.
+"""Gestionnaire de cycle de vie subprocess pour vLLM, SGLang et llama.cpp.
 
-Each run gets a unique id, a line-buffered stdout/stderr pump, an async log
-queue, and a live ring buffer. The frontend streams logs over SSE and can
-send SIGTERM/SIGKILL via the /runs/{id}/stop endpoint.
+Chaque run obtient un id unique, une pompe stdout/stderr line-buffered,
+une queue de log async, et un ring buffer live. Le frontend streame les
+logs via SSE et peut envoyer SIGTERM/SIGKILL via l'endpoint
+/runs/{id}/stop.
 """
 
 from __future__ import annotations

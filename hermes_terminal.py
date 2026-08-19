@@ -1,9 +1,10 @@
-"""Browser terminal bridge for Spark Studio's embedded Hermes TUI.
+"""Pont terminal navigateur pour le TUI Hermes embarqué de Spark Studio.
 
-The Hermes dashboard uses the same architecture: a real ``hermes --tui``
-process runs behind a pseudo-terminal while xterm.js renders its ANSI stream
-in the browser.  This module keeps the bridge deliberately small and POSIX
-only; DGX Spark runs Linux, and native Windows users should use WSL.
+Le dashboard Hermes suit la même architecture : un vrai processus
+``hermes --tui`` tourne derrière un pseudo-terminal tandis que xterm.js
+affiche son flux ANSI dans le navigateur. Ce module garde le pont
+délibérément petit et POSIX uniquement ; DGX Spark tourne Linux, et les
+utilisateurs Windows natifs doivent passer par WSL.
 """
 
 from __future__ import annotations

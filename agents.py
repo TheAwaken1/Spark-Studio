@@ -1,12 +1,13 @@
-"""Bridge to the Claude Code, OpenAI Codex, and Hugging Face CLIs.
+"""Pont vers les CLI Claude Code, OpenAI Codex et Hugging Face.
 
-We delegate all OAuth to the official CLIs:
-  - `claude` (@anthropic-ai/claude-code) — Pro/Max subscription login via `claude /login`
-  - `codex`  (@openai/codex)             — ChatGPT login via `codex login`
-  - `hf`     (huggingface_hub)            — browser/device login via `hf auth login`
+Nous déléguons tout l'OAuth aux CLI officielles :
+  - `claude` (@anthropic-ai/claude-code) — login abonnement Pro/Max via `claude /login`
+  - `codex`  (@openai/codex)             — login ChatGPT via `codex login`
+  - `hf`     (huggingface_hub)            — login navigateur/device via `hf auth login`
 
-The CLIs store their own credentials after login. Spark Studio never reads or
-stores the underlying tokens; it only invokes login and checks public identity.
+Les CLI stockent elles-mêmes leurs credentials après le login. Spark Studio
+ne lit ni ne stocke jamais les tokens sous-jacents ; il invoque seulement
+le login et vérifie l'identité publique.
 """
 
 from __future__ import annotations

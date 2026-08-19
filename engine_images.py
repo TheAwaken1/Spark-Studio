@@ -1,14 +1,15 @@
-"""Engine container image management for the spark-vllm-docker pipeline.
+"""Gestion des images containers d'engine pour la pipeline spark-vllm-docker.
 
-The recipes always run whatever is tagged ``vllm-node`` (plus the -tf5 /
--mxfp4 variants). "Some new model doesn't run" is almost always a stale
-runner image — new architectures land in vLLM nightlies, and eugr's
-``build-and-copy.sh`` (no flags) re-pulls the tested nightly and retags.
+Les recipes exécutent toujours ce qui est tagué ``vllm-node`` (plus les
+variantes -tf5 / -mxfp4). « Un nouveau modèle ne tourne pas » est presque
+toujours une image de runner obsolète — les nouvelles architectures arrivent
+dans les nightlies vLLM, et le ``build-and-copy.sh`` (sans flags) d'eugr
+re-pull la nightly testée et la retague.
 
-This module provides the read side: which images exist, which one
-``vllm-node`` actually is, and — on demand — the vLLM/FlashInfer versions
-inside an image (probed by running python inside it; cached by image id).
-The build/pull actions stream through the server's SSE endpoint.
+Ce module fournit le côté lecture : quelles images existent, quel est
+le ``vllm-node`` réel, et — à la demande — les versions vLLM/FlashInfer
+présentes dans une image (sonde en lançant python dedans ; cache par id
+d'image). Les actions build/pull streament via l'endpoint SSE du serveur.
 """
 
 from __future__ import annotations

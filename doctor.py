@@ -1,18 +1,18 @@
-"""Spark Studio Doctor — one source of truth for system health checks.
+"""Spark Studio Doctor — source unique de vérité pour les contrôles de santé système.
 
-Aggregates every dependency / hardware / feature probe the app already knows
-how to do (hostinfo, runners, sparkrun_service, agents, benchy) into a single
-report consumed three ways:
+Agrège toutes les sondes (dépendances / matériel / features) que l'app
+sait déjà faire (hostinfo, runners, sparkrun_service, agents, benchy) en
+un seul rapport, consommé de trois manières :
 
-  - CLI:  ./start.sh --doctor   (or: env/bin/python doctor.py)
-  - API:  GET /api/doctor       (powers the first-run wizard + Feature Health)
-  - Bug reports: the "Copy Bug Report" flow embeds the same report
+  - CLI : ./start.sh --doctor   (ou : env/bin/python doctor.py)
+  - API : GET /api/doctor       (alimente l'assistant premier lancement + Feature Health)
+  - Bug reports : le flux « Copier le rapport de bug » embarque ce même rapport
 
-Each check returns {id, label, status, detail, fix}:
-  status: "ok" — working;  "warn" — optional thing missing (feature degrades);
-          "error" — core problem worth fixing before serious use.
-Checks never raise: a probe that blows up becomes its own "error" entry so one
-broken dependency can't hide the rest of the report.
+Chaque check renvoie {id, label, status, detail, fix} :
+  status : « ok » — fonctionne ; « warn » — élément optionnel manquant (feature dégradée) ;
+           « error » — problème principal à corriger avant usage sérieux.
+Les checks ne lèvent jamais d'exception : une sonde qui explose devient sa
+propre entrée « error » pour qu'une dépendance cassée ne masque pas le reste.
 """
 
 from __future__ import annotations

@@ -1,8 +1,9 @@
-"""HuggingFace model compatibility checker for DGX Spark.
+"""Vérificateur de compatibilité des modèles HuggingFace pour DGX Spark.
 
-DGX Spark = Grace-Blackwell superchip, 128 GB unified memory. We estimate
-memory footprint from config.json and quantization, then flag whether a
-model can run on vLLM / SGLang / llama.cpp under that envelope.
+DGX Spark = superpuce Grace-Blackwell, 128 GB de mémoire unifiée. Nous
+estimons l'empreinte mémoire depuis config.json et la quantization, puis
+nous indiquons si un modèle peut tourner sur vLLM / SGLang / llama.cpp
+sous cette enveloppe.
 """
 
 from __future__ import annotations
