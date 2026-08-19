@@ -1,32 +1,33 @@
 ---
-name: Bug report
-about: Something broke or behaved unexpectedly
+name: Rapport de bug
+about: Quelque chose s'est cassé ou a eu un comportement inattendu
 title: ""
 labels: bug
 ---
 
 <!--
-The fastest way to a fix: paste a Bug Report from the app.
+La voie la plus rapide vers un correctif : collez un rapport de bug depuis l'application.
 
-  Recovery tab → "Copy Bug Report"   (or the 🐞 Bug Report button on Runs & Logs)
+  Onglet Recovery → « Copier le rapport de bug »   (ou le bouton 🐞 Rapport de bug dans Runs & Logs)
 
-It bundles your system health, the failing run's recipe, and its last log
-lines — with tokens/secrets automatically redacted. Paste it below.
+Il rassemble l'état de santé de votre système, la recipe du run en échec,
+et ses dernières lignes de log — avec tokens et secrets automatiquement masqués.
+Collez-le ci-dessous.
 
-If the app won't start at all, run `./start.sh --doctor` in the install
-folder and paste that output instead.
+Si l'application ne démarre pas du tout, lancez `./start.sh --doctor` dans le
+dossier d'installation et collez plutôt cette sortie.
 -->
 
-## What happened
+## Ce qui s'est passé
 
 
-## What you expected
+## Ce que vous attendiez
 
 
-## Bug report from the app
+## Rapport de bug depuis l'application
 
 <details>
-<summary>Paste the Copy Bug Report output here</summary>
+<summary>Collez ici la sortie de « Copier le rapport de bug »</summary>
 
 ```
 

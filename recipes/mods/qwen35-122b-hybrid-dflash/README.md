@@ -1,13 +1,14 @@
-# Qwen3.5 122B hybrid vLLM patch mod
+# Mod de patch vLLM hybride Qwen3.5 122B
 
-This mod applies the runtime patches from
+Ce mod applique les patches de runtime depuis
 [`Entrpi/qwen3.5-122B-A10B-on-spark`](https://github.com/Entrpi/qwen3.5-122B-A10B-on-spark)
-at pinned commit `a77cbdab26956ef6ac9cdca544e5fb9ec1f3bb2a`.
+au commit pinné `a77cbdab26956ef6ac9cdca544e5fb9ec1f3bb2a`.
 
-The downloaded files are SHA-256 verified before execution. The hybrid INC
-INT4/FP8 dispatch, INT8 lm-head, DFlash KV-page unification, and prefix-alignment
-patches are mandatory and fail closed if the pinned container source differs.
-The FLA shared-memory patch is an optional prefill optimization.
+Les fichiers téléchargés sont vérifiés par SHA-256 avant exécution. Les
+patches de dispatch hybride INC INT4/FP8, lm-head INT8, unification des
+KV-pages DFlash et alignement de préfixe sont obligatoires et échouent
+strictement (fail closed) si la source du container pinné diffère. Le
+patch FLA shared-memory est une optimisation de prefill optionnelle.
 
-Upstream is MIT licensed. The patch sources are downloaded directly from the
-pinned upstream revision rather than duplicated here.
+L'upstream est sous licence MIT. Les sources des patches sont téléchargées
+directement depuis la révision upstream pinnée, plutôt que dupliquées ici.

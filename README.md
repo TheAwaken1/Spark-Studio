@@ -1,16 +1,16 @@
 # Spark Studio
 
-**Your DGX Spark, one friendly dashboard.** Launch local models with one click, watch memory and logs live, chat, benchmark — and when a recipe breaks or runs slow, let Claude Code or Codex diagnose, patch, and relaunch it for you (your own Pro/Max/Plus subscription, no API keys).
+**Votre DGX Spark, un dashboard convivial.** Lancez des modèles locaux en un clic, surveillez la mémoire et les logs en direct, chattez, benchmarkez — et quand une recipe casse ou tourne lentement, laissez Claude Code ou Codex diagnostiquer, patcher, et la relancer pour vous (votre propre abonnement Pro/Max/Plus, sans clés API).
 
-Runs **vLLM**, **SGLang**, **llama.cpp**, **WebGPU (WebLLM)**, and **sparkrun** community recipes.
+Exécute des recipes communautaires **vLLM**, **SGLang**, **llama.cpp**, **WebGPU (WebLLM)**, et **sparkrun**.
 
-## Quick Start
+## Démarrage rapide
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/TheAwaken1/Spark-Studio/main/install.sh)
 ```
 
-or clone it yourself:
+ou clonez vous-même :
 
 ```bash
 git clone https://github.com/TheAwaken1/Spark-Studio.git
@@ -18,112 +18,114 @@ cd Spark-Studio
 ./start.sh
 ```
 
-Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on your LAN). First run sets up the Python environment automatically, then a **setup wizard** checks your system, recommends a model that fits your Spark, and launches it.
+Ouvrez **http://127.0.0.1:7860** (ou `http://<ip-spark>:7860` depuis toute machine de votre LAN). Au premier lancement, l'environnement Python est mis en place automatiquement, puis un **assistant d'installation** vérifie votre système, recommande un modèle adapté à votre Spark, et le lance.
 
-> **Security note:** the dashboard has no authentication and binds to all
-> interfaces so your LAN can use it. Anyone on your network can control it,
-> and — over the HTTPS/Caddy setup — open **Hermes Chat, which is a real
-> interactive shell running as your user**. Only run it on a network where you
-> trust every device (not guest/shared Wi-Fi), use
-> `./start.sh --host 127.0.0.1` for local-only, and never expose the port to
-> the internet.
+> **Note de sécurité :** le dashboard n'a pas d'authentification et se lie
+> à toutes les interfaces pour que votre LAN puisse l'utiliser. Quiconque
+> sur votre réseau peut le contrôler, et — via la configuration HTTPS/Caddy
+> — ouvrir **Hermes Chat, qui est un véritable shell interactif tournant
+> sous votre utilisateur**. Ne l'exécutez que sur un réseau où vous faites
+> confiance à tous les appareils (pas de Wi-Fi invité/partagé), utilisez
+> `./start.sh --host 127.0.0.1` pour un usage local uniquement, et n'exposez
+> jamais le port sur internet.
 
 ```bash
-./start.sh --doctor   # full system health report at any time
+./start.sh --doctor   # rapport de santé complet du système, à tout moment
 ```
 
-## What you can do in 60 seconds
+## Ce que vous pouvez faire en 60 secondes
 
-1. Open the dashboard — the wizard checks your Spark and picks a starter model
-2. Click **Launch** — watch load progress and unified-memory use live
-3. **Chat** with the model the moment it's serving
-4. Click **Benchmark** for tok/s + TTFT, or **Optimize Speed** to let an agent tune it
-5. If anything fails, **Auto-Fix & Retry** reads the logs and patches the recipe
+1. Ouvrez le dashboard — l'assistant vérifie votre Spark et choisit un modèle de démarrage
+2. Cliquez sur **Lancer** — suivez la progression du chargement et l'utilisation de la mémoire unifiée en direct
+3. **Chattez** avec le modèle dès qu'il sert
+4. Cliquez sur **Benchmark** pour tok/s + TTFT, ou **Optimiser la vitesse** pour laisser un agent le régler
+5. En cas d'échec, **Correction auto & Reprise** lit les logs et patche la recipe
 
-## Demo
+## Démo
 
 <!-- TODO: capture docs/demo.gif — paste a HF model id → Forge → Run → chat -->
-*Screenshots and demo GIF coming soon.*
+*Captures d'écran et GIF de démo à venir.*
 
-## Features
+## Fonctionnalités
 
-- **First-run setup wizard** — on a fresh install the browser opens to a guided flow: full system check (`/api/doctor`), pick a goal (fast chat / best quality / coding / agents & tools / low memory), and launch a model **recommended for your hardware** — ranked from recipes proven on your Spark, models already on disk, community-validated registry recipes, and your own benchmark history. Reopen any time via **Setup Wizard** on the Overview tab
-- **Beginner / Advanced mode** — a sidebar toggle. Beginner shows just the essentials (Overview, Recipes, Models, Chat, Runs & Logs); Advanced shows every engine tab, Forge, Benchmarks, and Agents. Fresh installs start in Beginner; existing setups stay Advanced
-- **Dashboard UI** with dedicated tabs per engine (vLLM, SGLang, llama.cpp, WebGPU). Run lists are named by model/recipe (not hex ids), recipe editors are full Monaco editors with YAML/JSON/shell highlighting, and on phones/tablets the sidebar collapses into a slide-out menu — handy for checking vitals or logs from the couch
-- **LAN-ready** — `./start.sh` binds to all interfaces so every computer on your network can use the app (no login; don't expose it to the internet)
-- **Zero-CDN, offline-ready UI** — fonts (Inter / JetBrains Mono), Font Awesome icons, Monaco, Chart.js, and highlight.js are bundled under `web/vendor/` and served locally; the dashboard is fully functional on a firewalled or offline box. The browser tab shows the running engine (`▶ vllm · Spark Studio`) and the app is installable as a PWA
-- **Drop-zone recipe runner** — paste or drop a JSON recipe, click Run, stream logs live
-- **Run anything** — one box on the Recipes tab accepts a [spark-arena.com](https://spark-arena.com/leaderboard) benchmark link (or the whole share blurb), a recipe YAML/JSON, a HuggingFace model id, or a `@community/ref`, and just runs it. Arena imports are saved to My Recipes automatically
-- **Ask Claude / Ask Codex** button on every failing run — reads the recipe + last 300 log lines, inlines the sparkrun recipe-schema reference (RECIPES.md), matching curated recipes, and fix patches from the local registry mirror, and returns a patched recipe with diagnosis
-- **Hugging Face browser login** — connect the official `hf` CLI from **Agents & Identities** using its device-code OAuth flow. Spark Studio shows the signed-in username and enables private/gated model downloads without reading or storing the token
-- **Auto-Fix & Retry** — one click on a failed run starts a hands-free loop: the agent diagnoses, patches the recipe, relaunches, watches the new logs, and retries with fresh context — up to 3 attempts — until the engine actually serves. No more clicking Fix over and over
-- **Optimize Speed** — the same hands-free loop, but for *slow* runs instead of broken ones: one click on a healthy run benchmarks it (tok/s + TTFT), hands the agent the measured numbers, live GPU/memory vitals, and DGX Spark tuning knowledge (FlashInfer vs Marlin backends, `sparkrun tune` kernel configs, KV-cache quantization, per-family env vars from the eugr/sparkrun registries), relaunches the tuned recipe, and re-benchmarks. Whichever configuration *measured* fastest is the one left serving and saved on the recipe — a patch that benches slower is rolled back automatically. Declares victory at ≥10% improvement (`SPARK_STUDIO_OPTIMIZE_MARGIN`)
-- **Recipe Forge** — paste any HuggingFace repo id; Spark Studio checks the synced recipe registry for a Spark-validated YAML, falls back to adapted registry recipes, then heuristic presets. Each result is badged so you know ground truth vs. a guess. One-click starter chips surface your recent forges and Spark-validated models from the registry
-- **Hardware-aware fit check** — probes the local box via `nvidia-smi`, badges every recipe with **Fits this Spark** / **Needs N GPUs** / **Too big**
-- **Compatibility check** — verdict ranges from `excellent` to `too-large` with reasons
-- **Recipe library** (SQLite) — save, edit, tag, share (copy/paste as JSON between users), import/export. New recipes are created in Recipe Forge — and **every direct launch from an engine tab auto-saves too** (any engine, tagged `auto-saved`, deduped per engine+model), so a run that worked is always one click away in My Recipes with its engine and ✓ working badge
-- **sparkrun kept up to date** — `start.sh` runs `sparkrun update` on every launch (skip with `--no-sparkrun-update` or `SPARK_STUDIO_NO_SPARKRUN_UPDATE=1`), and the Community recipes toolbar has an **Update sparkrun** button with a channel picker: Stable (PyPI), Beta (develop), Alpha (bleeding edge), or YOLO (`--yolo`, alias for alpha). The chosen channel is remembered by sparkrun for future updates — including the automatic one at launch — and the toolbar shows the installed version
-- **Community recipes via sparkrun** — browse the mirrored `@official`/`@experimental` registry and launch on your Spark mesh with one click. The Nodes (TP) selector filters to recipes that actually fit your node count (multi-Spark recipes are badged and hidden at 1 node); Stop wires through `sparkrun stop`, and if that fails (stale job id, sparkrun error) Spark Studio force-removes the job's containers itself — Stop always means stopped. Every launch auto-saves a recipe in My Recipes (deduped per ref) so it's always one click away. Saved sparkrun recipes can carry launch options (`args._sparkrun.max_model_len` and arbitrary `-o key=value` `overrides`) that apply on every relaunch — handy for pinning workarounds to a model
-- **Server-side ✓ working / ✗ failed badges** — a watchdog probes each engine's `/v1/models` and tags the recipe the moment it starts serving (or fails), even with every browser tab closed. It also catches sparkrun's nastiest failure mode: the engine crashing inside a container that stays "Up" — the run is marked failed, the real traceback is pulled from the in-container serve log for Ask Claude, and the zombie container is torn down. Slow multi-node loads can extend the never-ready deadline via `SPARK_STUDIO_SPARKRUN_GRACE` (seconds, default 1200)
-- **Restart-proof runs** — the systemd service preserves engine process groups and child-owned logs while only the dashboard restarts. On boot Spark Studio reconciles its run database with reality, health-checks each retained `/v1/models` endpoint, and restores **Ready**, logs, Stop, chat, model label, and recipe linkage automatically; orphaned rows are marked exited. Direct `./start.sh` sessions still unload their engines on normal Ctrl+C unless `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1` is set
-- **Registry auto-sync** — the three upstream repos are refreshed on every start; a ✨ badge shows recipes that arrived since last sync
-- **Local models** — scans every HF cache (env vars *and* caches referenced by your recipes), shows true on-disk sizes, one-click "Serve with vLLM", "Forge", or **Delete** to free disk space
-- **Chat & Canvas / Engine Chat** — Monaco editor + chat, auto-targets whichever engine is running; renders Chart.js charts, Word/Excel export cards, and web-grounded answers. Auto-fits `max_tokens` to the engine's real context window every turn
-- **Benchmarks** — quick tokens/s + TTFT sanity bench, plus full [llama-benchy](https://github.com/eugr/llama-benchy) sweeps (pp/tg at depth, concurrency, prefix caching). Every result records the engine version; compare any two runs side-by-side, and copy a shareable markdown report (hardware + engine + recipe + results) for the community
-- **Tool Eval Bench** — answers "how *useful* is this model?", not just how fast. 12 deterministic cases score five skills 0–100: **tool selection** (pick the right tool among five), **argument extraction** (exact dates/amounts/names into tool args), **restraint** (answer directly instead of spurious tool calls), **using tool results** in the final answer, and **strict JSON** output. Each case shows what the model actually did (`called get_weather({"city": "Tokyo"})`); thinking models get a fair token budget and `<think>` blocks are stripped before checking. Every eval saves a markdown + JSON report to `tooleval-results/` and scores are kept in history per model. If the engine was launched without tool calling, the bench says so instead of silently scoring zero
-- **`sparkstudio` CLI + Hermes Agent Lab** — chat with the loaded model, run speed/tool benches, hand a real repository task to [Hermes Agent](https://github.com/NousResearch/hermes-agent), or score models on disposable coding fixtures. It follows the [NVIDIA DGX Spark Hermes playbook](https://build.nvidia.com/spark/hermes-agent/instructions): the active local OpenAI-compatible endpoint is configured as Hermes' custom provider, while reports, diffs, test output, and Spark telemetry are retained for comparison
-- **Hermes Chat in the dashboard** — the complete Hermes Ink TUI runs inside an xterm.js tab through a real POSIX PTY/WebSocket bridge. Slash commands, `/model`, approvals, tool activity, local/Claude/Codex switching, and Spark Studio web search work exactly as they do in the terminal. The session survives recipe swaps, provider switches, and page reloads: Chat keeps running while an engine loads (or with none at all), a reload reattaches to the same live agent, and `/model`'s **Spark Studio** provider always lists whatever recipe is currently serving — via a stable `/api/engine/v1` passthrough that follows the active engine across ports, so switching local ↔ Claude/Codex mid-session just works
-- **Load telemetry on every run** — run cards show how long the model took to become ready and how much unified RAM it claimed (`loaded in 3m42s · +38.2 GB RAM`), stamped the moment the engine first answers. Stats persist in run history and survive app restarts; adopted/external endpoints (already loaded) honestly show nothing instead of a bogus number
-- **Pre-launch memory guard** — on DGX Spark's 128 GB unified pool each model fills most of the pool, so only one fits at a time. Before launching, Spark Studio stops any other resident model, waits for its memory to actually free, and blocks a launch that still won't fit (with a one-click "launch anyway") — so swapping models doesn't OOM the box or take the dashboard down with it. See [Memory / OOM protection](#memory--oom-protection)
-- **WebGPU tab** — in-browser inference via MLC WebLLM, with PDF/CSV/XLSX attachment extraction and built-in web search (bundled SearXNG, auto-started)
-- **Crash-loop patching** — accept Claude / Codex's patched recipe with one click; re-runs immediately
-- **Honest run states** — badges distinguish **failed** (crash, red) from **stopped** (you hit Stop) and clean exits, so a page of finished runs doesn't look like a page of errors
-- **Cluster page (multi-node over sparkrun)** — node health cards with **live per-node telemetry** (CPU, unified memory, GPU util/temp/power — streamed from `sparkrun cluster monitor --json`, so remote Sparks report real numbers without Spark Studio ever SSHing anywhere), TP availability at a glance, plain-English **launch readiness checks** before a multi-node run, per-node serve-log viewer for local job containers, and **Retry with fewer nodes** on failed multi-node launches. Single-Spark boxes see a clean "Single Node" view with a how-to-mesh pointer — nothing feels missing
-- **OpenAI-compatible gateway** — point any client (Continue, Cursor, etc.) at the active run's `:<port>/v1`
+- **Assistant d'installation au premier lancement** — sur une installation fraîche, le navigateur s'ouvre sur un flux guidé : vérification système complète (`/api/doctor`), choix d'un objectif (chat rapide / meilleure qualité / code / agents & outils / mémoire réduite), et lancement d'un modèle **recommandé pour votre matériel** — classé à partir de recipes éprouvées sur votre Spark, de modèles déjà sur disque, de recipes validées par la communauté, et de votre propre historique de benchmarks. Rouvrable à tout moment via **Assistant d'installation** sur l'onglet Vue d'ensemble
+- **Mode Débutant / Avancé** — un toggle dans la barre latérale. Débutant affiche uniquement l'essentiel (Vue d'ensemble, Recipes, Modèles, Chat, Runs & Logs) ; Avancé affiche tous les onglets d'engine, Forge, Benchmarks, et Agents. Les nouvelles installations démarrent en Débutant ; les installations existantes restent en Avancé
+- **UI Dashboard** avec des onglets dédiés par engine (vLLM, SGLang, llama.cpp, WebGPU). Les listes de runs sont nommées par modèle/recipe (pas par ids hex), les éditeurs de recipe sont des éditeurs Monaco complets avec coloration YAML/JSON/shell, et sur téléphone/tablette la barre latérale se replie en menu coulissant — pratique pour vérifier les signes vitaux ou les logs depuis le canapé
+- **Prêt pour le LAN** — `./start.sh` se lie à toutes les interfaces pour que chaque machine de votre réseau puisse utiliser l'app (pas de login ; ne l'exposez pas sur internet)
+- **UI Zero-CDN, prête hors ligne** — les fontes (Inter / JetBrains Mono), icônes Font Awesome, Monaco, Chart.js, et highlight.js sont bundlées sous `web/vendor/` et servies localement ; le dashboard est pleinement fonctionnel sur une box en pare-feu ou hors ligne. L'onglet du navigateur montre l'engine en cours d'exécution (`▶ vllm · Spark Studio`) et l'app est installable en tant que PWA
+- **Runner de recipe par drop-zone** — collez ou déposez une recipe JSON, cliquez sur Run, streamez les logs en direct
+- **Lancez n'importe quoi** — une zone sur l'onglet Recipes accepte un lien de benchmark [spark-arena.com](https://spark-arena.com/leaderboard) (ou le blurb de partage complet), un YAML/JSON de recipe, un id de modèle HuggingFace, ou un `@community/ref`, et l'exécute. Les imports Arena sont sauvegardés dans Mes Recipes automatiquement
+- **Bouton Ask Claude / Ask Codex** sur chaque run en échec — lit la recipe + les 300 dernières lignes de log, inline la référence du schéma de recipe sparkrun (RECIPES.md), les recipes curatoriales correspondantes, et les patches de fix depuis le miroir local du registry, et renvoie une recipe patchée avec diagnostic
+- **Login navigateur Hugging Face** — connectez la CLI officielle `hf` depuis **Agents & Identités** via son flow OAuth device-code. Spark Studio affiche le nom d'utilisateur connecté et permet les téléchargements de modèles privés/gated sans lire ni stocker le token
+- **Correction auto & Reprise** — un clic sur un run échoué démarre une boucle mains libres : l'agent diagnostique, patche la recipe, relance, surveille les nouveaux logs, et réessaie avec un contexte frais — jusqu'à 3 tentatives — jusqu'à ce que l'engine serve réellement. Fini de cliquer sur Fix en boucle
+- **Optimiser la vitesse** — la même boucle mains libres, mais pour les runs *lents* au lieu des cassés : un clic sur un run sain le benchmarke (tok/s + TTFT), passe à l'agent les chiffres mesurés, les signes vitaux GPU/mémoire en direct, et la connaissance de tuning DGX Spark (backends FlashInfer vs Marlin, configs kernel `sparkrun tune`, quantification du cache KV, variables d'environnement par famille depuis les registries eugr/sparkrun), relance la recipe tunée, et re-benchmarke. La configuration qui a *mesuré* la plus rapide est celle qui reste en service et est sauvegardée sur la recipe — un patch qui bench plus lentement est annulé automatiquement. Déclare la victoire à ≥10% d'amélioration (`SPARK_STUDIO_OPTIMIZE_MARGIN`)
+- **Recipe Forge** — collez n'importe quel id de repo Hugging Face ; Spark Studio consulte le registry de recipes synchronisé pour un YAML validé pour Spark, se rabat sur les recipes du registry adaptées, puis sur des presets heuristiques. Chaque résultat est badgé pour distinguer la vérité terrain d'un guess. Des chips starter en un clic font remonter vos forges récentes et les modèles validés Spark depuis le registry
+- **Vérification de compatibilité matérielle** — sonde la box locale via `nvidia-smi`, badge chaque recipe avec **Tient sur ce Spark** / **Nécessite N GPUs** / **Trop gros**
+- **Vérification de compatibilité** — verdict allant de `excellent` à `too-large` avec raisons
+- **Bibliothèque de recipes** (SQLite) — sauvegardez, éditez, taguez, partagez (copier/coller en JSON entre utilisateurs), importez/exportez. Les nouvelles recipes sont créées dans Recipe Forge — et **chaque lancement direct depuis un onglet d'engine est aussi auto-sauvegardé** (tout engine, taggé `auto-saved`, dédupliqué par engine+model), donc un run qui a fonctionné est toujours à un clic dans Mes Recipes avec son badge engine et ✓ working
+- **sparkrun maintenu à jour** — `start.sh` lance `sparkrun update` à chaque démarrage (à passer avec `--no-sparkrun-update` ou `SPARK_STUDIO_NO_SPARKRUN_UPDATE=1`), et la barre d'outils Community recipes a un bouton **Update sparkrun** avec un sélecteur de canal : Stable (PyPI), Beta (develop), Alpha (bleeding edge), ou YOLO (`--yolo`, alias pour alpha). Le canal choisi est mémorisé par sparkrun pour les futures mises à jour — y compris la mise à jour automatique au lancement — et la barre d'outils affiche la version installée
+- **Recipes communautaires via sparkrun** — parcourez le registry mirroir `@official`/`@experimental` et lancez sur votre mesh Spark en un clic. Le sélecteur Nodes (TP) filtre vers les recipes qui tiennent réellement dans votre nombre de nœuds (les recipes multi-Spark sont badgées et masquées à 1 nœud) ; Stop passe par `sparkrun stop`, et si cela échoue (id de job obsolète, erreur sparkrun) Spark Studio force-supprime les containers du job lui-même — Stop signifie toujours stoppé. Chaque lancement auto-sauvegarde une recipe dans Mes Recipes (dédupliquée par ref) pour qu'elle soit toujours à un clic. Les recipes sparkrun sauvegardées peuvent porter des options de lancement (`args._sparkrun.max_model_len` et `-o key=value` `overrides` arbitraires) qui s'appliquent à chaque relancement — pratique pour épingler des workarounds à un modèle
+- **Badges serveur ✓ working / ✗ failed** — un watchdog sonde `/v1/models` de chaque engine et tague la recipe dès qu'elle commence à servir (ou échoue), même avec tous les onglets navigateur fermés. Il rattrape aussi le plus méchant mode d'échec de sparkrun : l'engine qui crash dans un container qui reste "Up" — le run est marqué échoué, la vraie traceback est tirée du log de service in-container pour Ask Claude, et le container zombie est démantelé. Les chargements lents multi-nœuds peuvent étendre le délai never-ready via `SPARK_STUDIO_SPARKRUN_GRACE` (secondes, défaut 1200)
+- **Runs résistants au redémarrage** — le service systemd préserve les groupes de processus d'engine et les logs appartenant aux enfants pendant que seul le dashboard redémarre. Au boot Spark Studio réconcilie sa base de runs avec la réalité, vérifie la santé de chaque endpoint `/v1/models` retenu, et restaure automatiquement **Ready**, les logs, Stop, le chat, le label du modèle, et le lien de recipe ; les lignes orphelines sont marquées exited. Les sessions `./start.sh` directes déchargent toujours leurs engines au Ctrl+C normal sauf si `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1` est défini
+- **Auto-sync des registries** — les trois repos upstream sont rafraîchis à chaque démarrage ; un badge ✨ montre les recipes arrivées depuis le dernier sync
+- **Modèles locaux** — scanne chaque cache HF (variables d'environnement *et* caches référencés par vos recipes), affiche les tailles réelles sur disque, « Servir avec vLLM » / « Forge » / **Supprimer** en un clic pour libérer de l'espace disque
+- **Chat & Canvas / Engine Chat** — éditeur Monaco + chat, cible automatiquement l'engine en cours d'exécution ; rend des graphiques Chart.js, des cartes d'export Word/Excel, et des réponses grounded sur le web. Ajuste automatiquement `max_tokens` à la fenêtre de contexte réelle de l'engine à chaque tour
+- **Benchmarks** — bench rapide tok/s + TTFT, plus sweeps complets [llama-benchy](https://github.com/eugr/llama-benchy) (pp/tg à profondeur, concurrence, prefix caching). Chaque résultat enregistre la version de l'engine ; comparez deux runs côte à côte, et copiez un rapport markdown partageable (hardware + engine + recipe + résultats) pour la communauté
+- **Tool Eval Bench** — répond à « à quel point ce modèle est-il *utile* ? », pas seulement à sa vitesse. 12 cas déterministes notent cinq compétences de 0 à 100 : **sélection d'outil** (choisir le bon outil parmi cinq), **extraction d'arguments** (dates/montants/noms exacts dans les args d'outil), **retenue** (répondre directement au lieu d'appels d'outils spurieux), **utilisation des résultats d'outil** dans la réponse finale, et sortie **strict JSON**. Chaque cas montre ce que le modèle a réellement fait (`called get_weather({"city": "Tokyo"})`) ; les modèles de raisonnement reçoivent un budget de token juste et les blocs `<think>` sont strippés avant vérification. Chaque eval sauvegarde un rapport markdown + JSON dans `tooleval-results/` et les scores sont conservés dans l'historique par modèle. Si l'engine a été lancé sans tool calling, le bench le dit au lieu de noter zéro silencieusement
+- **CLI `sparkstudio` + Hermes Agent Lab** — chattez avec le modèle chargé, lancez des benches de vitesse/outils, confiez une vraie tâche de dépôt à [Hermes Agent](https://github.com/NousResearch/hermes-agent), ou notez les modèles sur des fixtures de code jetables. Elle suit le [NVIDIA DGX Spark Hermes playbook](https://build.nvidia.com/spark/hermes-agent/instructions) : l'endpoint OpenAI-compatible local actif est configuré comme custom provider de Hermes, tandis que les rapports, diffs, sortie de tests, et télémétrie Spark sont conservés pour comparaison
+- **Hermes Chat dans le dashboard** — le TUI Hermes Ink complet tourne dans un onglet xterm.js à travers un vrai bridge POSIX PTY/WebSocket. Les slash commands, `/model`, les approbations, l'activité d'outils, le switching local/Claude/Codex, et la recherche web Spark Studio fonctionnent exactement comme dans le terminal. La session survit aux swaps de recipe, switches de provider, et reloads de page : Chat continue de tourner pendant qu'un engine charge (ou sans aucun), un reload se rattache au même agent live, et le provider **Spark Studio** de `/model` liste toujours la recipe qui sert actuellement — via un passthrough stable `/api/engine/v1` qui suit l'engine actif à travers les ports, donc switcher local ↔ Claude/Codex en pleine session marche tout simplement
+- **Télémétrie de chargement sur chaque run** — les cartes de run affichent combien de temps le modèle a mis à devenir ready et combien de RAM unifiée il a réclamé (`chargé en 3m42s · +38.2 GB RAM`), estampillé au moment où l'engine répond pour la première fois. Les stats persistent dans l'historique des runs et survivent aux redémarrages de l'app ; les endpoints adoptés/externes (déjà chargés) affichent honnêtement rien au lieu d'un chiffre bidon
+- **Garde mémoire pré-lancement** — sur le pool unifié de 128 GB du DGX Spark, chaque modèle remplit la plupart du pool, donc un seul tient à la fois. Avant de lancer, Spark Studio arrête tout autre modèle résident, attend que sa mémoire soit réellement libérée, et bloque un lancement qui ne tiendrait toujours pas (avec un « lancer quand même » en un clic) — pour que swapper des modèles n'OOM pas la box ou ne fasse pas tomber le dashboard avec. Voir [Protection mémoire / OOM](#protection-mémoire--oom)
+- **Onglet WebGPU** — inférence in-browser via MLC WebLLM, avec extraction d'attachements PDF/CSV/XLSX et recherche web intégrée (SearXNG bundlé, démarré automatiquement)
+- **Patching en crash-loop** — acceptez la recipe patchée de Claude / Codex en un clic ; le run reprend immédiatement
+- **États de run honnêtes** — les badges distinguent **failed** (crash, rouge) de **stopped** (vous avez cliqué Stop) et les sorties propres, pour qu'une page de runs terminés ne ressemble pas à une page d'erreurs
+- **Page Cluster (multi-nœud via sparkrun)** — cartes de santé de nœuds avec **télémétrie live par nœud** (CPU, mémoire unifiée, util/temp/power GPU — streamée depuis `sparkrun cluster monitor --json`, pour que les Sparks distants rapportent de vrais chiffres sans que Spark Studio ne SSH nulle part), dispo TP d'un coup d'œil, **vérifications de readiness de lancement** en clair avant un run multi-nœud, viewer de log de service par nœud pour les containers de job locaux, et **Réessayer avec moins de nœuds** sur les lancements multi-nœud échoués. Les boxes mono-Spark voient une vue « Single Node » propre avec un pointeur vers comment faire un mesh — rien ne semble manquer
+- **Gateway OpenAI-compatible** — pointez n'importe quel client (Continue, Cursor, etc.) vers le `:<port>/v1` du run actif
 
-## Prerequisites
+## Prérequis
 
-- **Linux** (NVIDIA DGX Spark / aarch64 recommended; x86_64 also works)
+- **Linux** (NVIDIA DGX Spark / aarch64 recommandé ; x86_64 marche aussi)
 - **Python 3.11**
 - **Git**
-- **Node.js + npm** (only needed for the Claude Code and Codex agent features)
-- **uv** (recommended) — `pip install uv` — or plain `pip`
-- **nvidia-smi** available on PATH for GPU telemetry
+- **Node.js + npm** (seulement nécessaire pour les features d'agents Claude Code et Codex)
+- **uv** (recommandé) — `pip install uv` — ou `pip` standard
+- **nvidia-smi** disponible dans le PATH pour la télémétrie GPU
 
-Your inference engine(s) installed separately:
+Vos engine(s) d'inférence installés séparément :
 - [vLLM](https://docs.vllm.ai/en/latest/getting_started/installation.html)
 - [SGLang](https://docs.sglang.ai/start/install.html)
 - [llama.cpp](https://github.com/ggerganov/llama.cpp)
 
-Optional extras:
-- [llama-benchy](https://github.com/eugr/llama-benchy) for full benchmark sweeps — `uv pip install --python env/bin/python llama-benchy`
-- [sparkrun](https://github.com/spark-arena/sparkrun) for multi-node community recipes — `uvx sparkrun setup` (guided cluster wizard)
-- [Hermes Agent](https://hermes-agent.nousresearch.com/) for the local-model Agent Lab — installed with one click from **Hermes → Chat**, pinned to release `v2026.7.20` (manual command below)
-- **Docker** for spark-vllm-docker recipes and the bundled SearXNG web search
+Extras optionnels :
+- [llama-benchy](https://github.com/eugr/llama-benchy) pour les sweeps de benchmark complets — `uv pip install --python env/bin/python llama-benchy`
+- [sparkrun](https://github.com/spark-arena/sparkrun) pour les recipes communautaires multi-nœud — `uvx sparkrun setup` (assistant cluster guidé)
+- [Hermes Agent](https://hermes-agent.nousresearch.com/) pour l'Agent Lab local — installé en un clic depuis **Hermes → Chat**, pinné sur la release `v2026.7.20` (commande manuelle ci-dessous)
+- **Docker** pour les recipes spark-vllm-docker et la recherche web SearXNG bundled
 
 ## Installation
 
-### Option A — One-command installer
+### Option A — Installateur one-command
 
 ```bash
 bash <(curl -fsSL https://raw.githubusercontent.com/TheAwaken1/Spark-Studio/main/install.sh)
 ```
 
-Checks your system (git, Python/uv, GPU, Docker, npm), clones into
-`~/spark-studio`, bootstraps the environment, runs the doctor, and offers to
-install optional pieces per profile:
+Vérifie votre système (git, Python/uv, GPU, Docker, npm), clone dans
+`~/spark-studio`, bootstrap l'environnement, lance le doctor, et propose
+d'installer les pièces optionnelles par profil :
 
-| Profile | Adds |
+| Profil | Ajoute |
 |---|---|
-| `--basic` | dashboard + recipes + local runs |
-| `--recommended` *(default)* | + sparkrun CLI (community recipes, kernel tuning) |
-| `--full` | + llama-benchy + Claude/Codex agent CLIs + Hermes Agent + pinned Hermes Mod |
+| `--basic` | dashboard + recipes + runs locaux |
+| `--recommended` *(défaut)* | + sparkrun CLI (recipes communautaires, kernel tuning) |
+| `--full` | + llama-benchy + CLIs d'agent Claude/Codex + Hermes Agent + Hermes Mod pinné |
 
-Piped installs (`curl … \| bash`) can't prompt, so they run fully
-non-interactive with the defaults above; use the `bash <(curl …)` form for
-prompts. `--dir <path>` picks the install location.
+Les installs pipées (`curl … \| bash`) ne peuvent pas prompter, donc elles
+tournent en non-interactif complet avec les défauts ci-dessus ; utilisez la
+forme `bash <(curl …)` pour avoir les prompts. `--dir <path>` choisit
+l'emplacement d'install.
 
-### Option B — Clone and start
+### Option B — Clone et start
 
 ```bash
 git clone https://github.com/TheAwaken1/Spark-Studio.git
@@ -131,28 +133,30 @@ cd Spark-Studio
 ./start.sh
 ```
 
-That's it — on first run `start.sh` creates the `./env` virtualenv and
-installs `requirements.txt` automatically (via **uv** if installed, which can
-also fetch Python 3.11 for you; otherwise plain `python3 -m venv` + pip).
+C'est tout — au premier lancement `start.sh` crée le virtualenv `./env` et
+installe `requirements.txt` automatiquement (via **uv** s'il est installé,
+qui peut aussi fetch Python 3.11 pour vous ; sinon `python3 -m venv` + pip
+standard).
 
 <details>
-<summary>Manual setup (if you prefer to run the steps yourself)</summary>
+<summary>Setup manuel (si vous préférez faire les étapes vous-même)</summary>
 
 ```bash
-# venv — uv (recommended) or plain Python
-uv venv env --python 3.11        # or: python3.11 -m venv env
+# venv — uv (recommandé) ou Python standard
+uv venv env --python 3.11        # ou : python3.11 -m venv env
 
-# dependencies
-uv pip install --python env/bin/python -r requirements.txt   # or: env/bin/pip install -r requirements.txt
+# dépendances
+uv pip install --python env/bin/python -r requirements.txt   # ou : env/bin/pip install -r requirements.txt
 ```
 
 </details>
 
-### 2. (Optional) Pre-download the recipe registries
+### 2. (Optionnel) Pré-télécharger les registries de recipes
 
-Spark Studio mirrors three upstream repos locally for offline use. The app
-clones and refreshes them automatically on every start, so this step is only
-needed if you want the mirrors in place before first boot (e.g. offline install):
+Spark Studio mirror trois repos upstream localement pour usage hors ligne.
+L'app clone et rafraîchit automatiquement à chaque démarrage, donc cette
+étape n'est nécessaire que si vous voulez les mirrors en place avant le
+premier boot (par ex. install offline) :
 
 ```bash
 mkdir -p data/registry
@@ -161,25 +165,26 @@ git clone --depth 1 https://github.com/eugr/spark-vllm-docker.git    data/regist
 git clone --depth 1 https://github.com/spark-arena/sparkrun.git        data/registry/sparkrun
 ```
 
-### 3. (Optional) Connect agent CLIs, Hugging Face, and Hermes
+### 3. (Optionnel) Connecter les CLIs d'agent, Hugging Face, et Hermes
 
-For the **Ask Claude** and **Ask Codex** buttons:
+Pour les boutons **Ask Claude** et **Ask Codex** :
 
 ```bash
 npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-After installing, log in from **Agents & Identities** inside Spark Studio — no API keys needed, just your browser OAuth flow.
+Après installation, loguez-vous depuis **Agents & Identités** dans Spark Studio — pas de clés API nécessaires, juste votre flow OAuth navigateur.
 
-Spark Studio already installs the official Hugging Face CLI. In **Agents & Identities**, click **Log in** under Hugging Face, open the displayed browser URL, and confirm the one-time code. The `hf` CLI owns the saved credential; Spark Studio only checks `hf auth whoami` to display your public username. This enables downloads of private repositories and gated models that your account has accepted access to.
+Spark Studio installe déjà la CLI Hugging Face officielle. Dans **Agents & Identités**, cliquez sur **Log in** sous Hugging Face, ouvrez l'URL navigateur affichée, et confirmez le code one-time. La CLI `hf` possède le credential sauvegardé ; Spark Studio ne fait que vérifier `hf auth whoami` pour afficher votre nom d'utilisateur public. Cela active les téléchargements de repos privés et modèles gated que votre compte a accepté.
 
-For Agent Lab, open **Hermes → Chat** and click **Install Hermes** — that's the
-whole setup. Spark Studio runs the official per-user installer (pinned to
-release `v2026.7.20`), detects the CLI automatically, and connects Hermes to
-whatever model is currently loaded. There is no wizard to answer: the isolated
-profile is generated from the live engine endpoint (URL, model id, context
-length) and refreshed automatically before every run, so a changed engine port
-never needs manual editing. The equivalent manual command is:
+Pour l'Agent Lab, ouvrez **Hermes → Chat** et cliquez sur **Install Hermes** — c'est
+tout le setup. Spark Studio lance l'installateur per-user officiel (pinné
+sur la release `v2026.7.20`), détecte la CLI automatiquement, et connecte
+Hermes à quelque modèle que ce soit qui soit actuellement chargé. Il n'y a
+pas d'assistant auquel répondre : le profil isolé est généré depuis
+l'endpoint d'engine live (URL, id de modèle, longueur de contexte) et
+rafraîchi automatiquement avant chaque run, donc un port d'engine changé
+n'a jamais besoin d'édition manuelle. La commande manuelle équivalente est :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.20/scripts/install.sh \
@@ -187,31 +192,32 @@ curl -fsSL https://raw.githubusercontent.com/NousResearch/hermes-agent/v2026.7.2
 ./start.sh --install-cli
 ```
 
-#### Optional: standalone `hermes` outside Spark Studio
+#### Optionnel : `hermes` standalone hors de Spark Studio
 
-**Skip this section unless you also want to use bare `hermes` with your
-personal `~/.hermes` profile.** Nothing in Spark Studio (dashboard Chat,
-`sparkstudio hermes`, Agent Lab benchmarks) requires it. If you do run Hermes'
-own interactive setup wizard for your personal profile, load the model in
-Spark Studio first, copy the endpoint shown in **Engine Chat** (add `/v1`, e.g.
-`http://127.0.0.1:41293/v1` — the port changes per run, so always use the
-current URL), and answer:
+**Sautez cette section sauf si vous voulez aussi utiliser `hermes` brut
+avec votre profil personnel `~/.hermes`.** Rien dans Spark Studio
+(dashboard Chat, `sparkstudio hermes`, Agent Lab benchmarks) ne le
+requiert. Si vous lancez bien l'assistant de setup interactif de Hermes
+pour votre profil personnel, chargez d'abord le modèle dans Spark Studio,
+copiez l'endpoint montré dans **Engine Chat** (ajoutez `/v1`, par ex.
+`http://127.0.0.1:41293/v1` — le port change à chaque run, donc utilisez
+toujours l'URL courante), et répondez :
 
-| Installer prompt | Answer |
+| Prompt de l'installateur | Réponse |
 |---|---|
 | Install ripgrep and ffmpeg? | **Yes** |
 | Import or migrate OpenClaw configuration? | **No** |
 | How would you like to set up Hermes? | **Blank Slate** |
 | Select provider | **Custom endpoint (enter URL manually)** |
-| API base URL | **`http://127.0.0.1:41293/v1`** (or the current Engine Chat URL plus `/v1`) |
-| API key | **Leave blank** |
-| Model | Select the model reported by the loaded endpoint |
-| Context length | **Leave blank for auto-detection** |
-| Display name | Accept the default, or use **Spark Studio Local** |
+| API base URL | **`http://127.0.0.1:41293/v1`** (ou l'URL Engine Chat courante plus `/v1`) |
+| API key | **Laisser vide** |
+| Model | Sélectionnez le modèle rapporté par l'endpoint chargé |
+| Context length | **Laisser vide pour auto-détection** |
+| Display name | Acceptez le défaut, ou utilisez **Spark Studio Local** |
 | Terminal backend | **Local** |
 | What next? | **Start with everything disabled — finish now** |
 
-Reload the shell and verify the integration:
+Rechargez le shell et vérifiez l'intégration :
 
 ```bash
 source ~/.bashrc
@@ -223,39 +229,42 @@ sparkstudio agent cases
 sparkstudio agent eval --suite coding-smoke
 ```
 
-Spark Studio rewrites its isolated Hermes profile with the currently active
-engine URL before every Agent Lab run and before `sparkstudio hermes`, so a
-later port change does not require editing your personal Hermes configuration.
+Spark Studio réécrit son profil Hermes isolé avec l'URL d'engine
+actuellement active avant chaque run Agent Lab et avant
+`sparkstudio hermes`, donc un changement de port ultérieur ne nécessite pas
+d'éditer votre configuration Hermes personnelle.
 
-## Running
+## Lancement
 
 ```bash
 ./start.sh
 ```
 
-(First run also sets up the Python environment — see Installation.)
+(Le premier lancement configure aussi l'environnement Python — voir Installation.)
 
-### Run it like an app
+### Lancez-le comme une app
 
 ```bash
-./start.sh --install-launcher   # "Spark Studio" in your application menu
-./start.sh --install-service    # systemd user service (auto-start, self-updating)
+./start.sh --install-launcher   # "Spark Studio" dans votre menu d'applications
+./start.sh --install-service    # service utilisateur systemd (auto-start, self-updating)
 ./start.sh --install-cli        # ~/.local/bin/sparkstudio
 ```
 
-The **desktop launcher** starts the server if needed and opens the dashboard —
-no terminal. The **service** survives reboots (`loginctl enable-linger $USER`
-to run without being logged in), keeps models serving across restarts
-(`KEEP_RUNS_ON_EXIT` baked into the unit), and enables one-click in-app
-updates: when a new version is on GitHub, the sidebar version badge lights up —
-click it and the service pulls, refreshes dependencies, and restarts itself.
-If your service was installed before this behavior was added, run
-`./start.sh --install-service` once to install the model-preserving restart policy.
-Without the service the badge still appears; the update applies and you restart
-`./start.sh` yourself.
+Le **launcher desktop** démarre le serveur si besoin et ouvre le dashboard —
+pas de terminal. Le **service** survit aux reboots (`loginctl enable-linger $USER`
+pour tourner sans être logué), garde les modèles en service à travers les
+redémarrages (`KEEP_RUNS_ON_EXIT` baked into the unit), et active les updates
+in-app en un clic : quand une nouvelle version est sur GitHub, le badge de
+version dans la sidebar s'allume — cliquez et le service pull, rafraîchit
+les dépendances, et se redémarre. Si votre service a été installé avant
+que ce comportement soit ajouté, lancez `./start.sh --install-service` une
+fois pour installer la politique de redémarrage qui préserve les modèles.
+Sans le service, le badge apparaît toujours ; l'update s'applique et vous
+redémarrez `./start.sh` vous-même.
 
-Click the version line in the sidebar any time for a **QR code** — scan it to
-open Spark Studio on a phone or tablet on the same network.
+Cliquez sur la ligne de version dans la sidebar à tout moment pour un
+**QR code** — scannez-le pour ouvrir Spark Studio sur un téléphone ou une
+tablette sur le même réseau.
 
 ### Health check (doctor)
 
@@ -263,15 +272,16 @@ open Spark Studio on a phone or tablet on the same network.
 ./start.sh --doctor
 ```
 
-Prints a full system report — OS/GPU/driver, unified memory, Docker, every
-engine (vLLM/SGLang/llama.cpp), sparkrun, Claude/Codex agents, llama-benchy,
-SearXNG, and your dashboard URLs — with a one-line fix for anything missing.
-Exit code is non-zero when a core check fails, so it's scriptable. The same
-report is served at `GET /api/doctor` for the UI and bug reports.
+Affiche un rapport système complet — OS/GPU/driver, mémoire unifiée, Docker,
+chaque engine (vLLM/SGLang/llama.cpp), sparkrun, agents Claude/Codex,
+llama-benchy, SearXNG, et vos URLs de dashboard — avec un fix en une
+ligne pour tout ce qui manque. Le code de sortie est non-zéro quand un
+check critique échoue, donc c'est scriptable. Le même rapport est servi
+sur `GET /api/doctor` pour l'UI et les rapports de bug.
 
-## `sparkstudio` CLI + Hermes Agent Lab
+## CLI `sparkstudio` + Hermes Agent Lab
 
-Start Spark Studio, launch a tool-capable model, and check the full path:
+Démarrez Spark Studio, lancez un modèle tool-capable, et vérifiez le path complet :
 
 ```bash
 sparkstudio status
@@ -285,168 +295,191 @@ sparkstudio agent doctor
 sparkstudio hermes
 ```
 
-`sparkstudio search` uses the dashboard's existing `/api/search` pipeline:
-configured SearXNG first, bundled SearXNG next, then DuckDuckGo fallback. Add
-`--enrich` to fetch readable text from the top pages, `--limit 1..10` to size
-the result set, or put the global `--json` before `search` for automation.
+`sparkstudio search` utilise le pipeline `/api/search` existant du dashboard :
+SearXNG configuré en premier, SearXNG bundled en second, puis fallback
+DuckDuckGo. Ajoutez `--enrich` pour fetcher le texte lisible des top pages,
+`--limit 1..10` pour dimensionner le set de résultats, ou placez le
+`--json` global avant `search` pour l'automatisation.
 
-Use `sparkstudio hermes` (alias: `sparkstudio agent chat`) for an interactive
-Hermes session that follows the model currently loaded in the dashboard. Bare
-`hermes` intentionally reads your personal `~/.hermes/config.yaml`; if that
-profile contains an older engine port, it will continue trying the old model.
-Interactive Spark Studio sessions also receive one read-only MCP tool,
-`mcp__sparkstudio__web_search`. It routes every query through Spark Studio's
-SearXNG/DDG pipeline. The MCP server exposes no generic browser, shell,
-credential, or write API. Search results are treated as untrusted source
-material and include their URLs for citation.
+Utilisez `sparkstudio hermes` (alias : `sparkstudio agent chat`) pour une
+session Hermes interactive qui suit le modèle actuellement chargé dans le
+dashboard. Le `hermes` brut lit intentionnellement votre `~/.hermes/config.yaml`
+personnel ; si ce profil contient un port d'engine plus ancien, il
+continuera d'essayer l'ancien modèle. Les sessions interactives Spark
+Studio reçoivent aussi un outil MCP read-only, `mcp__sparkstudio__web_search`.
+Il route chaque query à travers le pipeline SearXNG/DDG de Spark Studio.
+Le serveur MCP n'expose aucun browser, shell, credential, ou API d'écriture
+génériques. Les résultats de recherche sont traités comme du matériel
+source non trusted et incluent leurs URLs pour citation.
 
-The dashboard's **Hermes → Chat** view is the same real Hermes TUI, not a second
-chat implementation. Open the tab after a model is ready and it starts against
-that loaded model automatically. Choose a workspace before starting; changing
-it requires stopping and restarting the TUI. Use **Stop** or **Restart** for the
-PTY lifecycle, and type `/model` inside Hermes to move between the local model
-and any authenticated Claude or Codex provider.
-The isolated `data/agent-lab/hermes` profile and Spark Studio search MCP server
-are shared with `sparkstudio hermes`, so both entry points behave consistently.
+La vue **Hermes → Chat** du dashboard est le même vrai Hermes TUI, pas
+une seconde implémentation de chat. Ouvrez l'onglet après qu'un modèle
+soit ready et il démarre contre ce modèle chargé automatiquement. Choisissez
+un workspace avant de démarrer ; le changer nécessite d'arrêter et
+redémarrer le TUI. Utilisez **Stop** ou **Restart** pour le lifecycle du
+PTY, et tapez `/model` dans Hermes pour bouger entre le modèle local et
+n'importe quel provider Claude ou Codex authentifié. Le profil isolé
+`data/agent-lab/hermes` et le serveur MCP de recherche Spark Studio sont
+partagés avec `sparkstudio hermes`, donc les deux points d'entrée se
+comportent de manière cohérente.
 
-To make Claude, Codex, or Copilot available to `/model` inside Hermes Chat,
-authenticate the **isolated profile** — not your personal one:
+Pour rendre Claude, Codex, ou Copilot disponibles à `/model` dans Hermes
+Chat, authentifiez le **profil isolé** — pas votre profil personnel :
 
 ```bash
-sparkstudio agent auth add openai-codex   # or anthropic-claude, copilot, …
+sparkstudio agent auth add openai-codex   # ou anthropic-claude, copilot, …
 ```
 
-Bare `hermes auth add <provider>` writes to your personal `~/.hermes`, which
-the dashboard deliberately never reads, so credentials added that way will
-still show "needs setup" in `/model`. `sparkstudio agent auth` wraps
-`hermes auth` with the dashboard's `HERMES_HOME`; use it for `list` and other
-auth subcommands too. The local model needs no credentials at all.
-Spark Studio prefers the WebSocket bridge and automatically falls back to a
-same-origin HTTPS terminal transport when a browser, certificate policy, or
-network proxy rejects WSS. The fallback carries the same PTY bytes, keyboard
-input, resize events, and cleanup behavior; no user setting is required.
+`hermes auth add <provider>` brut écrit dans votre `~/.hermes` personnel,
+que le dashboard ne lit jamais délibérément, donc les credentials ajoutés
+de cette manière afficheront toujours « needs setup » dans `/model`.
+`sparkstudio agent auth` wrappe `hermes auth` avec le `HERMES_HOME` du
+dashboard ; utilisez-le aussi pour `list` et les autres sous-commandes
+d'auth. Le modèle local n'a besoin d'aucun credential. Spark Studio
+préfère le bridge WebSocket et retombe automatiquement sur un transport
+terminal HTTPS same-origin quand un navigateur, une politique de
+certificat, ou un proxy réseau rejette WSS. Le fallback porte les mêmes
+octets PTY, l'input clavier, les events de resize, et le comportement de
+cleanup ; aucun setting utilisateur n'est requis.
 
-The sidebar hardware widget uses a separate, read-only telemetry stream. A
-browser or proxy can briefly reconnect that stream without interrupting Spark
-Studio, the loaded model, or Hermes. The UI keeps the last good reading during
-short retries and labels a longer retry as **Telemetry reconnecting**.
+Le widget hardware de la sidebar utilise un stream de télémétrie séparé,
+read-only. Un navigateur ou un proxy peut brièvement reconnecter ce stream
+sans interrompre Spark Studio, le modèle chargé, ou Hermes. L'UI garde la
+dernière bonne lecture pendant les retries courts et étiquette un retry
+plus long comme **Télémétrie en reconnexion**.
 
 ### Hermes Learning
 
-The **Hermes → Learning** view controls durable knowledge for Spark Studio's
-isolated profile. Interactive dashboard and `sparkstudio hermes` sessions enable
-three complementary capabilities by default:
+La vue **Hermes → Learning** contrôle la connaissance durable pour le
+profil isolé de Spark Studio. Les sessions interactives dashboard et
+`sparkstudio hermes` activent trois capacités complémentaires par défaut :
 
-- **Memory** keeps a bounded set of environment, engine, model, and recipe facts.
-- **Skills** preserve reusable procedures for fixing, fine-tuning, benchmarking,
-  and optimizing recipes or models.
-- **Session search** retrieves relevant details from earlier conversations.
+- **Memory** garde un ensemble borné de faits d'environnement, d'engine, de modèle, et de recipe.
+- **Skills** préservent des procédures réutilisables pour fixer, finetuner, benchmarker, et optimiser des recipes ou modèles.
+- **Session search** retrouve des détails pertinents depuis des conversations antérieures.
 
-The **User profile** is also enabled by default so Hermes can remember optional
-personal preferences, but it has its own switch and can be disabled without
-turning off technical memory. None of these features retrain or alter model
-weights; they provide durable context that follows the isolated Hermes profile
-when `/model` switches between a local model, Claude, or Codex.
+Le **User profile** est aussi activé par défaut pour qu'Hermes puisse se
+rappeler des préférences personnelles optionnelles, mais il a son propre
+toggle et peut être désactivé sans éteindre la mémoire technique. Aucune
+de ces features ne retrain ou n'altère les poids du modèle ; elles
+fournissent un contexte durable qui suit le profil Hermes isolé quand
+`/model` switch entre un modèle local, Claude, ou Codex.
 
-**Review learning before saving** defaults on. Proposed memory and skill writes
-appear as approval cards above the embedded Chat terminal, showing the content
-with explicit **Approve** and **Reject** buttons. You do not need to type
-`approved` into the prompt. The `/memory pending` and `/skills pending` commands
-remain available for terminal-first review. Approved learning is available to
-new Chat sessions, so restart an already-running Chat to load it into context.
-Older staged skills are normalized to the current Hermes schema and clearly
-labeled **Repair & Approve**. Supporting-file cards stay disabled until their
-preceding create-skill card is approved, preventing dependency-order failures.
-Deterministic Agent Lab model evaluations intentionally keep the constrained
-stateless toolset, preventing learned answers from contaminating comparison
-scores.
+**Review learning before saving** est activé par défaut. Les écritures de
+mémoire et de skill proposées apparaissent comme cartes d'approbation
+au-dessus du terminal Chat embarqué, montrant le contenu avec des
+boutons explicites **Approuver** et **Rejeter**. Vous n'avez pas besoin
+de taper `approved` dans le prompt. Les commandes `/memory pending` et
+`/skills pending` restent disponibles pour la revue terminal-first.
+L'apprentissage approuvé est disponible aux nouvelles sessions Chat,
+donc redémarrez un Chat déjà en cours pour le charger en contexte. Les
+anciennes skills staged sont normalisées au schéma Hermes courant et
+clairement étiquetées **Repair & Approve**. Les cartes de fichiers de
+support restent désactivées tant que leur carte create-skill précédente
+n'est pas approuvée, prévenant les échecs d'ordre de dépendance. Les
+évaluations de modèle déterministes de l'Agent Lab gardent
+intentionnellement le toolset constrained stateless, empêchant les
+réponses apprises de contaminer les scores de comparaison.
 
-For recipe work, Spark Studio registers the curated `sparkrun-recipes` skill.
-It directs agents to the repository's `Title Recipe Format.md` reference captured
-from the official sparkrun recipe-format documentation, without injecting the
-entire reference into unrelated prompts.
+Pour le travail de recipe, Spark Studio enregistre la skill curatoriale
+`sparkrun-recipes`. Elle dirige les agents vers la référence
+`Title Recipe Format.md` du dépôt capturée depuis la documentation
+officielle de format de recipe sparkrun, sans injecter toute la
+référence dans des prompts non liés.
 
-The same **Hermes** area also includes **Skin Studio**, powered by the pinned
-[`hermes-mod@0.2.0`](https://github.com/cocktailpeanut/hermes-mod) add-on —
-big thanks to [@cocktailpeanut](https://github.com/cocktailpeanut) for building
-and open-sourcing it. On first use, click **Install add-on**; if Hermes is
-missing, the button installs Hermes first and then continues automatically.
-The `--full` one-command profile preinstalls both. Spark Studio stores the
-add-on under the git-ignored `data/addons/hermes-mod`, starts it on loopback,
-and embeds it through a sandboxed same-origin bridge. Node.js and npm are the
-only add-on prerequisites. It always targets
-`data/agent-lab/hermes`, never your personal `~/.hermes`. Create or load a skin,
-click **Activate** inside Skin Studio, then choose **Restart Chat to apply**.
-Spark Studio automatically converts multi-line logo and hero color markup to
-the line-oriented form required by the Ink TUI. Use the **Saved skin** picker
-and **Delete skin** to remove a custom skin; deleting the active skin safely
-returns Hermes to the default skin. **Use original Hermes** selects the built-in
-default design without deleting any saved skins; choose **Restart Chat to apply**
-after switching designs.
-Only the Hermes PTY restarts—the loaded inference engine stays running. Image
-selection uses the browser picker, so it also works over Spark Studio's private
-HTTPS/LAN dashboard.
+La même zone **Hermes** inclut aussi **Skin Studio**, alimenté par
+l'add-on pinné [`hermes-mod@0.2.0`](https://github.com/cocktailpeanut/hermes-mod)
+— un grand merci à [@cocktailpeanut](https://github.com/cocktailpeanut)
+pour l'avoir construit et open-sourcé. À la première utilisation,
+cliquez sur **Install add-on** ; si Hermes manque, le bouton installe
+Hermes d'abord puis continue automatiquement. Le profil one-command
+`--full` préinstalle les deux. Spark Studio stocke l'add-on sous
+`data/addons/hermes-mod` git-ignored, le démarre sur loopback, et
+l'embarque à travers un bridge same-origin sandboxé. Node.js et npm
+sont les seuls prérequis de l'add-on. Il cible toujours
+`data/agent-lab/hermes`, jamais votre `~/.hermes` personnel. Créez ou
+chargez un skin, cliquez sur **Activate** dans Skin Studio, puis
+choisissez **Restart Chat to apply**. Spark Studio convertit
+automatiquement le markup multi-ligne de logo et de couleur de hero en
+la forme orientée ligne requise par le TUI Ink. Utilisez le picker
+**Saved skin** et **Delete skin** pour supprimer un skin custom ;
+supprimer le skin actif ramène Hermes en toute sécurité au skin par
+défaut. **Use original Hermes** sélectionne le design par défaut
+intégré sans supprimer de skins sauvegardés ; choisissez **Restart Chat
+to apply** après avoir switché de design. Seul le PTY Hermes redémarre
+— l'engine d'inférence chargé continue de tourner. La sélection
+d'image utilise le picker du navigateur, donc elle marche aussi via le
+dashboard privé HTTPS/LAN de Spark Studio.
 
-Because Hermes can run terminal commands and edit files, the WebSocket terminal
-accepts loopback browsers and same-origin private-LAN browsers using HTTPS/WSS.
-Plain HTTP connections from another device and public remote addresses are
-rejected. The bundled Caddy setup (`https://<Spark-IP>:8443`) meets the encrypted
-private-LAN requirement automatically. To deliberately bypass that boundary
-when another trusted transport already protects Spark Studio, start it with:
+Parce qu'Hermes peut lancer des commandes terminal et éditer des
+fichiers, le terminal WebSocket accepte les navigateurs loopback et les
+navigateurs LAN privé same-origin via HTTPS/WSS. Les connexions HTTP
+plain depuis un autre device et les adresses remote publiques sont
+rejetées. Le setup Caddy bundled (`https://<Spark-IP>:8443`) satisfait
+automatiquement l'exigence LAN privé chiffré. Pour outrepasser
+délibérément cette frontière quand un autre transport de confiance
+protège déjà Spark Studio, démarrez avec :
 
 ```bash
 SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE=1 ./start.sh
 ```
 
-Do not enable unrestricted remote terminal access on an untrusted network.
-WebSocket Origin validation remains enforced in every mode. The HTTPS fallback
-requires a same-origin-only custom request header and an unguessable session ID.
-The HTTPS fallback keeps a ten-minute encrypted session lease so returning from
-an opened preview or reloading the dashboard reattaches to the same Hermes TUI.
-Pressing **Stop** still terminates it immediately; abandoned sessions and their
-helpers are reaped automatically when the lease expires.
+N'activez pas l'accès terminal remote non restreint sur un réseau non
+de confiance. La validation WebSocket Origin reste enforced dans tous
+les modes. Le fallback HTTPS requiert un custom request header
+same-origin-only et un session ID non-devinable. Le fallback HTTPS
+garde un lease de session chiffré de dix minutes pour que revenir d'un
+preview ouvert ou reload le dashboard se rattache au même Hermes TUI.
+Appuyer sur **Stop** le termine toujours immédiatement ; les sessions
+abandonnées et leurs helpers sont reaped automatiquement quand le lease
+expire.
 
-**Recommended Caddy retry settings.** By default Caddy returns an instant 502
-when the dashboard is mid-restart (`./start.sh --update`, the in-app updater,
-or `systemctl --user restart spark-studio`). With a dashboard tab open, that
-can leave half-loaded panels — most visibly a Skin Studio iframe whose assets
-failed to load. Tell Caddy to ride out restarts instead by giving the
-`reverse_proxy` directive a retry window:
+**Réglages de retry Caddy recommandés.** Par défaut, Caddy renvoie un
+502 instantané quand le dashboard est en plein redémarrage
+(`./start.sh --update`, l'updater in-app, ou
+`systemctl --user restart spark-studio`). Avec un onglet dashboard
+ouvert, ça peut laisser des panneaux à moitié chargés — le plus visible
+étant un iframe Skin Studio dont les assets n'ont pas chargé. Dites à
+Caddy de tenir pendant les redémarrages au lieu de ça en donnant à la
+directive `reverse_proxy` une fenêtre de retry :
 
 ```caddyfile
 https://<Spark-IP>:8443 {
     tls internal
     reverse_proxy 127.0.0.1:7860 {
-        # Ride out dashboard restarts instead of returning 502: hold each
-        # request up to 15s, retrying every 500ms.
+        # Tient pendant les redémarrages du dashboard au lieu de renvoyer 502 :
+        # maintient chaque requête jusqu'à 15s, en retry toutes les 500ms.
         lb_try_duration 15s
         lb_try_interval 500ms
     }
 }
 ```
 
-Requests made during a restart then pause briefly and complete once the
-dashboard is back, so updates are invisible to open browser tabs. Note that
-with `admin off` in the Caddyfile, `caddy reload` cannot work — restart the
-proxy to apply changes: `systemctl --user restart spark-studio-https`.
+Les requêtes faites pendant un redémarrage se mettent alors en pause
+brièvement et complètent une fois le dashboard de retour, donc les
+updates sont invisibles aux onglets navigateur ouverts. Notez qu'avec
+`admin off` dans le Caddyfile, `caddy reload` ne peut pas marcher —
+redémarrez le proxy pour appliquer les changements :
+`systemctl --user restart spark-studio-https`.
 
-Run the deterministic coding smoke suite through Hermes:
+Lancez la suite coding smoke déterministe via Hermes :
 
 ```bash
 sparkstudio agent cases
 sparkstudio agent eval --suite coding-smoke
 
-# More confidence, and parallel workers if the loaded model can handle them
+# Plus de confiance, et workers parallèles si le modèle chargé peut les gérer
 sparkstudio agent eval --trials 3 --jobs 2 --fail-below 70
 ```
 
-Each case starts as a tiny Git repository with known failing tests. Hermes gets
-the `file,terminal` toolset, edits the repository, runs its tests, and is scored
-only by a clean post-run test command. Markdown and JSON reports land under
-`data/agent-lab/results/`; `sparkstudio agent history` and
-`sparkstudio agent show <run-id>` retrieve the SQLite-backed history.
+Chaque cas démarre comme un petit dépôt Git avec des tests qui échouent
+connu. Hermes reçoit le toolset `file,terminal`, édite le dépôt, lance
+ses tests, et est noté seulement par une commande de test post-run
+propre. Les rapports markdown et JSON atterrissent sous
+`data/agent-lab/results/` ; `sparkstudio agent history` et
+`sparkstudio agent show <run-id>` retrouvent l'historique backed SQLite.
 
-Use the same harness on your own repository:
+Utilisez le même harness sur votre propre dépôt :
 
 ```bash
 sparkstudio agent run \
@@ -454,106 +487,118 @@ sparkstudio agent run \
   --repo /path/to/project
 ```
 
-By default this creates a detached worktree from the repository's current
-`HEAD`, preserving the original checkout and any uncommitted work. The result
-prints the retained workspace and diff. Pass `--in-place` only when you want
-Hermes to edit the original checkout.
+Par défaut, cela crée un worktree détaché depuis le `HEAD` courant du
+dépôt, préservant le checkout original et tout travail non committé. Le
+résultat imprime le workspace retenu et le diff. Passez `--in-place`
+seulement quand vous voulez qu'Hermes édite le checkout original.
 
-Agent Lab uses a dedicated profile at `data/agent-lab/hermes` so it never
-rewrites your personal Hermes settings. Interactive `sparkstudio hermes` adds
-the single search MCP tool to `file,terminal`; unattended `agent run` and
-`agent eval` remain restricted to `file,terminal` and explicitly prohibit
-network use. Smart approvals, denials for common high-risk commands, and
-Hermes checkpoints remain enabled. This is process guidance, not an OS
-sandbox: review generated changes before using them and avoid `--unsafe-yolo`
-unless the workspace is disposable.
+L'Agent Lab utilise un profil dédié à `data/agent-lab/hermes` pour qu'il
+ne réécrive jamais vos settings Hermes personnels. Les sessions
+`sparkstudio hermes` interactives ajoutent l'unique outil MCP de
+recherche à `file,terminal` ; les `agent run` et `agent eval` non
+attentifs restent restreints à `file,terminal` et interdisent
+explicitement l'usage réseau. Les smart approvals, denials pour les
+commandes communes à haut risque, et Hermes checkpoints restent
+activés. C'est un guide de process, pas un sandbox OS : relisez les
+changements générés avant de les utiliser et évitez `--unsafe-yolo`
+sauf si le workspace est jetable.
 
-For an external OpenAI-compatible server, place global overrides before the
-command: `sparkstudio --base-url http://127.0.0.1:41293/v1 --model MODEL agent eval`.
-Add `--json` in the same position for automation.
+Pour un serveur externe OpenAI-compatible, placez les overrides globaux
+avant la commande :
+`sparkstudio --base-url http://127.0.0.1:41293/v1 --model MODEL agent eval`.
+Ajoutez `--json` à la même position pour l'automatisation.
 
-or manually:
+ou manuellement :
 
 ```bash
 env/bin/python -m uvicorn server:app --host 0.0.0.0 --port 7860
 ```
 
-Then open **http://127.0.0.1:7860** in your browser, or reach it from any
-machine on your network at `http://<this-machine's-LAN-IP>:7860`.
+Puis ouvrez **http://127.0.0.1:7860** dans votre navigateur, ou joignez-le
+depuis toute machine de votre réseau à `http://<IP-LAN-de-cette-machine>:7860`.
 
-You can use any available port — just change `7860` to whatever you prefer
-(`./start.sh --port 8000` works too; extra args are passed through to uvicorn).
-If the port is already taken, `start.sh` tells you which process holds it and
-suggests an alternative instead of failing mid-boot.
-To restrict access to this machine only, use `--host 127.0.0.1`.
+Vous pouvez utiliser n'importe quel port disponible — changez juste
+`7860` pour ce que vous préférez (`./start.sh --port 8000` marche aussi ;
+les args supplémentaires sont passés à uvicorn). Si le port est déjà
+pris, `start.sh` vous dit quel process le tient et suggère une
+alternative au lieu d'échouer en plein boot. Pour restreindre l'accès
+à cette machine uniquement, utilisez `--host 127.0.0.1`.
 
-> **Note:** the app has no built-in authentication — anyone on your network
-> can use it. Don't expose the port to the internet.
+> **Note :** l'app n'a pas d'authentification intégrée — quiconque sur
+> votre réseau peut l'utiliser. N'exposez pas le port sur internet.
 
-Stopping the app with **Ctrl+C also unloads everything it launched** — engine
-processes, docker containers, and sparkrun workloads — so models don't linger
-on the GPU after the dashboard is gone. If you *want* a model to keep serving
-across app restarts, start with `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1 ./start.sh`;
-the next boot re-adopts it automatically.
+Arrêter l'app avec **Ctrl+C décharge aussi tout ce qu'elle a lancé** —
+processus d'engine, containers docker, et workloads sparkrun — donc les
+modèles ne restent pas sur le GPU après que le dashboard soit parti.
+Si vous *voulez* qu'un modèle continue de servir à travers les
+redémarrages de l'app, démarrez avec
+`SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1 ./start.sh` ; le boot suivant le
+réadopte automatiquement.
 
-If `ufw` is enabled, allow the port for your LAN:
+Si `ufw` est activé, autorisez le port pour votre LAN :
 
 ```bash
 sudo ufw allow from 192.168.0.0/24 to any port 7860 proto tcp
 ```
 
-### Optional environment variables
+### Variables d'environnement optionnelles
 
-| Variable | Purpose | Default |
+| Variable | Rôle | Défaut |
 |---|---|---|
-| `HF_HOME` | Override HuggingFace cache root (hub lives under `$HF_HOME/hub`) | `~/.cache/huggingface` |
-| `HF_HUB_CACHE` | Point directly at a hub directory (`models--*` folders) | `$HF_HOME/hub` |
-| `HF_HUB_ENABLE_HF_TRANSFER` | Faster HF downloads via `hf_transfer` | unset |
-| `SEARXNG_URL` | Point web search at a specific SearXNG instance (overrides the bundled container) | auto-detected |
-| `SPARK_STUDIO_NO_SPARKRUN_UPDATE` | Set to `1` to skip the automatic `sparkrun update` that `start.sh` runs on launch (same as `./start.sh --no-sparkrun-update`) | unset (auto-update) |
-| `SPARK_STUDIO_SPARKRUN_GRACE` | Seconds a sparkrun run may stay not-ready before the watchdog fails it (only applies when no local container signal is available, e.g. remote multi-node heads) | `1200` |
-| `SPARK_STUDIO_KEEP_RUNS_ON_EXIT` | Set to `1` to give engine output a durable log, leave models serving when the app exits, and re-adopt healthy endpoints as Ready on next boot | unset (models unload) |
-| `SPARK_STUDIO_NO_MEMORY_GUARD` | Set to `1` to disable the pre-launch unified-memory guard (stop-and-wait + fit check before launching a model) | unset (guard on) |
-| `SPARK_STUDIO_MEM_GUARD_TIMEOUT` | Max seconds the guard waits for a stopped model's memory to be reclaimed before proceeding | `120` |
-| `SPARK_STUDIO_AGENT_TIMEOUT` | Seconds to wait for a Claude/Codex answer before giving up | `420` |
-| `SPARK_STUDIO_AUTOFIX_WAIT` | Seconds Auto-Fix & Retry (and Optimize Speed) waits for a relaunched engine before judging the attempt | `1800` |
-| `SPARK_STUDIO_OPTIMIZE_MARGIN` | Percent tok/s improvement over baseline at which Optimize Speed declares success and stops early | `10` |
-| `SPARK_STUDIO_CORS_ORIGINS` | Comma-separated origins allowed to call the API cross-origin (off by default — the UI is same-origin and the app has no auth) | unset (no CORS) |
+| `HF_HOME` | Override la racine du cache HuggingFace (hub sous `$HF_HOME/hub`) | `~/.cache/huggingface` |
+| `HF_HUB_CACHE` | Pointe directement sur un répertoire hub (dossiers `models--*`) | `$HF_HOME/hub` |
+| `HF_HUB_ENABLE_HF_TRANSFER` | Téléchargements HF plus rapides via `hf_transfer` | non défini |
+| `SEARXNG_URL` | Pointe la recherche web sur une instance SearXNG spécifique (override le container bundled) | auto-détecté |
+| `SPARK_STUDIO_NO_SPARKRUN_UPDATE` | Mettez à `1` pour skip le `sparkrun update` automatique que `start.sh` lance au boot (équivalent à `./start.sh --no-sparkrun-update`) | non défini (auto-update) |
+| `SPARK_STUDIO_SPARKRUN_GRACE` | Secondes pendant lesquelles un run sparkrun peut rester not-ready avant que le watchdog ne l'échoue (s'applique seulement quand aucun signal de container local n'est disponible, par ex. heads multi-nœud remote) | `1200` |
+| `SPARK_STUDIO_KEEP_RUNS_ON_EXIT` | Mettez à `1` pour donner à la sortie d'engine un log durable, laisser les modèles en service quand l'app exit, et réadopter les endpoints sains comme Ready au boot suivant | non défini (modèles déchargés) |
+| `SPARK_STUDIO_NO_MEMORY_GUARD` | Mettez à `1` pour désactiver la garde mémoire unifiée pré-lancement (stop-and-wait + fit check avant de lancer un modèle) | non défini (garde active) |
+| `SPARK_STUDIO_MEM_GUARD_TIMEOUT` | Secondes max que la garde attend que la mémoire d'un modèle arrêté soit réclamée avant de continuer | `120` |
+| `SPARK_STUDIO_AGENT_TIMEOUT` | Secondes à attendre une réponse Claude/Codex avant d'abandonner | `420` |
+| `SPARK_STUDIO_AUTOFIX_WAIT` | Secondes que Auto-Fix & Retry (et Optimiser la vitesse) attend un engine relancé avant de juger la tentative | `1800` |
+| `SPARK_STUDIO_OPTIMIZE_MARGIN` | Pourcentage d'amélioration tok/s sur la baseline auquel Optimiser la vitesse déclare le succès et s'arrête tôt | `10` |
+| `SPARK_STUDIO_CORS_ORIGINS` | Origines séparées par des virgules autorisées à appeler l'API cross-origin (off par défaut — l'UI est same-origin et l'app n'a pas d'auth) | non défini (pas de CORS) |
 
-The Models tab scans all of the above **plus** any cache your saved recipes
-hand to engine containers via `-e HF_HUB_CACHE=…`, so models show up even when
-only the recipes know where they live.
+L'onglet Models scanne tout ce qui précède **plus** tout cache que vos
+recipes sauvegardées passent aux containers d'engine via
+`-e HF_HUB_CACHE=…`, donc les modèles apparaissent même quand seules
+les recipes savent où ils vivent.
 
-Example:
+Exemple :
 ```bash
 HF_HOME=/mnt/models/.cache/huggingface \
 HF_HUB_ENABLE_HF_TRANSFER=1 \
 env/bin/python -m uvicorn server:app --host 0.0.0.0 --port 7860
 ```
 
-### Web search
+### Recherche web
 
-The chat's globe toggle grounds answers in live web results. On boot the app
-auto-starts a bundled **SearXNG** container (`spark-searxng`, official
-`searxng/searxng` image, bound to `127.0.0.1`). Config lives in
-`data/searxng/settings.yml` (only reliable, key-free engines are enabled, JSON
-output on). Backend priority is: `SEARXNG_URL` env override → bundled container →
-any SearXNG on a well-known local port → **DuckDuckGo** (`ddgs`) fallback. Requires
-Docker; if Docker is absent, search transparently falls back to DuckDuckGo.
+Le toggle globe du chat ancre les réponses dans des résultats web live.
+Au boot, l'app auto-démarre un container **SearXNG** bundled
+(`spark-searxng`, image officielle `searxng/searxng`, lié à
+`127.0.0.1`). La config vit dans `data/searxng/settings.yml`
+(seuls les engines fiables et sans clé sont activés, sortie JSON on).
+Priorité du backend : override env `SEARXNG_URL` → container bundled →
+tout SearXNG sur un port local well-known → fallback **DuckDuckGo**
+(`ddgs`). Requiert Docker ; si Docker est absent, la recherche retombe
+transparrement sur DuckDuckGo.
 
-Search is more than links: news/trending queries are routed to dedicated news
-indexes with freshness windows, results are de-duplicated per domain, and the
-top pages are **fetched and their article text extracted** (lxml) so the model
-answers from real content with inline source citations — not from homepage
-snippets. Reasoning models' chain-of-thought renders as a collapsible
-"Thinking" section instead of polluting the answer.
+La recherche est plus que des liens : les requêtes news/trending sont
+routées vers des index de news dédiés avec des fenêtres de fraîcheur,
+les résultats sont dédupliqués par domaine, et les top pages sont
+**fetchées et leur texte d'article extrait** (lxml) pour que le modèle
+réponde depuis du vrai contenu avec citations de source inline — pas
+depuis des snippets de homepage. Le chain-of-thought des modèles de
+raisonnement se rend comme une section repliable « Thinking » au lieu
+de polluer la réponse.
 
 ## Prometheus / Grafana
 
-Every Spark Studio instance exposes standard [Prometheus](https://prometheus.io)
-metrics at `/metrics` — GPU utilization/temperature/power/clock, unified memory,
-CPU, and per-run readiness gauges. For historic dashboards across a mesh, add a
-scrape job per Spark and point Grafana at Prometheus:
+Chaque instance Spark Studio expose des métriques [Prometheus](https://prometheus.io)
+standard sur `/metrics` — utilisation/température/power/clock GPU, mémoire
+unifiée, CPU, et gauges de readiness par run. Pour des dashboards
+historiques à travers un mesh, ajoutez un scrape job par Spark et
+pointez Grafana sur Prometheus :
 
 ```yaml
 scrape_configs:
@@ -562,42 +607,49 @@ scrape_configs:
       - targets: ["192.168.0.132:7860", "192.168.0.133:7860"]
 ```
 
-Token-level engine metrics (throughput, KV-cache usage, queue depth) come from
-the engines themselves — the active vLLM run serves its own `/metrics` on its
-port; scrape that alongside. No Kubernetes/DCGM stack required, but if you run
-one, these endpoints scrape the same way.
+Les métriques engine au niveau token (throughput, usage KV-cache,
+profondeur de queue) viennent des engines eux-mêmes — le run vLLM actif
+sert son propre `/metrics` sur son port ; scrape ça en parallèle. Pas
+besoin de stack Kubernetes/DCGM, mais si vous en avez une, ces
+endpoints se scrapent de la même façon.
 
-## Memory / OOM protection
+## Protection mémoire / OOM
 
-DGX Spark shares one 128 GB pool between GPU and system RAM, so a model that
-overcommits can drive the box to true out-of-memory. The `sparkrun setup`
-wizard installs **earlyoom** to kill a runaway workload before the kernel
-locks up — good — but its default `--prefer` list includes `python`, and Spark
-Studio's dashboard *is* a `python` process. Under memory pressure earlyoom can
-then SIGKILL the ~100 MB dashboard right alongside the multi-GB model (you'll
-see a bare `Killed` in the terminal where you ran `./start.sh`).
+DGX Spark partage un pool de 128 GB entre GPU et RAM système, donc un
+modèle qui overcommit peut drive la box jusqu'à un vrai OOM. Le wizard
+`sparkrun setup` installe **earlyoom** pour tuer un workload en fuite
+avant que le kernel ne se lock — bien — mais sa liste `--prefer` par
+défaut inclut `python`, et le dashboard de Spark Studio *est* un
+processus `python`. Sous pression mémoire, earlyoom peut alors SIGKILL
+le dashboard de ~100 MB aux côtés du modèle de plusieurs GB (vous
+verrez un `Killed` brut dans le terminal où vous avez lancé
+`./start.sh`).
 
-Spark Studio mitigates this from its side automatically:
+Spark Studio mitige cela depuis son côté automatiquement :
 
-- **Pre-launch memory guard.** Because each model fills most of the pool, only
-  one fits at a time. Before starting a model the app stops any other resident
-  model, **waits for its unified memory to actually be reclaimed** (the
-  teardown/reclaim lag is exactly what causes back-to-back launches to OOM),
-  and refuses a launch that still won't fit — the UI offers a one-click "launch
-  anyway". This prevents the OOM at the source instead of cleaning up after it.
-  Estimated footprint comes from the recipe's `gpu-memory-utilization` /
-  `mem-fraction-static` (× the 128 GB pool); llama.cpp isn't pool-filling so
-  it's exempt from the hard fit-check. Override with the `force` flag on a
-  launch, or globally with `SPARK_STUDIO_NO_MEMORY_GUARD=1`.
-- **Post-stop memory reclaim.** On the GB10 a stopped model's unified memory
-  stays pinned after the CUDA process exits — `free` keeps showing ~100 GB
-  used with nothing running (a known DGX Spark quirk; the manual fix is
-  `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`). After every model
-  stop/exit the app waits for the run's containers/process to actually be
-  gone and flushes caches automatically; the pre-launch guard also flushes
-  before refusing a launch for lack of memory. Flushing needs root, so grant
-  this one narrow passwordless command (writing to `drop_caches` only evicts
-  reclaimable caches — it can't harm running workloads):
+- **Garde mémoire pré-lancement.** Parce que chaque modèle remplit la
+  plupart du pool, un seul tient à la fois. Avant de démarrer un
+  modèle, l'app arrête tout autre modèle résident, **attend que sa
+  mémoire unifiée soit réellement réclamée** (le lag teardown/reclaim
+  est exactement ce qui cause des OOM en back-to-back), et refuse un
+  lancement qui ne tiendrait toujours pas — l'UI offre un « lancer
+  quand même » en un clic. Cela prévient l'OOM à la source au lieu de
+  nettoyer après. L'empreinte estimée vient du `gpu-memory-utilization`
+  / `mem-fraction-static` de la recipe (× le pool de 128 GB) ;
+  llama.cpp ne remplit pas le pool donc il est exempt du fit-check
+  dur. Override avec le flag `force` sur un lancement, ou globalement
+  avec `SPARK_STUDIO_NO_MEMORY_GUARD=1`.
+- **Reclaim mémoire post-stop.** Sur le GB10, la mémoire unifiée d'un
+  modèle arrêté reste pinnée après que le process CUDA exit — `free`
+  continue d'afficher ~100 GB utilisés sans rien qui tourne (un quirk
+  DGX Spark connu ; le fix manuel est
+  `sudo sh -c 'sync; echo 3 > /proc/sys/vm/drop_caches'`). Après chaque
+  stop/exit de modèle, l'app attend que les containers/process du run
+  soient vraiment partis et flush les caches automatiquement ; la garde
+  pré-lancement flush aussi avant de refuser un lancement pour manque
+  de mémoire. Le flush nécessite root, donc accordez cette unique
+  commande narrow passwordless (écrire dans `drop_caches` n'évince que
+  des caches réclamables — ça ne peut pas nuire aux workloads en cours) :
 
   ```bash
   echo "$USER ALL=(root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches" \
@@ -605,37 +657,40 @@ Spark Studio mitigates this from its side automatically:
   sudo chmod 0440 /etc/sudoers.d/spark-studio-reclaim
   ```
 
-  Without the rule, the run log shows a `[reclaim]` line with this exact hint.
-- **OOM priority.** At startup the app tries to lower its own OOM priority (only
-  possible with privilege, e.g. a systemd unit with `OOMScoreAdjust=-500`), and
-  — the part that always works — it **raises the OOM priority of every engine
-  subprocess it launches**, so if memory pressure does hit, it kills the
-  relaunchable model before the control plane.
+  Sans la règle, le log de run affiche une ligne `[reclaim]` avec ce hint exact.
+- **Priorité OOM.** Au démarrage, l'app essaie de baisser sa propre
+  priorité OOM (seulement possible avec privilège, par ex. une unité
+  systemd avec `OOMScoreAdjust=-500`), et — la partie qui marche
+  toujours — elle **élève la priorité OOM de chaque sous-processus
+  d'engine qu'elle lance**, donc si la pression mémoire arrive, ça tue
+  le modèle relaunchable avant le control plane.
 
-For the docker / sparkrun path (where the model runs in a container the app
-doesn't own), apply the box-wide fix once — drop `python` from earlyoom's
-`--prefer` list:
+Pour le path docker / sparkrun (où le modèle tourne dans un container
+que l'app ne possède pas), appliquez le fix box-wide une fois — retirez
+`python` de la liste `--prefer` d'earlyoom :
 
 ```bash
 sudo sed -i.bak 's/|python3|python)/)/' /etc/default/earlyoom
 sudo systemctl restart earlyoom
-pgrep -a earlyoom   # verify: the --prefer group no longer contains python
+pgrep -a earlyoom   # vérifiez : le groupe --prefer ne contient plus python
 ```
 
-Inference engines are still matched by their real names (`vllm`, `sglang`,
-`llama-server`, …), so earlyoom keeps protecting the box — it just stops
-treating the dashboard as a preferred sacrifice.
+Les engines d'inférence sont toujours matchés par leurs vrais noms
+(`vllm`, `sglang`, `llama-server`, …), donc earlyoom continue de
+protéger la box — il arrête juste de traiter le dashboard comme un
+sacrifice préféré.
 
-## Updating
+## Mise à jour
 
 ```bash
 ./start.sh --update
 ```
 
-Pulls the latest code, refreshes Python dependencies, reports the version
-change, and starts the app — one command to be current *and* running.
+Pull le dernier code, rafraîchit les dépendances Python, rapporte le
+changement de version, et démarre l'app — une seule commande pour être
+à jour *et* en train de tourner.
 
-Manual equivalent:
+Équivalent manuel :
 
 ```bash
 git pull
@@ -646,30 +701,34 @@ uv pip install --python env/bin/python -r requirements.txt --upgrade
 npm install -g @anthropic-ai/claude-code @openai/codex
 ```
 
-Registry mirrors refresh themselves on every app start (or click **Refresh
-now** on the Forge tab) — no manual git commands needed.
+Les mirrors de registry se rafraîchissent à chaque démarrage d'app (ou
+cliquez sur **Refresh now** sur l'onglet Forge) — pas de commandes git
+manuelles nécessaires.
 
-## I Broke It — Safe Reset
+## J'ai cassé — Safe Reset
 
-The **Recovery** tab (visible in Beginner Mode too) has one-click, plainly
-labeled actions: clear finished runs, remove orphan containers (never touches
-containers you manage yourself or active sparkrun jobs), reset the registry
-cache, reset the app database (confirm-gated; models on disk are untouched),
-and **Copy Bug Report** — a markdown bundle of system health + the failing
-run's recipe and last 300 log lines (secrets redacted), ready for a GitHub
-issue or an agent.
+L'onglet **Recovery** (visible aussi en Mode Débutant) a des actions
+en un clic, clairement étiquetées : clear les runs terminés, retirer
+les containers orphelins (ne touche jamais aux containers que vous
+gérez vous-même ou aux jobs sparkrun actifs), reset le cache du
+registry, reset la base de l'app (confirm-gated ; les modèles sur
+disque sont intouchés), et **Copier le rapport de bug** — un bundle
+markdown de la santé système + la recipe du run en échec et les 300
+dernières lignes de log (secrets redactés), prêt pour une issue
+GitHub ou un agent.
 
-From the terminal, when the app itself won't start:
+Depuis le terminal, quand l'app elle-même ne démarre pas :
 
 ```bash
-rm -f data/spark_studio.db     # clear saved recipes/history only
-rm -rf env && ./start.sh       # rebuild the Python environment
+rm -f data/spark_studio.db     # clear les recipes/historique sauvegardés uniquement
+rm -rf env && ./start.sh       # rebuild l'environnement Python
 rm -rf env data/spark_studio.db && ./start.sh   # full reset
 ```
 
-Downloaded models live in the HF cache and survive every reset above.
+Les modèles téléchargés vivent dans le cache HF et survivent à
+chaque reset ci-dessus.
 
-## Recipe Schema
+## Schéma de recipe
 
 ```json
 {
@@ -689,37 +748,47 @@ Downloaded models live in the HF cache and survive every reset above.
 }
 ```
 
-### Context, batch size, and capabilities (vLLM)
+### Contexte, batch size, et capabilities (vLLM)
 
-Every vLLM recipe — whether **forged**, **created**, or **edited** — is normalized so it serves the
-**full context the model supports, capped at 262144**, with `max-num-batched-tokens: 16384`. The cap
-uses the model's native context (from its HF config), so a 262144-native model like Qwen3 gets the
-full 256K while a 131072 model like Llama-3.1 gets 131072 — vLLM never has to be asked for more
-context than the model allows, so recipes always launch. (vLLM sizes the KV cache to
-`gpu-memory-utilization`, not to `max-model-len`, so a high ceiling doesn't OOM — it only trades some
-max concurrency.)
+Chaque recipe vLLM — qu'elle soit **forgée**, **créée**, ou **éditee**
+— est normalisée pour qu'elle serve le **contexte complet que le
+modèle supporte, plafonné à 262144**, avec
+`max-num-batched-tokens: 16384`. Le plafond utilise le contexte natif
+du modèle (depuis sa config HF), donc un modèle 262144-native comme
+Qwen3 obtient le 256K complet tandis qu'un modèle 131072 comme
+Llama-3.1 obtient 131072 — vLLM n'a jamais à être demandé pour plus
+de contexte que le modèle n'en autorise, donc les recipes lancent
+toujours. (vLLM dimensionne le cache KV sur `gpu-memory-utilization`,
+pas sur `max-model-len`, donc un plafond élevé n'OOM pas — ça trade
+juste un peu de concurrence max.)
 
-**Reasoning and tool calling** are added automatically for recognized model families (Qwen3, GLM-4.7,
-gpt-oss, MiniMax-M2, Nemotron, Gemma-4, …) — Forge wires in the correct `--tool-call-parser` /
-`--reasoning-parser` and `--enable-auto-tool-choice`. Unrecognized families get nothing, because a
-wrong parser breaks serving. The **recipe editor** shows a **Capabilities** row with Tool calling /
-Reasoning toggles (each enabled only when a parser is known for that model) so you can override per
-recipe; `GET /api/recipes/capabilities?model=<repo>` returns what a given model supports and the
-context that will be applied.
+**Reasoning et tool calling** sont ajoutés automatiquement pour les
+familles de modèles reconnues (Qwen3, GLM-4.7, gpt-oss, MiniMax-M2,
+Nemotron, Gemma-4, …) — Forge wire le bon `--tool-call-parser` /
+`--reasoning-parser` et `--enable-auto-tool-choice`. Les familles non
+reconnues n'obtiennent rien, parce qu'un mauvais parser casse le
+service. L'**éditeur de recipe** affiche une ligne **Capabilities**
+avec des toggles Tool calling / Reasoning (chacun activé seulement
+quand un parser est connu pour ce modèle) pour que vous puissiez
+overrider par recipe ; `GET /api/recipes/capabilities?model=<repo>`
+renvoie ce qu'un modèle donné supporte et le contexte qui sera
+appliqué.
 
-Engine values: `vllm` | `sglang` | `llamacpp`. The runner maps `args` to CLI flags automatically — kebab-case keys become `--kebab-case`, booleans become bare flags.
+Valeurs d'engine : `vllm` | `sglang` | `llamacpp`. Le runner mappe
+`args` vers des flags CLI automatiquement — les clés en kebab-case
+deviennent `--kebab-case`, les booléens deviennent des flags bare.
 
 ## API
 
-Once running at `http://127.0.0.1:7860`:
+Une fois lancé sur `http://127.0.0.1:7860` :
 
 ### JavaScript
 
 ```js
-// List recipes
+// Liste les recipes
 const recipes = await fetch('/api/recipes').then(r => r.json());
 
-// Start a run
+// Démarre un run
 const run = await fetch('/api/runs', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -729,11 +798,11 @@ const run = await fetch('/api/runs', {
   }),
 }).then(r => r.json());
 
-// Stream logs
+// Stream les logs
 const es = new EventSource(`/api/runs/${run.id}/stream`);
 es.addEventListener('log', ev => console.log(ev.data));
 
-// Chat against the active engine
+// Chat contre l'engine actif
 const reply = await fetch('/api/chat', {
   method: 'POST',
   headers: { 'Content-Type': 'application/json' },
@@ -748,17 +817,17 @@ import httpx
 
 BASE = "http://127.0.0.1:7860"
 
-# Forge recipes for a HF model
+# Forge des recipes pour un modèle HF
 resp = httpx.get(f"{BASE}/api/hf/forge", params={"repo": "meta-llama/Llama-3.1-8B-Instruct"}).json()
 print(resp["report"]["verdict"], resp["recipes"][0])
 
-# Launch a run
+# Lance un run
 run = httpx.post(f"{BASE}/api/runs", json={
     "engine": "vllm",
     "args": {"model": "meta-llama/Llama-3.1-8B-Instruct", "max-model-len": 16384},
 }).json()
 
-# Ask Claude to fix a broken run
+# Demande à Claude de fixer un run cassé
 tail = httpx.get(f"{BASE}/api/runs/{run['id']}/tail", params={"n": 200}).json()
 fix = httpx.post(f"{BASE}/api/agents/fix", json={
     "agent": "claude",
@@ -794,7 +863,7 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
   -o test.docx
 ```
 
-### Endpoint Map
+### Map d'endpoints
 
 | Method | Path | Purpose |
 |---|---|---|
@@ -866,22 +935,25 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/images` `/api/images/probe?ref=` | Spark-vLLM runner images / vLLM+FlashInfer versions inside one |
 | `GET` | `/api/images/build?mode=` | SSE: run build-and-copy.sh (nightly / wheels / allowlisted advanced flags) |
 
-## Platform
+## Plateforme
 
-Linux + NVIDIA. Tested on DGX Spark (Grace Blackwell, aarch64). vLLM and SGLang are Linux-first; llama.cpp is cross-platform but wired for GPU offload here.
+Linux + NVIDIA. Testé sur DGX Spark (Grace Blackwell, aarch64). vLLM et
+SGLang sont Linux-first ; llama.cpp est cross-platform mais wired ici
+pour GPU offload.
 
-## Community & credits
+## Communauté & crédits
 
-Spark Studio is built on the work of the DGX Spark / GB10 community:
+Spark Studio est construit sur le travail de la communauté DGX Spark / GB10 :
 
-- [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) — the curated recipe registry this app mirrors and forges from
-- [spark-arena/sparkrun](https://github.com/spark-arena/sparkrun) — multi-node workload launcher, integrated as a runner
-- [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) — canonical docker orchestration for Spark recipes (used verbatim for docker runs)
-- [eugr/llama-benchy](https://github.com/eugr/llama-benchy) — the benchmark engine behind the Benchmarks tab
-- [Spark Arena leaderboard](https://spark-arena.com/leaderboard) — community benchmark hub; paste its recipe YAMLs straight into the engine tabs, and share your own results with the ⧉ report button
+- [spark-arena/recipe-registry](https://github.com/spark-arena/recipe-registry) — le registry de recipes curatoriales que cette app mirror et forgé depuis
+- [spark-arena/sparkrun](https://github.com/spark-arena/sparkrun) — launcher de workload multi-nœud, intégré en tant que runner
+- [eugr/spark-vllm-docker](https://github.com/eugr/spark-vllm-docker) — orchestration docker canonique pour les recipes Spark (utilisé verbatim pour les runs docker)
+- [eugr/llama-benchy](https://github.com/eugr/llama-benchy) — le moteur de benchmark derrière l'onglet Benchmarks
+- [Spark Arena leaderboard](https://spark-arena.com/leaderboard) — hub de benchmark communautaire ; collez ses YAMLs de recipe directement dans les onglets d'engine, et partagez vos propres résultats avec le bouton ⧉ report
 
-## License
+## Licence
 
-MIT — see [LICENSE](LICENSE). Vendored assets under `web/vendor/` (Monaco
-Editor, Chart.js, marked, DOMPurify, highlight.js, qrcode-generator,
-Font Awesome Free) retain their own licenses; see the headers in each file.
+MIT — voir [LICENSE](LICENSE). Les assets vendored sous `web/vendor/`
+(Monaco Editor, Chart.js, marked, DOMPurify, highlight.js,
+qrcode-generator, Font Awesome Free) conservent leurs propres licences ;
+voir les headers dans chaque fichier.

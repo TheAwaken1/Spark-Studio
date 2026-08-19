@@ -1,16 +1,18 @@
-# Spark Studio User-Friendly Install & Onboarding Roadmap
+# Feuille de route d'install et d'onboarding conviviale pour Spark Studio
 
-## Goal
+## Objectif
 
-Make Spark Studio feel as close to a **one-click install** and **beginner-friendly local AI workstation** as possible.
+Faire en sorte que Spark Studio se rapproche autant que possible d'un
+**install one-click** et d'une **station de travail AI locale
+beginner-friendly**.
 
-The ideal experience should be:
+L'expérience idéale devrait être :
 
 ```bash
 curl -fsSL https://sparkstudio.dev/install | bash
 ```
 
-Then the browser opens to a guided setup flow:
+Puis le navigateur s'ouvre sur un flux de setup guidé :
 
 ```text
 Welcome to Spark Studio
@@ -25,66 +27,69 @@ Qwen 2.5 7B Instruct — fits your Spark
 [Launch Model]
 ```
 
-After launch:
+Après le lancement :
 
 ```text
 Model loaded in 2m14s · +38 GB RAM
 [Chat Now] [Benchmark] [Optimize Speed] [Stop]
 ```
 
-The user should not need to understand Python environments, model flags, YAML, registry details, LAN binding, or dependency problems before getting their first model running.
+L'utilisateur ne devrait pas avoir besoin de comprendre les
+environnements Python, les flags de modèle, le YAML, les détails de
+registry, le binding LAN, ou les problèmes de dépendances avant de
+faire tourner son premier modèle.
 
 ---
 
-# 1. Create a True One-Command Installer
+# 1. Créer un vrai installateur one-command
 
-## Recommendation
+## Recommandation
 
-Add a beginner-friendly install command:
+Ajoutez une commande d'install beginner-friendly :
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/YOURNAME/Spark-Studio/main/install.sh | bash
 ```
 
-Eventually, upgrade to a branded domain:
+À terme, upgradez vers un domaine brandé :
 
 ```bash
 curl -fsSL https://sparkstudio.dev/install | bash
 ```
 
-Optional future packaging:
+Packaging futur optionnel :
 
 ```bash
 uvx spark-studio
 ```
 
-or:
+ou :
 
 ```bash
 pipx run spark-studio
 ```
 
-## What the installer should do
+## Ce que l'installateur devrait faire
 
-The installer should:
+L'installateur devrait :
 
-- Check for Linux
-- Check for Python 3.11
-- Install or suggest `uv`
-- Check for Git
-- Check for `nvidia-smi`
-- Detect DGX Spark / NVIDIA GPU
-- Check for Node/npm only if agent features are requested
-- Check for Docker only if Web Search / SearXNG is requested
-- Check whether `sparkrun` exists
-- Offer to run `uvx sparkrun setup`
-- Clone Spark Studio
-- Create the virtual environment
-- Install Python dependencies
-- Start Spark Studio
-- Print the local and LAN URLs
+- Vérifier Linux
+- Vérifier Python 3.11
+- Installer ou suggérer `uv`
+- Vérifier Git
+- Vérifier `nvidia-smi`
+- Détecter DGX Spark / GPU NVIDIA
+- Vérifier Node/npm seulement si les features d'agent sont demandées
+- Vérifier Docker seulement si Web Search / SearXNG est demandé
+- Vérifier si `sparkrun` existe
+- Proposer de lancer `uvx sparkrun setup`
+- Cloner Spark Studio
+- Créer le virtualenv
+- Installer les dépendances Python
+- Démarrer Spark Studio
+- Afficher les URLs locale et LAN
 
-## Example install output
+## Exemple de sortie d'install
 
 ```text
 Spark Studio Installer
@@ -108,27 +113,30 @@ Local:   http://127.0.0.1:7860
 LAN:     http://192.168.1.50:7860
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-The current clone-and-run flow is good for developers, but beginners still have to understand Git, folders, Python errors, optional dependencies, and networking.
+Le flow clone-and-run actuel est bon pour les développeurs, mais les
+débutants doivent encore comprendre Git, les dossiers, les erreurs
+Python, les dépendances optionnelles, et le réseau.
 
-The goal is to make setup feel like installing an app, not configuring a development environment.
+Le but est de faire ressembler le setup à l'install d'une app, pas à
+la configuration d'un environnement de développement.
 
 ---
 
-# 2. Add a First-Run Setup Wizard
+# 2. Ajouter un assistant de setup au premier lancement
 
-## Recommendation
+## Recommandation
 
-On the first browser launch, do not drop users directly into the full dashboard.
+Au premier lancement navigateur, ne lâchez pas les utilisateurs directement dans le dashboard complet.
 
-Show a guided onboarding wizard.
+Affichez un assistant d'onboarding guidé.
 
-## First-run wizard flow
+## Flow de l'assistant au premier lancement
 
-### Step 1: System Check
+### Étape 1 : Vérification système
 
-Show clear system status:
+Affichez un statut système clair :
 
 ```text
 ✅ DGX Spark detected
@@ -141,9 +149,9 @@ Show clear system status:
 ⚠️ Codex missing — Ask Codex disabled
 ```
 
-### Step 2: Choose User Goal
+### Étape 2 : Choisir un objectif utilisateur
 
-Ask what the user wants to do:
+Demandez ce que l'utilisateur veut faire :
 
 - I just want to run one local model
 - I want to use sparkrun community recipes
@@ -152,11 +160,11 @@ Ask what the user wants to do:
 - I want WebGPU/browser models
 - I want benchmarking and model comparison
 
-### Step 3: Pick a Starter Model
+### Étape 3 : Choisir un modèle de démarrage
 
-Show only options that fit the current hardware.
+Affichez seulement les options qui tiennent dans le hardware actuel.
 
-Recommended categories:
+Catégories recommandées :
 
 - Fastest starter
 - Best quality that fits
@@ -165,17 +173,17 @@ Recommended categories:
 - Best for tool calling
 - Best for chat
 
-### Step 4: Launch
+### Étape 4 : Lancement
 
-Use one big button:
+Utilisez un gros bouton :
 
 ```text
 [Launch Recommended Model]
 ```
 
-### Step 5: Confirm Success
+### Étape 5 : Confirmer le succès
 
-After the model loads:
+Après que le modèle charge :
 
 ```text
 Model loaded successfully
@@ -187,27 +195,29 @@ Endpoint: http://127.0.0.1:8000/v1
 [Chat Now] [Run Benchmark] [Optimize Speed] [Stop]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-Spark Studio has a lot of powerful features. The first-run wizard protects beginners from feeling overwhelmed and gets them to a successful first run faster.
+Spark Studio a beaucoup de features puissantes. L'assistant au premier
+lancement protège les débutants du sentiment d'être submergés et les
+amène plus vite à un premier run réussi.
 
 ---
 
-# 3. Add Beginner Mode and Advanced Mode
+# 3. Ajouter Mode Débutant et Mode Avancé
 
-## Recommendation
+## Recommandation
 
-Add a UI mode toggle:
+Ajoutez un toggle de mode d'UI :
 
 ```text
 Mode: Beginner | Advanced
 ```
 
-The default should be **Beginner Mode**.
+Le défaut devrait être **Mode Débutant**.
 
-## Beginner Mode
+## Mode Débutant
 
-Show only the essentials:
+Affichez seulement l'essentiel :
 
 - Home
 - Models
@@ -217,19 +227,19 @@ Show only the essentials:
 - Logs
 - Stop
 
-Hide advanced features behind simple language.
+Cachez les features avancées derrière un langage simple.
 
-Example labels:
+Exemple de labels :
 
-- “Run a Model”
-- “Chat”
-- “See Logs”
-- “Stop Model”
-- “Fix Problem”
+- « Run a Model »
+- « Chat »
+- « See Logs »
+- « Stop Model »
+- « Fix Problem »
 
-## Advanced Mode
+## Mode Avancé
 
-Show the full power-user interface:
+Affichez l'interface complète pour power users :
 
 - vLLM
 - SGLang
@@ -248,23 +258,25 @@ Show the full power-user interface:
 - Search backend
 - External endpoints
 
-## Why this matters
+## Pourquoi c'est important
 
-The project is powerful, but the number of tabs/features can intimidate new users.
+Le projet est puissant, mais le nombre d'onglets/features peut intimider les nouveaux utilisateurs.
 
-Beginner Mode lets Spark Studio feel simple without removing power from advanced users.
+Le Mode Débutant permet à Spark Studio de rester simple sans retirer la puissance aux utilisateurs avancés.
 
 ---
 
-# 4. Add a Recommended Starter Model Flow
+# 4. Ajouter un flow de modèle de démarrage recommandé
 
-## Recommendation
+## Recommandation
 
-Ship Spark Studio with a beginner-safe “Start Here” flow.
+Livrez Spark Studio avec un flow « Start Here » safe pour les débutants.
 
-The user should not need to know YAML, Hugging Face IDs, engine flags, or registry names to launch their first model.
+L'utilisateur ne devrait pas avoir besoin de connaître YAML, les IDs
+Hugging Face, les flags d'engine, ou les noms de registry pour lancer
+son premier modèle.
 
-## Suggested starter buttons
+## Boutons de démarrage suggérés
 
 ```text
 [Run Fast Starter Model]
@@ -274,22 +286,22 @@ The user should not need to know YAML, Hugging Face IDs, engine flags, or regist
 [Run Low-Memory Model]
 ```
 
-## Hardware-aware recommendation logic
+## Logique de recommandation hardware-aware
 
-Spark Studio should inspect:
+Spark Studio devrait inspecter :
 
-- Available unified memory
-- GPU count / Spark node count
-- Local models already downloaded
-- Installed engines
-- Registry recipes
-- Compatibility score
-- Expected memory usage
-- Known working recipes
+- Mémoire unifiée disponible
+- Compte de GPU / compte de nœuds Spark
+- Modèles locaux déjà téléchargés
+- Engines installés
+- Recipes du registry
+- Score de compatibilité
+- Usage mémoire attendu
+- Recipes connues qui marchent
 
-Then recommend one safe default.
+Puis recommander un défaut safe.
 
-## Example UI
+## Exemple d'UI
 
 ```text
 Recommended for your Spark:
@@ -304,27 +316,27 @@ Expected startup: 2–4 minutes
 [Launch]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-A beginner should be able to get a model running without touching a recipe editor.
+Un débutant devrait pouvoir faire tourner un modèle sans toucher à un éditeur de recipe.
 
 ---
 
-# 5. Add Plain-English Error Messages
+# 5. Ajouter des messages d'erreur en langage clair
 
-## Recommendation
+## Recommandation
 
-Translate common technical failures into helpful explanations.
+Traduisez les échecs techniques courants en explications utiles.
 
-## Example: missing vLLM
+## Exemple : vLLM manquant
 
-Instead of only showing:
+Au lieu d'afficher seulement :
 
 ```text
 ModuleNotFoundError: No module named vllm
 ```
 
-Show:
+Affichez :
 
 ```text
 vLLM is not installed yet.
@@ -340,15 +352,15 @@ Or run:
 uv pip install --python env/bin/python vllm
 ```
 
-## Example: not enough memory
+## Exemple : mémoire insuffisante
 
-Instead of:
+Au lieu de :
 
 ```text
 CUDA out of memory
 ```
 
-Show:
+Affichez :
 
 ```text
 This model is too large for the available memory right now.
@@ -365,7 +377,7 @@ Spark Studio can:
 [Launch Anyway]
 ```
 
-## Example: Docker missing
+## Exemple : Docker manquant
 
 ```text
 Docker is not installed.
@@ -377,38 +389,39 @@ Spark Studio will continue using the DuckDuckGo fallback when possible.
 [Continue Without Docker]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-Friendly error messages make the app feel stable even when something fails.
+Des messages d'erreur conviviaux font paraître l'app stable même quand quelque chose échoue.
 
-Users do not mind problems as much when the app explains what happened and gives the next step.
+Les utilisateurs acceptent mieux les problèmes quand l'app explique ce qui s'est passé et donne la prochaine étape.
 
 ---
 
-# 6. Make Dependencies Optional by Feature
+# 6. Rendre les dépendances optionnelles par feature
 
-## Recommendation
+## Recommandation
 
-Do not make users feel like they need every dependency before starting.
+Ne faites pas sentir aux utilisateurs qu'ils ont besoin de chaque
+dépendance avant de commencer.
 
-Organize dependencies by feature.
+Organisez les dépendances par feature.
 
-| User wants | Required |
+| L'utilisateur veut | Requis |
 |---|---|
-| Basic dashboard | Python + Git |
-| GPU telemetry | `nvidia-smi` |
-| sparkrun community recipes | `sparkrun` |
-| Claude/Codex auto-fix | Node + Claude Code / Codex CLI |
-| Web search | Docker for bundled SearXNG, or fallback search |
+| Dashboard basique | Python + Git |
+| Télémétrie GPU | `nvidia-smi` |
+| Recipes communautaires sparkrun | `sparkrun` |
+| Auto-fix Claude/Codex | Node + Claude Code / Codex CLI |
+| Recherche web | Docker pour SearXNG bundled, ou recherche fallback |
 | Benchmarks | llama-benchy |
-| vLLM engine | vLLM |
-| SGLang engine | SGLang |
-| llama.cpp engine | llama.cpp |
-| WebGPU inference | Compatible browser / WebLLM assets |
+| Engine vLLM | vLLM |
+| Engine SGLang | SGLang |
+| Engine llama.cpp | llama.cpp |
+| Inférence WebGPU | Browser compatible / assets WebLLM |
 
-## UI behavior
+## Comportement de l'UI
 
-Each feature should show one of these states:
+Chaque feature devrait afficher un de ces états :
 
 ```text
 ✅ Available
@@ -418,7 +431,7 @@ Each feature should show one of these states:
 ⏭️ Skip
 ```
 
-## Example
+## Exemple
 
 ```text
 Claude Auto-Fix
@@ -430,37 +443,39 @@ This feature lets Spark Studio ask Claude Code to diagnose and patch broken reci
 [Skip]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-A 1-click install should not fail just because optional features are missing.
+Un install 1-click ne devrait pas échouer juste parce que des features
+optionnelles manquent.
 
-The app should install the core first and let users add advanced features later.
-
----
-
-# 7. Package Spark Studio Three Ways
-
-## Recommendation
-
-Support three installation paths.
+L'app devrait installer le core d'abord et laisser les utilisateurs
+ajouter les features avancées plus tard.
 
 ---
 
-## Option A: Recommended Script Installer
+# 7. Packager Spark Studio de trois façons
 
-Best for most DGX Spark users.
+## Recommandation
+
+Supportez trois chemins d'install.
+
+---
+
+## Option A : Installateur script recommandé
+
+Le mieux pour la plupart des utilisateurs DGX Spark.
 
 ```bash
 curl -fsSL https://sparkstudio.dev/install | bash
 ```
 
-Use this as the primary README quick start.
+Utilisez cela comme quick start principal du README.
 
 ---
 
-## Option B: Developer Install
+## Option B : Install développeur
 
-Best for GitHub users who want to modify the code.
+Le mieux pour les utilisateurs GitHub qui veulent modifier le code.
 
 ```bash
 git clone https://github.com/YOURNAME/Spark-Studio.git
@@ -470,33 +485,36 @@ cd Spark-Studio
 
 ---
 
-## Option C: Docker Compose Install
+## Option C : Install Docker Compose
 
-Best for users who want isolation.
+Le mieux pour les utilisateurs qui veulent de l'isolation.
 
 ```bash
 docker compose up
 ```
 
-Even if GPU inference engines are host-managed, Docker can still be useful for the dashboard/control plane, SearXNG, and supporting services.
+Même si les engines d'inférence GPU sont gérés sur l'hôte, Docker peut
+quand même être utile pour le dashboard/control plane, SearXNG, et les
+services de support.
 
-## Why this matters
+## Pourquoi c'est important
 
-Different users trust different installation styles.
+Différents utilisateurs font confiance à différents styles d'install.
 
-A script installer feels easy, Git feels transparent, and Docker feels clean.
+Un installateur script est perçu comme facile, Git comme transparent,
+et Docker comme propre.
 
 ---
 
-# 8. Improve the README Landing Section
+# 8. Améliorer la section d'atterrissage du README
 
-## Recommendation
+## Recommandation
 
-Make the top of the README shorter, clearer, and more emotional.
+Rendez le haut du README plus court, plus clair, et plus émotionnel.
 
-Do not lead with every feature. Lead with the outcome.
+Ne commencez pas par chaque feature. Commencez par le résultat.
 
-## Suggested README opening
+## Ouverture README suggérée
 
 ```markdown
 # Spark Studio
@@ -523,7 +541,7 @@ http://<your-spark-ip>:7860
 5. Click Auto-Fix if it fails
 ```
 
-## Recommended README structure
+## Structure README recommandée
 
 ```markdown
 # Spark Studio
@@ -557,30 +575,31 @@ http://<your-spark-ip>:7860
 ## Community & Credits
 ```
 
-## Move the giant feature list lower
+## Déplacer la grande liste de features plus bas
 
-Keep the full feature list, but move it below:
+Gardez la liste complète de features, mais déplacez-la en-dessous de :
 
 - Quick Start
 - Screenshots
 - First-run experience
 - Why Spark Studio?
 
-## Why this matters
+## Pourquoi c'est important
 
-The README should sell the project before it documents every detail.
+Le README devrait vendre le projet avant de documenter chaque détail.
 
-Most users decide whether to keep reading in the first few seconds.
+La plupart des utilisateurs décident s'ils continuent à lire dans les
+premières secondes.
 
 ---
 
-# 9. Add Screenshots and a Short GIF Demo
+# 9. Ajouter des screenshots et un court GIF de démo
 
-## Recommendation
+## Recommandation
 
-Add visuals near the top of the README.
+Ajoutez des visuels près du haut du README.
 
-## Must-have screenshots
+## Screenshots indispensables
 
 1. Home dashboard
 2. First-run wizard
@@ -591,9 +610,9 @@ Add visuals near the top of the README.
 7. Benchmark results
 8. Local models tab
 
-## Best demo GIF
+## Meilleur GIF de démo
 
-Create a 20-second GIF showing:
+Créez un GIF de 20 secondes montrant :
 
 ```text
 Paste model ID
@@ -603,7 +622,7 @@ Paste model ID
 → Chat with model
 ```
 
-## Suggested README section
+## Section README suggérée
 
 ```markdown
 ## Demo
@@ -613,31 +632,32 @@ Paste model ID
 Paste a Hugging Face model ID, click Forge, launch the recommended recipe, and chat with the model.
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-A GIF communicates the product faster than a large README.
+Un GIF communique le produit plus vite qu'un grand README.
 
-For this kind of project, visuals are not optional — they are part of the onboarding.
+Pour ce genre de projet, les visuels ne sont pas optionnels — ils font
+partie de l'onboarding.
 
 ---
 
-# 10. Add a Health Check / Doctor Command
+# 10. Ajouter une commande Health Check / Doctor
 
-## Recommendation
+## Recommandation
 
-Add:
+Ajoutez :
 
 ```bash
 ./spark-studio doctor
 ```
 
-or:
+ou :
 
 ```bash
 spark-studio doctor
 ```
 
-## Example output
+## Exemple de sortie
 
 ```text
 Spark Studio Doctor
@@ -654,41 +674,42 @@ Spark Studio Doctor
 ✅ LAN URL: http://192.168.1.50:7860
 ```
 
-## Doctor should check
+## Le Doctor devrait vérifier
 
 - OS
 - Architecture
-- Python version
+- Version Python
 - uv
 - Git
 - Node/npm
 - Docker
-- NVIDIA driver
+- Driver NVIDIA
 - `nvidia-smi`
-- Available memory
-- DGX Spark detection
-- vLLM installed
-- SGLang installed
-- llama.cpp installed
-- sparkrun installed
-- Claude Code installed
-- Codex installed
-- llama-benchy installed
-- SearXNG container status
-- LAN IP
-- Port availability
+- Mémoire disponible
+- Détection DGX Spark
+- vLLM installé
+- SGLang installé
+- llama.cpp installé
+- sparkrun installé
+- Claude Code installé
+- Codex installé
+- llama-benchy installé
+- Statut container SearXNG
+- IP LAN
+- Disponibilité de port
 
-## Why this matters
+## Pourquoi c'est important
 
-A doctor command gives users confidence and gives maintainers better bug reports.
+Une commande doctor donne confiance aux utilisateurs et donne aux
+mainteners de meilleurs rapports de bug.
 
 ---
 
-# 11. Add Desktop Launcher and Systemd Service Options
+# 11. Ajouter les options Desktop Launcher et service Systemd
 
-## Recommendation
+## Recommandation
 
-After install, offer:
+Après l'install, proposez :
 
 ```text
 Create desktop launcher? [Y/n]
@@ -698,55 +719,56 @@ Start on boot? [y/N]
 
 ## Desktop launcher
 
-Create a `.desktop` file so users can open Spark Studio like a normal app.
+Créez un fichier `.desktop` pour que les utilisateurs puissent ouvrir
+Spark Studio comme une app normale.
 
-Example app name:
+Exemple de nom d'app :
 
 ```text
 Spark Studio
 ```
 
-Action:
+Action :
 
 ```text
 Open Spark Studio Dashboard
 ```
 
-## Systemd service
+## Service Systemd
 
-Allow:
+Permettez :
 
 ```bash
 sudo systemctl enable --now spark-studio
 ```
 
-This would make Spark Studio always available at:
+Cela rendrait Spark Studio toujours disponible à :
 
 ```text
 http://spark.local:7860
 ```
 
-or:
+ou :
 
 ```text
 http://<spark-lan-ip>:7860
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-A real app should not require opening a terminal every time.
+Une vraie app ne devrait pas nécessiter d'ouvrir un terminal à chaque fois.
 
-This is especially helpful for a dedicated DGX Spark box.
+C'est particulièrement utile pour une box DGX Spark dédiée.
 
 ---
 
-# 12. Add Local Network Discovery
+# 12. Ajouter la découverte de réseau local
 
-## Recommendation
+## Recommandation
 
-Every launch should clearly print all access URLs.
+Chaque lancement devrait clairement afficher toutes les URLs d'accès.
 
-## Example
+## Exemple
 
 ```text
 Spark Studio is running:
@@ -756,38 +778,40 @@ LAN:       http://192.168.1.50:7860
 Hostname:  http://dgx-spark.local:7860
 ```
 
-## Add UI display
+## Affichage dans l'UI
 
-Show the same URLs inside the app:
+Affichez les mêmes URLs dans l'app :
 
 ```text
 Access Spark Studio from another computer:
 http://192.168.1.50:7860
 ```
 
-## Optional QR code
+## QR code optionnel
 
-Show a QR code for phones/tablets on the same network.
+Affichez un QR code pour les phones/tablettes sur le même réseau.
 
 ```text
 Scan to open Spark Studio on your phone
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-LAN access is one of Spark Studio’s strengths, but users should not have to find their IP address manually.
+L'accès LAN est une des forces de Spark Studio, mais les utilisateurs
+ne devraient pas avoir à trouver leur adresse IP manuellement.
 
 ---
 
-# 13. Add an “I Broke It” Recovery Section
+# 13. Ajouter une section de recovery « J'ai cassé »
 
-## Recommendation
+## Recommandation
 
-Add both UI recovery buttons and README recovery commands.
+Ajoutez à la fois des boutons de recovery dans l'UI et des commandes de
+recovery dans le README.
 
-## UI recovery buttons
+## Boutons de recovery dans l'UI
 
-Create a “Recovery” or “Troubleshooting” page with:
+Créez une page « Recovery » ou « Troubleshooting » avec :
 
 - Clear failed runs
 - Remove orphan containers
@@ -797,11 +821,11 @@ Create a “Recovery” or “Troubleshooting” page with:
 - Rebuild Python environment
 - Full safe reset
 
-## Safe descriptions
+## Descriptions safe
 
-Before each action, explain what will happen.
+Avant chaque action, expliquez ce qui va se passer.
 
-Example:
+Exemple :
 
 ```text
 Reset app database
@@ -812,7 +836,7 @@ It does not delete downloaded models.
 [Reset Database]
 ```
 
-Example:
+Exemple :
 
 ```text
 Remove orphan containers
@@ -823,7 +847,7 @@ It does not delete model files.
 [Clean Containers]
 ```
 
-## README section
+## Section README
 
 ```markdown
 ## I Broke It — Safe Reset
@@ -843,19 +867,20 @@ rm -rf env data/spark_studio.db
 ./start.sh
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-Beginners are more willing to experiment when they know there is a safe reset path.
+Les débutants sont plus enclins à expérimenter quand ils savent qu'il y
+a un chemin de reset safe.
 
 ---
 
-# 14. Add Better Install-Time Choices
+# 14. Ajouter de meilleurs choix à l'install
 
-## Recommendation
+## Recommandation
 
-During install, ask what type of setup the user wants.
+Pendant l'install, demandez quel type de setup l'utilisateur veut.
 
-## Example
+## Exemple
 
 ```text
 Choose setup type:
@@ -868,11 +893,11 @@ Choose setup type:
 Select [2]:
 ```
 
-## Suggested defaults
+## Défauts suggérés
 
-Use **Recommended** as the default.
+Utilisez **Recommended** comme défaut.
 
-## Setup profiles
+## Profils de setup
 
 ### Basic
 
@@ -902,17 +927,18 @@ Use **Recommended** as the default.
 - WebGPU assets
 - Advanced benchmarking
 
-## Why this matters
+## Pourquoi c'est important
 
-A single install command can still feel user-friendly while avoiding a giant all-or-nothing dependency install.
+Une seule commande d'install peut quand même rester user-friendly tout
+en évitant un install de dépendance géant tout-ou-rien.
 
 ---
 
-# 15. Add a Better Home Dashboard
+# 15. Ajouter un meilleur dashboard d'accueil
 
-## Recommendation
+## Recommandation
 
-The home screen should answer five questions immediately:
+L'écran d'accueil devrait répondre à cinq questions immédiatement :
 
 1. Is my Spark healthy?
 2. Is a model running?
@@ -920,9 +946,9 @@ The home screen should answer five questions immediately:
 4. How much memory is free?
 5. What should I do next?
 
-## Suggested dashboard cards
+## Cartes de dashboard suggérées
 
-### System Status
+### Statut système
 
 ```text
 DGX Spark detected
@@ -930,7 +956,7 @@ GPU ready
 Unified memory: 72 GB free / 128 GB total
 ```
 
-### Active Model
+### Modèle actif
 
 ```text
 No model running
@@ -938,7 +964,7 @@ No model running
 [Launch Recommended Model]
 ```
 
-or:
+ou :
 
 ```text
 Qwen 2.5 7B Instruct
@@ -947,9 +973,9 @@ Loaded in 2m14s · +38 GB RAM
 [Chat] [Benchmark] [Optimize] [Stop]
 ```
 
-### Recommended Next Action
+### Action suivante recommandée
 
-Examples:
+Exemples :
 
 ```text
 Start by launching a beginner-friendly model.
@@ -963,7 +989,7 @@ Your model is running. Try chatting or run a quick benchmark.
 This run failed. Auto-Fix can diagnose and patch the recipe.
 ```
 
-### Feature Health
+### Santé des features
 
 ```text
 ✅ sparkrun
@@ -972,19 +998,20 @@ This run failed. Auto-Fix can diagnose and patch the recipe.
 ⚠️ Claude Code
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-The home screen should act like a control center, not just a list of tabs.
+L'écran d'accueil devrait agir comme un centre de contrôle, pas juste
+une liste d'onglets.
 
 ---
 
-# 16. Add “One-Click Fix” Everywhere
+# 16. Ajouter « One-Click Fix » partout
 
-## Recommendation
+## Recommandation
 
-Wherever Spark Studio detects a problem, show one next action.
+Partout où Spark Studio détecte un problème, affichez une action suivante.
 
-Examples:
+Exemples :
 
 ```text
 vLLM missing
@@ -1016,19 +1043,20 @@ Memory not freed yet
 [Wait and Retry]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-The user should not have to read logs to know what to do next.
+L'utilisateur ne devrait pas avoir à lire les logs pour savoir quoi
+faire ensuite.
 
 ---
 
-# 17. Add Better Bug Report Export
+# 17. Ajouter un meilleur export de rapport de bug
 
-## Recommendation
+## Recommandation
 
-Add a “Copy Bug Report” button.
+Ajoutez un bouton « Copy Bug Report ».
 
-## Report should include
+## Le rapport devrait inclure
 
 - Spark Studio version
 - OS
@@ -1045,25 +1073,26 @@ Add a “Copy Bug Report” button.
 - Error summary
 - Recent doctor output
 
-## Example button
+## Exemple de bouton
 
 ```text
 [Copy Bug Report]
 ```
 
-## Why this matters
+## Pourquoi c'est important
 
-This makes GitHub issues cleaner and easier to debug.
+Cela rend les issues GitHub plus propres et plus faciles à débugger.
 
-It also helps users ask for help from Claude, Codex, or the community.
+Cela aide aussi les utilisateurs à demander de l'aide à Claude, Codex,
+ou à la communauté.
 
 ---
 
-# 18. Add Versioned Releases
+# 18. Ajouter des releases versionnées
 
-## Recommendation
+## Recommandation
 
-Create GitHub releases:
+Créez des releases GitHub :
 
 ```text
 v0.1.0
@@ -1071,19 +1100,19 @@ v0.2.0
 v0.3.0
 ```
 
-## Add an update command
+## Ajouter une commande d'update
 
 ```bash
 spark-studio update
 ```
 
-or:
+ou :
 
 ```bash
 ./start.sh --update
 ```
 
-## Add UI update check
+## Ajouter un check d'update dans l'UI
 
 ```text
 Spark Studio v0.2.0
