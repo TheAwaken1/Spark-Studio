@@ -1332,6 +1332,11 @@ body[data-uimode="beginner"] .tab[data-tab="hermes"] { display: none; }
 .sidebar-meta { font-size: 10px; opacity: 0.55; margin-bottom: 8px; text-align: center;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-meta:hover { opacity: 0.9; }
+.lang-select-wrap { margin-bottom: 8px; text-align: center; }
+.lang-select { font: inherit; font-size: 11px; color: var(--fg, inherit); background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border, rgba(255,255,255,0.15)); border-radius: 6px; padding: 3px 6px;
+  opacity: 0.7; cursor: pointer; }
+.lang-select:hover { opacity: 1; }
 .update-badge { color: var(--accent, #60a5fa); font-weight: 700; }
 .qr-box { display: flex; justify-content: center; padding: 10px; }
 .qr-box svg { background: #fff; border-radius: 8px; }

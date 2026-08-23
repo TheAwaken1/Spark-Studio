@@ -20,61 +20,69 @@
     <div class="brand">
       <div class="logo"><i class="fa-solid fa-bolt"></i></div>
       <div class="brand-text">
-        <div class="title">Spark Studio</div>
-        <div class="subtitle">DGX Spark control plane</div>
+        <div class="title" data-i18n="ss.app.title">Spark Studio</div>
+        <div class="subtitle" data-i18n="ss.app.subtitle">DGX Spark control plane</div>
       </div>
     </div>
     <nav class="tabs">
-      <a class="tab active" data-tab="overview"><i class="fa-solid fa-gauge-high"></i> Overview</a>
-      <a class="tab" data-tab="vllm"><i class="fa-solid fa-bolt-lightning"></i> vLLM</a>
-      <a class="tab" data-tab="sglang"><i class="fa-solid fa-diagram-project"></i> SGLang</a>
-      <a class="tab" data-tab="llamacpp"><i class="fa-solid fa-feather-pointed"></i> llama.cpp</a>
-      <a class="tab" data-tab="webgpu"><i class="fa-solid fa-comments"></i> Engine Chat</a>
-      <a class="tab" data-tab="recipes"><i class="fa-solid fa-bowl-food"></i> Recipes &amp; Community</a>
-      <a class="tab" data-tab="forge"><i class="fa-solid fa-hammer"></i> Recipe Forge</a>
-      <a class="tab" data-tab="models"><i class="fa-solid fa-cubes"></i> Models</a>
-      <a class="tab" data-tab="chat"><i class="fa-solid fa-comments"></i> Chat &amp; Canvas</a>
-      <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
-      <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
-      <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
-      <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> Hermes</a>
-      <a class="tab" data-tab="cluster"><i class="fa-solid fa-circle-nodes"></i> Cluster</a>
-      <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> Recovery</a>
+      <a class="tab active" data-tab="overview"><i class="fa-solid fa-gauge-high"></i> <span data-i18n="ss.nav.overview">Overview</span></a>
+      <a class="tab" data-tab="vllm"><i class="fa-solid fa-bolt-lightning"></i> <span data-i18n="ss.nav.vllm">vLLM</span></a>
+      <a class="tab" data-tab="sglang"><i class="fa-solid fa-diagram-project"></i> <span data-i18n="ss.nav.sglang">SGLang</span></a>
+      <a class="tab" data-tab="llamacpp"><i class="fa-solid fa-feather-pointed"></i> <span data-i18n="ss.nav.llamacpp">llama.cpp</span></a>
+      <a class="tab" data-tab="webgpu"><i class="fa-solid fa-comments"></i> <span data-i18n="ss.nav.webgpu">Engine Chat</span></a>
+      <a class="tab" data-tab="recipes"><i class="fa-solid fa-bowl-food"></i> <span data-i18n="ss.nav.recipes">Recipes &amp; Community</span></a>
+      <a class="tab" data-tab="forge"><i class="fa-solid fa-hammer"></i> <span data-i18n="ss.nav.forge">Recipe Forge</span></a>
+      <a class="tab" data-tab="models"><i class="fa-solid fa-cubes"></i> <span data-i18n="ss.nav.models">Models</span></a>
+      <a class="tab" data-tab="chat"><i class="fa-solid fa-comments"></i> <span data-i18n="ss.nav.chat">Chat &amp; Canvas</span></a>
+      <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> <span data-i18n="ss.nav.bench">Benchmarks</span></a>
+      <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> <span data-i18n="ss.nav.logs">Runs &amp; Logs</span></a>
+      <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> <span data-i18n="ss.nav.agents">Agents</span></a>
+      <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> <span data-i18n="ss.nav.hermes">Hermes</span></a>
+      <a class="tab" data-tab="cluster"><i class="fa-solid fa-circle-nodes"></i> <span data-i18n="ss.nav.cluster">Cluster</span></a>
+      <a class="tab" data-tab="recovery"><i class="fa-solid fa-kit-medical"></i> <span data-i18n="ss.nav.recovery">Recovery</span></a>
     </nav>
     <!-- live vitals + status stacked at bottom -->
     <div class="sidebar-bottom">
 
       <!-- Beginner/Advanced UI mode -->
-      <div class="ui-mode" title="Beginner hides advanced tabs; Advanced shows everything">
-        <button class="ui-mode-btn" id="modeBeginner" data-mode="beginner">Beginner</button>
-        <button class="ui-mode-btn" id="modeAdvanced" data-mode="advanced">Advanced</button>
+      <div class="ui-mode" title="Beginner hides advanced tabs; Advanced shows everything" data-i18n-title="ss.mode.beginner_hint">
+        <button class="ui-mode-btn" id="modeBeginner" data-mode="beginner"><span data-i18n="ss.mode.beginner">Beginner</span></button>
+        <button class="ui-mode-btn" id="modeAdvanced" data-mode="advanced"><span data-i18n="ss.mode.advanced">Advanced</span></button>
       </div>
 
       <!-- code-updated-but-process-stale warning -->
-      <div class="restart-needed" id="restartNeeded" hidden title="git pull updated the files, but this server process still runs the old code — new endpoints 404 until restarted">
+      <div class="restart-needed" id="restartNeeded" data-i18n="ss.restart_needed" hidden title="git pull updated the files, but this server process still runs the old code — new endpoints 404 until restarted" data-i18n-title="ss.restart_needed_hint">
         ⟳ restart needed — <span class="mono">Ctrl+C → ./start.sh</span>
       </div>
       <!-- version + LAN access line -->
-      <div class="sidebar-meta" id="sidebarMeta" title="Open Spark Studio from any machine on your network"></div>
+      <div class="sidebar-meta" id="sidebarMeta" title="Open Spark Studio from any machine on your network" data-i18n-title="ss.sidebar_meta_hint"></div>
+
+      <!-- language selector (wired by the i18n runtime) -->
+      <div class="lang-select-wrap" title="Interface language" data-i18n-title="ss.lang.hint">
+        <select id="langSelect" class="lang-select" aria-label="Interface language" data-i18n-aria="ss.lang.aria">
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
+      </div>
 
       <!-- DGX Spark live telemetry widget -->
       <div class="vitals-widget" id="vitalsWidget">
-        <div class="vitals-header" id="vitalsToggle" title="Click to expand live vitals">
+        <div class="vitals-header" id="vitalsToggle" title="Click to expand live vitals" data-i18n-title="ss.vitals.expand">
           <div class="vitals-header-info">
-            <div class="vitals-mem-text" id="vitalsMemText">connecting…</div>
+            <div class="vitals-mem-text" id="vitalsMemText" data-i18n="ss.vitals.connecting">connecting…</div>
             <canvas id="vitalsBar" height="8"></canvas>
-            <div class="vitals-stats-text" id="vitalsStatsText">GPU · CPU · Temp</div>
+            <div class="vitals-stats-text" id="vitalsStatsText" data-i18n="ss.vitals.label">GPU · CPU · Temp</div>
           </div>
           <span class="vitals-chevron" id="vitalsChevron">›</span>
         </div>
         <div class="vitals-body" id="vitalsBody">
           <canvas id="vitalsBarLg" height="20"></canvas>
           <div id="vitalsRows">
-            <div class="vitals-row"><span>GPU Util</span><span id="vGpuUtil">—</span></div>
-            <div class="vitals-row"><span>Temp</span><span id="vGpuTemp">—</span></div>
-            <div class="vitals-row"><span>Power</span><span id="vGpuPower">—</span></div>
-            <div class="vitals-row"><span>Clock</span><span id="vGpuClock">—</span></div>
-            <div class="vitals-row"><span>CPU</span><span id="vCpu">—</span></div>
+            <div class="vitals-row"><span data-i18n="ss.vitals.gpu_util">GPU Util</span><span id="vGpuUtil">—</span></div>
+            <div class="vitals-row"><span data-i18n="ss.vitals.temp">Temp</span><span id="vGpuTemp">—</span></div>
+            <div class="vitals-row"><span data-i18n="ss.vitals.power">Power</span><span id="vGpuPower">—</span></div>
+            <div class="vitals-row"><span data-i18n="ss.vitals.clock">Clock</span><span id="vGpuClock">—</span></div>
+            <div class="vitals-row"><span data-i18n="ss.vitals.cpu">CPU</span><span id="vCpu">—</span></div>
           </div>
           <canvas id="vitalsTps" width="210" height="38" class="vitals-tps-canvas"></canvas>
           <div class="vitals-tps-label" id="vitalsTpsLabel"></div>
@@ -82,9 +90,9 @@
       </div>
 
       <div class="status-card" id="systemCard">
-        <div class="row"><span>vLLM</span><span id="sysVllm">—</span></div>
-        <div class="row"><span>SGLang</span><span id="sysSglang">—</span></div>
-        <div class="row"><span>llama.cpp</span><span id="sysLlama">—</span></div>
+        <div class="row"><span data-i18n="ss.nav.vllm">vLLM</span><span id="sysVllm">—</span></div>
+        <div class="row"><span data-i18n="ss.nav.sglang">SGLang</span><span id="sysSglang">—</span></div>
+        <div class="row"><span data-i18n="ss.nav.llamacpp">llama.cpp</span><span id="sysLlama">—</span></div>
         <div class="row"><span>Claude</span><span id="sysClaude">—</span></div>
         <div class="row"><span>Codex</span><span id="sysCodex">—</span></div>
         <div class="row"><span>Hugging Face</span><span id="sysHuggingface">—</span></div>
@@ -96,99 +104,99 @@
     <!-- OVERVIEW -->
     <section class="panel active" data-panel="overview">
       <header class="panel-header">
-        <h1>Overview</h1>
-        <p>One place to launch and control every engine running on your DGX Spark.</p>
-        <button class="btn" id="openWizard" title="Guided setup: system check → pick a goal → launch a recommended model"><i class="fa-solid fa-wand-magic-sparkles"></i> Setup Wizard</button>
+        <h1 data-i18n="ss.nav.overview">Overview</h1>
+        <p data-i18n="ss.overview.desc">One place to launch and control every engine running on your DGX Spark.</p>
+        <button class="btn" id="openWizard" title="Guided setup: system check → pick a goal → launch a recommended model" data-i18n-title="ss.overview.wizard_hint"><i class="fa-solid fa-wand-magic-sparkles"><span data-i18n="ss.overview.wizard">Setup Wizard</span></button>
       </header>
       <div class="grid grid-3">
         <div class="card">
-          <h3><i class="fa-solid fa-server"></i> Active engine</h3>
-          <div id="activeRunCard" class="muted">No engine running.</div>
+          <h3><i class="fa-solid fa-server"></i><span data-i18n="ss.overview.active_engine">Active engine</span></h3>
+          <div id="activeRunCard" class="muted" data-i18n="ss.overview.no_engine">No engine running.</div>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-bolt"></i> Quick start</h3>
+          <h3><i class="fa-solid fa-bolt"></i><span data-i18n="ss.overview.quick_start">Quick start</span></h3>
           <div class="quick-actions">
-            <button class="btn" data-goto="vllm">Run vLLM</button>
-            <button class="btn" data-goto="sglang">Run SGLang</button>
-            <button class="btn" data-goto="llamacpp">Run llama.cpp</button>
-            <button class="btn" data-goto="webgpu">Open WebGPU</button>
-            <button class="btn primary" data-goto="forge">Forge Recipe</button>
+            <button class="btn" data-goto="vllm"><span data-i18n="ss.overview.run_vllm">Run vLLM</span></button>
+            <button class="btn" data-goto="sglang"><span data-i18n="ss.overview.run_sglang">Run SGLang</span></button>
+            <button class="btn" data-goto="llamacpp"><span data-i18n="ss.overview.run_llamacpp">Run llama.cpp</span></button>
+            <button class="btn" data-goto="webgpu"><span data-i18n="ss.overview.open_webgpu">Open WebGPU</span></button>
+            <button class="btn primary" data-goto="forge"><span data-i18n="ss.overview.forge_recipe">Forge Recipe</span></button>
           </div>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-heart-pulse"></i> System</h3>
-          <div id="systemDetail" class="muted">Loading…</div>
+          <h3><i class="fa-solid fa-heart-pulse"></i><span data-i18n="ss.overview.system">System</span></h3>
+          <div id="systemDetail" class="muted" data-i18n="ss.overview.loading">Loading…</div>
         </div>
       </div>
       <div class="card">
-        <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent runs</h3>
+        <h3><i class="fa-solid fa-clock-rotate-left"></i><span data-i18n="ss.overview.recent_runs">Recent runs</span></h3>
         <div id="overviewRuns"></div>
       </div>
     </section>
 
     <!-- ENGINE TABS use the same template -->
     <section class="panel" data-panel="vllm" data-engine="vllm">
-      <header class="panel-header"><h1>vLLM</h1><p>Throughput-first OpenAI-compatible server.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.vllm">vLLM</h1><p data-i18n="ss.engine.vllm.desc">Throughput-first OpenAI-compatible server.</p></header>
       <div class="engine-ui"></div>
       <div class="card" id="engineImagesCard" style="margin-top:14px">
         <h3><i class="fa-solid fa-layer-group"></i> Engine images <span class="muted" style="font-size:12px">(spark-vllm-docker runner)</span></h3>
         <p class="muted">Docker recipes run whatever is tagged <code>vllm-node</code>. New models usually need a <b>newer vLLM nightly</b> — update here, then relaunch the recipe. Running models keep their old image until relaunched.</p>
         <div id="imagesList" class="muted">Loading…</div>
         <div class="toolbar" style="margin-top:10px;flex-wrap:wrap">
-          <button class="btn primary" data-imgbuild="nightly" title="build-and-copy.sh with no flags: pulls the tested nightly eugr/spark-vllm:latest and retags vllm-node (~minutes)">⬇ Update to tested nightly</button>
-          <button class="btn" data-imgbuild="wheels" title="build-and-copy.sh --use-wheels: build from precompiled vLLM + FlashInfer wheels">🛞 Build from wheels</button>
+          <button class="btn primary" data-imgbuild="nightly" title="build-and-copy.sh with no flags: pulls the tested nightly eugr/spark-vllm:latest and retags vllm-node (~minutes)" data-i18n-title="ss.engine.images.update_nightly_hint"><span data-i18n="ss.engine.images.update_nightly">⬇ Update to tested nightly</span></button>
+          <button class="btn" data-imgbuild="wheels" title="build-and-copy.sh --use-wheels: build from precompiled vLLM + FlashInfer wheels" data-i18n-title="ss.engine.images.build_wheels_hint"><span data-i18n="ss.engine.images.build_wheels">🛞 Build from wheels</span></button>
           <label style="display:flex;gap:6px;align-items:center;flex:1;min-width:260px">Advanced
             <input id="imgFlags" type="text" class="mono" placeholder="--vllm-ref v0.24.0 --rebuild-flashinfer …" style="flex:1" />
           </label>
-          <button class="btn" data-imgbuild="advanced" title="Allowed: --use-wheels --rebuild-vllm --vllm-ref --rebuild-flashinfer --flashinfer-ref --apply-flashinfer-pr --apply-vllm-pr --apply-preset-vllm-prs --pre-tf --exp-mxfp4 --tag --build-jobs --cleanup">Build</button>
+          <button class="btn" data-imgbuild="advanced" title="Allowed: --use-wheels --rebuild-vllm --vllm-ref --rebuild-flashinfer --flashinfer-ref --apply-flashinfer-pr --apply-vllm-pr --apply-preset-vllm-prs --pre-tf --exp-mxfp4 --tag --build-jobs --cleanup" data-i18n-title="ss.engine.images.build_hint"><span data-i18n="ss.engine.images.build">Build</span></button>
         </div>
         <pre class="login-log" id="imgBuildLog" hidden></pre>
       </div>
     </section>
     <section class="panel" data-panel="sglang" data-engine="sglang">
-      <header class="panel-header"><h1>SGLang</h1><p>Structured generation runtime with RadixAttention.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.sglang">SGLang</h1><p>Structured generation runtime with RadixAttention.</p></header>
       <div class="engine-ui"></div>
     </section>
     <section class="panel" data-panel="llamacpp" data-engine="llamacpp">
-      <header class="panel-header"><h1>llama.cpp</h1><p>GGUF inference with full GPU offload.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.llamacpp">llama.cpp</h1><p data-i18n="ss.engine.llamacpp.desc">GGUF inference with full GPU offload.</p></header>
       <div class="engine-ui"></div>
     </section>
 
     <!-- WEBGPU -->
     <section class="panel" data-panel="webgpu">
       <header class="panel-header">
-        <h1>Engine Chat</h1>
-        <p>Chat against the running vLLM, SGLang, or llama.cpp engine. Supports image/file uploads when the model is multimodal.</p>
+        <h1 data-i18n="ss.nav.webgpu">Engine Chat</h1>
+        <p data-i18n="ss.webgpu.desc">Chat against the running vLLM, SGLang, or llama.cpp engine. Supports image/file uploads when the model is multimodal.</p>
       </header>
       <div class="card">
         <div class="form-row">
-          <label>Temperature
+          <label data-i18n="ss.webgpu.temperature">Temperature
             <input id="wgTemp" type="range" min="0" max="2" step="0.05" value="0.7" />
           </label>
           <div class="muted mono" id="wgTempValue">0.70</div>
-          <label>Max tokens
+          <label data-i18n="ss.webgpu.max_tokens">Max tokens
             <input id="wgMaxTokens" type="range" min="32" max="131072" step="256" value="4096" />
           </label>
           <div class="muted mono" id="wgMaxTokensValue">4096</div>
         </div>
         <div class="muted" id="wgSettingsStatus">Model identity and generation metrics will appear with each reply.</div>
         <div class="search-status-bar">
-          <span id="wgSearxStatus" class="search-status-text">Checking search…</span>
+          <span id="wgSearxStatus" class="search-status-text" data-i18n="ss.webgpu.search_checking">Checking search…</span>
         </div>
-        <div class="muted" id="wgServerStatus">No engine running.</div>
+        <div class="muted" id="wgServerStatus" data-i18n="ss.webgpu.no_engine">No engine running.</div>
 
         <div class="webgpu-chat" id="wgChat">
           <canvas id="wgAmbientCanvas" aria-hidden="true"></canvas>
           <div id="wgMessages" class="chat-messages"></div>
           <div id="wgAttachments" class="attachments"></div>
           <div class="chat-input">
-            <button id="wgAttachBtn" class="btn" title="Attach files / images / videos"><i class="fa-solid fa-paperclip"></i></button>
+            <button id="wgAttachBtn" class="btn" title="Attach files / images / videos" data-i18n-title="ss.webgpu.attach_hint"><i class="fa-solid fa-paperclip"></i></button>
             <input type="file" id="wgAttachInput" multiple accept="image/*,video/*,text/*,.pdf,.json,.yaml,.yml,.md,.txt,.py,.js,.ts,.csv,.tsv,.xlsx" hidden />
-            <button id="wgSearchToggle" class="search-pill" title="Toggle web search (SearXNG / DuckDuckGo)"><i class="fa-solid fa-globe"></i></button>
-            <textarea id="wgInput" placeholder="Ask… (Enter to send, Shift+Enter for newline)"></textarea>
-            <button id="wgSend" class="btn primary">Send</button>
-            <button id="wgStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
-            <button id="wgClear" class="btn" title="Clear chat history"><i class="fa-solid fa-trash"></i></button>
+            <button id="wgSearchToggle" class="search-pill" title="Toggle web search (SearXNG / DuckDuckGo)" data-i18n-title="ss.webgpu.search_toggle_hint"><i class="fa-solid fa-globe"></i></button>
+            <textarea id="wgInput" placeholder="Ask… (Enter to send, Shift+Enter for newline)" data-i18n-placeholder="ss.webgpu.input_placeholder"></textarea>
+            <button id="wgSend" class="btn primary"><span data-i18n="ss.webgpu.send">Send</span></button>
+            <button id="wgStop" class="btn danger" disabled><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
+            <button id="wgClear" class="btn" title="Clear chat history" data-i18n-title="ss.webgpu.clear_hint"><i class="fa-solid fa-trash"></i></button>
           </div>
         </div>
       </div>
@@ -197,43 +205,43 @@
     <!-- RECIPES -->
     <section class="panel" data-panel="recipes">
       <header class="panel-header">
-        <h1>Recipes</h1>
-        <p>Save, version, and relaunch recipes across engines. Create new ones in Recipe Forge; import or paste shared ones here.</p>
+        <h1 data-i18n="ss.recipes.title">Recipes</h1>
+        <p data-i18n="ss.recipes.desc">Save, version, and relaunch recipes across engines. Create new ones in Recipe Forge; import or paste shared ones here.</p>
       </header>
       <div class="card run-anything-card">
-        <h3><i class="fa-solid fa-wand-magic-sparkles"></i> Run anything</h3>
+        <h3><i class="fa-solid fa-wand-magic-sparkles"></i><span data-i18n="ss.recipes.run_anything">Run anything</span></h3>
         <div class="muted" style="margin-bottom:10px">Paste a <a href="https://spark-arena.com/leaderboard" target="_blank">spark-arena.com</a> benchmark link (or the whole share blurb), a recipe YAML/JSON, a HuggingFace model id, or a <code>@community/ref</code> — Spark Studio figures out the rest and runs it.</div>
         <div class="form-row" style="align-items:stretch">
-          <textarea id="runAnything" rows="2" placeholder="https://spark-arena.com/benchmark/…  ·  nvidia/Nemotron-3-Nano-…  ·  @experimental/…  ·  recipe YAML" style="flex:1;resize:vertical"></textarea>
-          <button id="runAnythingGo" class="btn primary" style="align-self:center">▶ Run</button>
+          <textarea id="runAnything" rows="2" placeholder="https://spark-arena.com/benchmark/…  ·  nvidia/Nemotron-3-Nano-…  ·  @experimental/…  ·  recipe YAML" data-i18n-placeholder="ss.recipes.run_anything_placeholder" style="flex:1;resize:vertical"></textarea>
+          <button id="runAnythingGo" class="btn primary" style="align-self:center"><span data-i18n="ss.recipes.run">▶ Run</span></button>
         </div>
         <div id="runAnythingStatus" class="muted" style="min-height:18px"></div>
       </div>
       <div class="card">
         <div class="toolbar">
-          <button class="btn" id="recPaste"><i class="fa-solid fa-paste"></i> Paste</button>
-          <button class="btn" id="recImport"><i class="fa-solid fa-file-import"></i> Import</button>
+          <button class="btn" id="recPaste"><i class="fa-solid fa-paste"><span data-i18n="ss.recipes.paste">Paste</span></button>
+          <button class="btn" id="recImport"><i class="fa-solid fa-file-import"><span data-i18n="ss.recipes.import">Import</span></button>
           <input type="file" id="recImportFile" accept=".json,.yaml,.yml,.txt" hidden />
-          <input id="recSearch" type="text" placeholder="Search…" />
+          <input id="recSearch" type="text" placeholder="Search…" data-i18n-placeholder="ss.recipes.search_placeholder" />
         </div>
         <div id="recipesList" class="recipes-grid"></div>
       </div>
       <div class="card" style="margin-top:16px">
         <div class="toolbar">
-          <h3 style="margin:0"><i class="fa-solid fa-circle-nodes"></i> Community recipes <span class="badge sparkrun-badge" title="Launched and orchestrated by sparkrun — Spark Studio is the friendly UI on top">⚡ powered by sparkrun</span></h3>
+          <h3 style="margin:0"><i class="fa-solid fa-circle-nodes"></i> Community recipes <span class="badge sparkrun-badge" title="Launched and orchestrated by sparkrun — Spark Studio is the friendly UI on top" data-i18n-title="ss.recipes.community_hint">⚡ powered by sparkrun</span></h3>
           <span id="sparkrunState" class="muted" style="font-size:12px"></span>
-          <select id="sparkrunChannel" style="margin-left:auto" title="Update channel — no flag stays on your current channel; beta/alpha install preview builds from git">
-            <option value="">Current channel</option>
-            <option value="stable">Stable (PyPI)</option>
-            <option value="beta">Beta (develop)</option>
-            <option value="alpha">Alpha (bleeding edge)</option>
-            <option value="yolo">YOLO (alias for alpha)</option>
+          <select id="sparkrunChannel" style="margin-left:auto" title="Update channel — no flag stays on your current channel; beta/alpha install preview builds from git" data-i18n-title="ss.recipes.channel_hint">
+            <option value=""><span data-i18n="ss.recipes.channel_current">Current channel</span></option>
+            <option value="stable"><span data-i18n="ss.recipes.channel_stable">Stable (PyPI)</span></option>
+            <option value="beta"><span data-i18n="ss.recipes.channel_beta">Beta (develop)</span></option>
+            <option value="alpha"><span data-i18n="ss.recipes.channel_alpha">Alpha (bleeding edge)</span></option>
+            <option value="yolo"><span data-i18n="ss.recipes.channel_yolo">YOLO (alias for alpha)</span></option>
           </select>
-          <button class="btn" id="sparkrunUpdate" title="Runs `sparkrun update` and refreshes recipe registries"><i class="fa-solid fa-arrows-rotate"></i> Update sparkrun</button>
+          <button class="btn" id="sparkrunUpdate" title="Runs `sparkrun update` and refreshes recipe registries" data-i18n-title="ss.recipes.update_sparkrun_hint"><i class="fa-solid fa-arrows-rotate"><span data-i18n="ss.recipes.update_sparkrun">Update sparkrun</span></button>
           <label style="display:flex;align-items:center;gap:6px">Nodes (TP)
-            <input id="sparkrunTp" type="number" value="1" min="1" style="width:60px" title="Multi-node tensor parallelism — number of Sparks in the mesh (no upper limit)" />
+            <input id="sparkrunTp" type="number" value="1" min="1" style="width:60px" title="Multi-node tensor parallelism — number of Sparks in the mesh (no upper limit)" data-i18n-title="ss.recipes.nodes_tp_hint" />
           </label>
-          <input id="sparkrunSearch" type="text" placeholder="Search…" />
+          <input id="sparkrunSearch" type="text" placeholder="Search…" data-i18n-placeholder="ss.recipes.search_placeholder" />
         </div>
         <div id="sparkrunList" class="recipes-grid"></div>
       </div>
@@ -242,19 +250,19 @@
     <!-- FORGE -->
     <section class="panel" data-panel="forge">
       <header class="panel-header">
-        <h1>Recipe Forge</h1>
-        <p>Paste a HuggingFace model id. We'll check DGX Spark compatibility and generate tuned recipes — preferring Spark-validated recipes from the synced registry.</p>
+        <h1 data-i18n="ss.nav.forge">Recipe Forge</h1>
+        <p data-i18n="ss.forge.desc">Paste a HuggingFace model id. We'll check DGX Spark compatibility and generate tuned recipes — preferring Spark-validated recipes from the synced registry.</p>
       </header>
       <div class="card">
         <div class="form-row">
-          <input id="forgeRepo" type="text" placeholder="e.g. meta-llama/Llama-3.1-8B-Instruct" style="flex:1" />
-          <button id="forgeCheck" class="btn primary"><i class="fa-solid fa-magnifying-glass"></i> Check</button>
-          <button id="forgeGenerate" class="btn"><i class="fa-solid fa-hammer"></i> Generate recipes</button>
+          <input id="forgeRepo" type="text" placeholder="e.g. meta-llama/Llama-3.1-8B-Instruct" data-i18n-placeholder="ss.forge.repo_placeholder" style="flex:1" />
+          <button id="forgeCheck" class="btn primary"><i class="fa-solid fa-magnifying-glass"><span data-i18n="ss.forge.check">Check</span></button>
+          <button id="forgeGenerate" class="btn"><i class="fa-solid fa-hammer"><span data-i18n="ss.forge.generate">Generate recipes</span></button>
         </div>
         <div id="registryStatus" class="registry-status empty">
           <span class="status-dot"></span>
-          <span>Registry: loading…</span>
-          <button id="registrySync" class="btn" style="margin-left:auto"><i class="fa-solid fa-arrows-rotate"></i> Refresh registry</button>
+          <span data-i18n="ss.forge.registry_loading">Registry: loading…</span>
+          <button id="registrySync" class="btn" style="margin-left:auto"><i class="fa-solid fa-arrows-rotate"><span data-i18n="ss.forge.refresh_registry">Refresh registry</span></button>
         </div>
         <div id="forgeSuggest" class="forge-suggest"></div>
         <div id="forgeReport"></div>
@@ -264,9 +272,9 @@
 
     <!-- MODELS -->
     <section class="panel" data-panel="models">
-      <header class="panel-header"><h1>Local models</h1><p>Everything in your HuggingFace caches — <code>HF_HUB_CACHE</code>/<code>HF_HOME</code>, the default cache, and any cache your recipes point engines at. Delete models here to free disk space.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.models.title">Local models</h1><p data-i18n-html="ss.models.desc">Everything in your HuggingFace caches — <code>HF_HUB_CACHE</code>/<code>HF_HOME</code>, the default cache, and any cache your recipes point engines at. Delete models here to free disk space.</p></header>
       <div class="card">
-        <button id="modelsRefresh" class="btn"><i class="fa-solid fa-arrows-rotate"></i> Rescan</button>
+        <button id="modelsRefresh" class="btn"><i class="fa-solid fa-arrows-rotate"><span data-i18n="ss.models.rescan">Rescan</span></button>
         <div id="modelsList"></div>
       </div>
     </section>
@@ -274,8 +282,8 @@
     <!-- CHAT & CANVAS -->
     <section class="panel" data-panel="chat">
       <header class="panel-header">
-        <h1>Chat &amp; Canvas</h1>
-        <p>Talks to the currently running engine. Left: Monaco plus a playable preview canvas for HTML/JS games. Right: chat.</p>
+        <h1 data-i18n="ss.nav.chat">Chat &amp; Canvas</h1>
+        <p data-i18n="ss.chat.desc">Talks to the currently running engine. Left: Monaco plus a playable preview canvas for HTML/JS games. Right: chat.</p>
       </header>
       <div class="chat-canvas">
         <div class="canvas-pane">
@@ -293,10 +301,10 @@
               <option value="shell">Shell</option>
             </select>
             <button id="canvasCopy" class="btn"><i class="fa-solid fa-copy"></i></button>
-            <button id="canvasRun" class="btn primary"><i class="fa-solid fa-play"></i> Run</button>
-            <button id="canvasStop" class="btn danger"><i class="fa-solid fa-stop"></i> Stop</button>
-            <button id="canvasPageMode" class="btn" title="Auto-detect page vs game mode (click to force page mode)"><i class="fa-solid fa-file-lines"></i></button>
-            <button id="canvasPopout" class="btn"><i class="fa-solid fa-up-right-from-square"></i> Pop Out</button>
+            <button id="canvasRun" class="btn primary"><i class="fa-solid fa-play"><span data-i18n="ss.chat.run">Run</span></button>
+            <button id="canvasStop" class="btn danger"><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
+            <button id="canvasPageMode" class="btn" title="Auto-detect page vs game mode (click to force page mode)" data-i18n-title="ss.chat.page_mode_hint"><i class="fa-solid fa-file-lines"></i></button>
+            <button id="canvasPopout" class="btn"><i class="fa-solid fa-up-right-from-square"><span data-i18n="ss.chat.popout">Pop Out</span></button>
             <button id="canvasClear" class="btn"><i class="fa-solid fa-trash"></i></button>
             <label class="canvas-split-control">Canvas Size
               <input id="canvasSplit" type="range" min="25" max="80" value="62" />
@@ -308,7 +316,7 @@
               <span>Preview canvas</span>
               <span id="canvasStatus" class="muted">Run HTML/JS code to play it here.</span>
             </div>
-            <iframe id="canvasPreview" title="Canvas Preview" sandbox="allow-scripts allow-pointer-lock allow-same-origin allow-modals allow-downloads"></iframe>
+            <iframe id="canvasPreview" title="Canvas Preview" data-i18n-title="ss.chat.canvas_aria" sandbox="allow-scripts allow-pointer-lock allow-same-origin allow-modals allow-downloads"></iframe>
           </div>
         </div>
         <div class="chat-pane">
@@ -329,12 +337,12 @@
           <div id="chatMessages" class="chat-messages"></div>
           <div id="chatAttachments" class="attachments"></div>
           <div class="chat-input">
-            <button id="chatAttachBtn" class="btn" title="Attach files / images / videos"><i class="fa-solid fa-paperclip"></i></button>
+            <button id="chatAttachBtn" class="btn" title="Attach files / images / videos" data-i18n-title="ss.webgpu.attach_hint"><i class="fa-solid fa-paperclip"></i></button>
             <input type="file" id="chatAttachInput" multiple accept="image/*,video/*,text/*,.pdf,.json,.yaml,.yml,.md,.txt,.py,.js,.ts,.csv" hidden />
-            <textarea id="chatInput" placeholder="Ask the active engine… (Enter to send, Shift+Enter for newline)"></textarea>
-            <button id="chatSend" class="btn primary">Send</button>
-            <button id="chatStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
-            <button id="chatClear" class="btn" title="Clear chat history"><i class="fa-solid fa-trash"></i></button>
+            <textarea id="chatInput" placeholder="Ask the active engine… (Enter to send, Shift+Enter for newline)" data-i18n-placeholder="ss.chat.input_placeholder"></textarea>
+            <button id="chatSend" class="btn primary"><span data-i18n="ss.webgpu.send">Send</span></button>
+            <button id="chatStop" class="btn danger" disabled><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
+            <button id="chatClear" class="btn" title="Clear chat history" data-i18n-title="ss.webgpu.clear_hint"><i class="fa-solid fa-trash"></i></button>
           </div>
         </div>
       </div>
@@ -342,10 +350,10 @@
 
     <!-- BENCHMARKS -->
     <section class="panel" data-panel="bench">
-      <header class="panel-header"><h1>Benchmarks</h1><p>Quick sanity bench, plus full <a href="https://github.com/eugr/llama-benchy" target="_blank">llama-benchy</a> sweep with prefill/decode at multiple context depths.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.bench">Benchmarks</h1><p data-i18n-html="ss.bench.desc">Quick sanity bench, plus full <a href="https://github.com/eugr/llama-benchy" target="_blank">llama-benchy</a> sweep with prefill/decode at multiple context depths.</p></header>
 
       <div class="card">
-        <h3><i class="fa-solid fa-flag-checkered"></i> llama-benchy</h3>
+        <h3><i class="fa-solid fa-flag-checkered"></i><span data-i18n="ss.bench.benchy.title">llama-benchy</span></h3>
         <div id="benchyMissing" class="muted" hidden>llama-benchy is not installed. Run <code>uv pip install --python env/bin/python llama-benchy</code> from the Spark Studio folder, then reopen this tab.</div>
         <div class="form-row">
           <label>Engine run <select id="benchyTarget"></select></label>
@@ -359,11 +367,11 @@
           <label>Runs / test <input id="benchyRuns" type="number" value="3" min="1" max="20" style="width:80px" /></label>
         </div>
         <div class="form-row">
-          <label style="flex:1">Model (HF id, used for tokenizer download) <input id="benchyModel" type="text" placeholder="e.g. Qwen/Qwen3.5-35B (leave blank to use served name)" /></label>
-          <label style="flex:1">Served model name (what the API expects) <input id="benchyServed" type="text" placeholder="e.g. qwen3.5-35b (leave blank = auto-detect)" /></label>
+          <label style="flex:1">Model (HF id, used for tokenizer download) <input id="benchyModel" type="text" placeholder="e.g. Qwen/Qwen3.5-35B (leave blank to use served name)" data-i18n-placeholder="ss.bench.model_placeholder" /></label>
+          <label style="flex:1">Served model name (what the API expects) <input id="benchyServed" type="text" placeholder="e.g. qwen3.5-35b (leave blank = auto-detect)" data-i18n-placeholder="ss.bench.served_placeholder" /></label>
         </div>
         <div class="form-row">
-          <label style="flex:1">Tokenizer override (optional) <input id="benchyTokenizer" type="text" placeholder="e.g. Qwen/Qwen3.5-35B — defaults to Model field" /></label>
+          <label style="flex:1">Tokenizer override (optional) <input id="benchyTokenizer" type="text" placeholder="e.g. Qwen/Qwen3.5-35B — defaults to Model field" data-i18n-placeholder="ss.bench.tokenizer_placeholder" /></label>
         </div>
         <div class="form-row">
           <label style="flex:1">Prompt sizes (pp, comma) <input id="benchyPp" type="text" value="2048" placeholder="2048,4096" /></label>
@@ -379,8 +387,8 @@
           <label class="checkbox"><input type="checkbox" id="benchySkipCoh" /> Skip coherence test</label>
         </div>
         <div class="toolbar">
-          <button id="benchyGo" class="btn primary"><i class="fa-solid fa-play"></i> Run llama-benchy</button>
-          <button id="benchyStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+          <button id="benchyGo" class="btn primary"><i class="fa-solid fa-play"><span data-i18n="ss.bench.run_btn">Run llama-benchy</span></button>
+          <button id="benchyStop" class="btn danger" disabled><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
         </div>
         <pre id="benchyLog" class="login-log" style="max-height:240px"></pre>
         <div id="benchyCharts" hidden>
@@ -393,11 +401,11 @@
       </div>
 
       <div class="card">
-        <h3><i class="fa-solid fa-toolbox"></i> Tool Eval Bench</h3>
+        <h3><i class="fa-solid fa-toolbox"></i><span data-i18n="ss.bench.tool_eval">Tool Eval Bench</span></h3>
         <div class="muted" style="margin-bottom:8px">How useful is the model in practice? 12 deterministic cases score tool selection, argument extraction, restraint (answering without spurious tool calls), using tool results, and strict JSON output.</div>
         <div class="form-row">
           <label>Engine run <select id="toolevalTarget"></select></label>
-          <button id="toolevalGo" class="btn primary"><i class="fa-solid fa-play"></i> Run Tool Eval</button>
+          <button id="toolevalGo" class="btn primary"><i class="fa-solid fa-play"><span data-i18n="ss.bench.run_tool_eval">Run Tool Eval</span></button>
           <span id="toolevalProgress" class="muted"></span>
         </div>
         <div id="toolevalScore"></div>
@@ -406,23 +414,23 @@
       </div>
 
       <div class="card">
-        <h3><i class="fa-solid fa-bolt-lightning"></i> Quick bench</h3>
+        <h3><i class="fa-solid fa-bolt-lightning"></i><span data-i18n="ss.bench.quick_bench">Quick bench</span></h3>
         <div class="form-row">
           <select id="benchRun"></select>
-          <input id="benchPrompt" type="text" placeholder="Custom prompt (optional)" style="flex:1" />
+          <input id="benchPrompt" type="text" placeholder="Custom prompt (optional)" data-i18n-placeholder="ss.bench.quick_bench_prompt" style="flex:1" />
           <input id="benchTokens" type="number" value="256" min="16" max="4096" style="width:100px" />
           <input id="benchRuns" type="number" value="3" min="1" max="20" style="width:80px" />
-          <button id="benchGo" class="btn primary"><i class="fa-solid fa-play"></i> Run</button>
+          <button id="benchGo" class="btn primary"><i class="fa-solid fa-play"><span data-i18n="ss.chat.run">Run</span></button>
         </div>
         <canvas id="benchChart" height="100"></canvas>
         <div id="benchTable"></div>
       </div>
 
       <div class="card">
-        <h3><i class="fa-solid fa-clock-rotate-left"></i> llama-benchy history</h3>
+        <h3><i class="fa-solid fa-clock-rotate-left"></i><span data-i18n="ss.bench.history.title">llama-benchy history</span></h3>
         <div class="toolbar" style="margin-bottom:8px">
           <span class="muted" style="font-size:12px">Tick two runs to compare · ⧉ copies a shareable markdown report</span>
-          <button id="benchyCompare" class="btn" disabled style="margin-left:auto"><i class="fa-solid fa-scale-balanced"></i> Compare selected</button>
+          <button id="benchyCompare" class="btn" disabled style="margin-left:auto"><i class="fa-solid fa-scale-balanced"><span data-i18n="ss.bench.history.compare">Compare selected</span></button>
         </div>
         <div id="benchyHistory"></div>
       </div>
@@ -430,17 +438,17 @@
 
     <!-- LOGS -->
     <section class="panel" data-panel="logs">
-      <header class="panel-header"><h1>Runs &amp; Logs</h1><p>Live log streams for every engine run.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.logs">Runs &amp; Logs</h1><p>Live log streams for every engine run.</p></header>
       <div class="card runs-layout">
         <div class="runs-list" id="runsList"></div>
         <div class="runs-view">
           <div class="toolbar">
             <span id="logsTitle" class="muted">Select a run</span>
-            <button id="logsStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
-            <button id="logsKill" class="btn danger" disabled><i class="fa-solid fa-skull"></i> Force</button>
-            <button id="logsFix" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Claude</button>
-            <button id="logsFixCodex" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"></i> Ask Codex</button>
-            <button id="logsBugReport" class="btn" title="Copy a markdown bug report: system health + this run's recipe and last 300 log lines (secrets redacted)"><i class="fa-solid fa-bug"></i> Bug Report</button>
+            <button id="logsStop" class="btn danger" disabled><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
+            <button id="logsKill" class="btn danger" disabled><i class="fa-solid fa-skull"><span data-i18n="ss.logs.force">Force</span></button>
+            <button id="logsFix" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"><span data-i18n="ss.logs.ask_claude">Ask Claude</span></button>
+            <button id="logsFixCodex" class="btn" disabled><i class="fa-solid fa-wand-magic-sparkles"><span data-i18n="ss.logs.ask_codex">Ask Codex</span></button>
+            <button id="logsBugReport" class="btn" title="Copy a markdown bug report: system health + this run's recipe and last 300 log lines (secrets redacted)" data-i18n-title="ss.logs.bug_report_hint"><i class="fa-solid fa-bug"><span data-i18n="ss.logs.bug_report">Bug Report</span></button>
           </div>
           <div id="logsRecovery" class="logs-recovery" hidden>
             <div class="logs-recovery-copy">
@@ -448,15 +456,15 @@
               <div id="logsRecoveryText" class="muted">Select a run to inspect launch status and recovery actions.</div>
             </div>
             <div class="logs-recovery-actions">
-              <button id="logsSaveRecipe" class="btn"><i class="fa-solid fa-floppy-disk"></i> Save Run as Recipe</button>
-              <button id="logsEditRecipe" class="btn"><i class="fa-solid fa-pen-to-square"></i> Edit Recipe</button>
-              <button id="logsFixInline" class="btn"><i class="fa-solid fa-wand-magic-sparkles"></i> Fix with Claude</button>
-              <button id="logsFixInlineCodex" class="btn"><i class="fa-solid fa-code"></i> Fix with Codex</button>
-              <button id="logsAutofix" class="btn primary" title="Claude diagnoses, patches, relaunches, and retries with fresh logs — up to 3 attempts, hands-free"><i class="fa-solid fa-rotate"></i> Auto-Fix &amp; Retry</button>
-              <button id="logsAutofixCodex" class="btn" title="Same hands-free fix loop, driven by Codex"><i class="fa-solid fa-rotate"></i> Auto-Fix (Codex)</button>
-              <button id="logsRetryLowerTp" class="btn" hidden title="A smaller node count often succeeds where a full-mesh launch failed"><i class="fa-solid fa-down-long"></i> Retry with fewer nodes</button>
-              <button id="logsOptimize" class="btn primary" disabled title="Benchmark the running engine, have Claude tune the recipe for tok/s, relaunch, re-benchmark — the fastest measured config wins"><i class="fa-solid fa-gauge-high"></i> Optimize Speed</button>
-              <button id="logsOptimizeCodex" class="btn" disabled title="Same speed-optimization loop, driven by Codex"><i class="fa-solid fa-gauge-high"></i> Optimize (Codex)</button>
+              <button id="logsSaveRecipe" class="btn"><i class="fa-solid fa-floppy-disk"><span data-i18n="ss.logs.save_as_recipe">Save Run as Recipe</span></button>
+              <button id="logsEditRecipe" class="btn"><i class="fa-solid fa-pen-to-square"><span data-i18n="ss.logs.edit_recipe">Edit Recipe</span></button>
+              <button id="logsFixInline" class="btn"><i class="fa-solid fa-wand-magic-sparkles"><span data-i18n="ss.logs.fix_claude">Fix with Claude</span></button>
+              <button id="logsFixInlineCodex" class="btn"><i class="fa-solid fa-code"><span data-i18n="ss.logs.fix_codex">Fix with Codex</span></button>
+              <button id="logsAutofix" class="btn primary" title="Claude diagnoses, patches, relaunches, and retries with fresh logs — up to 3 attempts, hands-free" data-i18n-title="ss.logs.autofix_hint"><i class="fa-solid fa-rotate"><span data-i18n="ss.logs.autofix">Auto-Fix &amp; Retry</span></button>
+              <button id="logsAutofixCodex" class="btn" title="Same hands-free fix loop, driven by Codex" data-i18n-title="ss.logs.autofix_codex_hint"><i class="fa-solid fa-rotate"><span data-i18n="ss.logs.autofix_codex">Auto-Fix (Codex)</span></button>
+              <button id="logsRetryLowerTp" class="btn" hidden title="A smaller node count often succeeds where a full-mesh launch failed" data-i18n-title="ss.logs.retry_fewer_nodes_hint"><i class="fa-solid fa-down-long"><span data-i18n="ss.logs.retry_fewer_nodes">Retry with fewer nodes</span></button>
+              <button id="logsOptimize" class="btn primary" disabled title="Benchmark the running engine, have Claude tune the recipe for tok/s, relaunch, re-benchmark — the fastest measured config wins" data-i18n-title="ss.logs.optimize_hint"><i class="fa-solid fa-gauge-high"><span data-i18n="ss.logs.optimize">Optimize Speed</span></button>
+              <button id="logsOptimizeCodex" class="btn" disabled title="Same speed-optimization loop, driven by Codex" data-i18n-title="ss.logs.optimize_codex_hint"><i class="fa-solid fa-gauge-high"><span data-i18n="ss.logs.optimize_codex">Optimize (Codex)</span></button>
             </div>
           </div>
           <pre id="logsOutput"></pre>
@@ -466,24 +474,24 @@
 
     <!-- AGENTS -->
     <section class="panel" data-panel="agents">
-      <header class="panel-header"><h1>Agents &amp; Identities</h1><p>Connect official CLIs for recipe agents and private or gated Hugging Face models. Spark Studio never stores their tokens.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.agents.title">Agents &amp; Identities</h1><p>Connect official CLIs for recipe agents and private or gated Hugging Face models. Spark Studio never stores their tokens.</p></header>
       <div class="grid grid-3">
         <div class="card">
           <h3><i class="fa-solid fa-brain"></i> Claude Code</h3>
           <div id="claudeStatus" class="muted">Checking…</div>
-          <button class="btn primary" id="claudeLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
+          <button class="btn primary" id="claudeLogin"><i class="fa-solid fa-right-to-bracket"><span data-i18n="ss.agents.login">Log in</span></button>
           <pre id="claudeLog" class="login-log"></pre>
         </div>
         <div class="card">
           <h3><i class="fa-solid fa-code"></i> OpenAI Codex</h3>
           <div id="codexStatus" class="muted">Checking…</div>
-          <button class="btn primary" id="codexLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
+          <button class="btn primary" id="codexLogin"><i class="fa-solid fa-right-to-bracket"><span data-i18n="ss.agents.login">Log in</span></button>
           <pre id="codexLog" class="login-log"></pre>
         </div>
         <div class="card">
           <h3><i class="fa-solid fa-face-smile"></i> Hugging Face</h3>
           <div id="huggingfaceStatus" class="muted">Checking…</div>
-          <button class="btn primary" id="huggingfaceLogin"><i class="fa-solid fa-right-to-bracket"></i> Log in</button>
+          <button class="btn primary" id="huggingfaceLogin"><i class="fa-solid fa-right-to-bracket"><span data-i18n="ss.agents.login">Log in</span></button>
           <pre id="huggingfaceLog" class="login-log"></pre>
         </div>
       </div>
@@ -493,13 +501,13 @@
     <section class="panel hermes-panel" data-panel="hermes">
       <header class="panel-header hermes-panel-header">
         <div>
-          <h1>Hermes</h1>
+          <h1 data-i18n="ss.nav.hermes">Hermes</h1>
           <p>Chat, build durable recipe knowledge, or design the real TUI with Skin Studio.</p>
         </div>
-        <div class="hermes-view-switch" role="tablist" aria-label="Hermes tools">
-          <button class="hermes-view-button active" data-hermes-target="chat" role="tab" aria-selected="true"><i class="fa-solid fa-terminal"></i> Chat</button>
-          <button class="hermes-view-button" data-hermes-target="learning" role="tab" aria-selected="false"><i class="fa-solid fa-brain"></i> Learning</button>
-          <button class="hermes-view-button" data-hermes-target="skins" role="tab" aria-selected="false"><i class="fa-solid fa-palette"></i> Skin Studio</button>
+        <div class="hermes-view-switch" role="tablist" aria-label="Hermes tools" data-i18n-aria="ss.hermes.tools_aria">
+          <button class="hermes-view-button active" data-hermes-target="chat" role="tab" aria-selected="true"><i class="fa-solid fa-terminal"><span data-i18n="ss.hermes.chat_tab">Chat</span></button>
+          <button class="hermes-view-button" data-hermes-target="learning" role="tab" aria-selected="false"><i class="fa-solid fa-brain"><span data-i18n="ss.hermes.learning_tab">Learning</span></button>
+          <button class="hermes-view-button" data-hermes-target="skins" role="tab" aria-selected="false"><i class="fa-solid fa-palette"><span data-i18n="ss.hermes.skins_tab">Skin Studio</span></button>
         </div>
       </header>
 
@@ -511,18 +519,18 @@
               <span id="hermesTuiStatus">Checking Hermes…</span>
             </div>
             <label class="hermes-workspace-label">
-              Workspace <span class="hermes-workspace-note" title="Changing the workspace requires stopping and restarting the Hermes TUI.">(stop &amp; restart to change)</span>
+              <span data-i18n="ss.hermes.workspace">Workspace</span> <span class="hermes-workspace-note" title="Changing the workspace requires stopping and restarting the Hermes TUI." data-i18n-title="ss.hermes.workspace_note"><span data-i18n="ss.hermes.workspace_restart">(stop &amp; restart to change)</span>
               <input id="hermesWorkspace" class="mono" type="text" spellcheck="false" />
             </label>
-            <button id="hermesInstall" class="btn primary" hidden><i class="fa-solid fa-download"></i> Install Hermes</button>
-            <button id="hermesTuiStart" class="btn primary" title="Connect Hermes to the model currently loaded in Spark Studio"><i class="fa-solid fa-plug"></i> Connect to current model</button>
-            <button id="hermesTuiRestart" class="btn" disabled><i class="fa-solid fa-rotate"></i> Restart</button>
-            <button id="hermesTuiStop" class="btn danger" disabled><i class="fa-solid fa-stop"></i> Stop</button>
+            <button id="hermesInstall" class="btn primary" hidden><i class="fa-solid fa-download"><span data-i18n="ss.hermes.install">Install Hermes</span></button>
+            <button id="hermesTuiStart" class="btn primary" title="Connect Hermes to the model currently loaded in Spark Studio" data-i18n-title="ss.hermes.connect_current_hint"><i class="fa-solid fa-plug"><span data-i18n="ss.hermes.connect_current">Connect to current model</span></button>
+            <button id="hermesTuiRestart" class="btn" disabled><i class="fa-solid fa-rotate"><span data-i18n="ss.hermes.restart">Restart</span></button>
+            <button id="hermesTuiStop" class="btn danger" disabled><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
           </div>
           <div class="hermes-terminal-hints">
-            <span id="hermesTuiModel" class="mono">No loaded model</span>
+            <span id="hermesTuiModel" class="mono" data-i18n="ss.hermes.no_loaded_model">No loaded model</span>
             <span>Use <code>/model</code> inside Hermes to switch between local, Claude, and Codex.</span>
-            <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> Local browser only</span>
+            <span id="hermesTuiSecurity"><i class="fa-solid fa-shield-halved"></i> <span data-i18n="ss.hermes.local_only">Local browser only</span></span>
           </div>
           <section id="hermesPendingApprovals" class="hermes-pending-approvals" hidden aria-live="polite">
             <div class="hermes-pending-heading">
@@ -535,7 +543,7 @@
             </div>
             <div id="hermesPendingList" class="hermes-pending-list"></div>
           </section>
-          <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal"></div>
+          <div id="hermesTerminal" class="hermes-terminal" aria-label="Hermes interactive terminal" data-i18n-aria="ss.hermes.terminal_aria"></div>
         </div>
       </div>
 
@@ -547,7 +555,7 @@
                 <span id="hermesLearningDot" class="status-dot"></span>
                 <span id="hermesLearningStatus">Checking learning settings…</span>
               </div>
-              <p>Give every model durable Spark Studio context without changing its weights.</p>
+              <p data-i18n="ss.hermes.learning_pitch">Give every model durable Spark Studio context without changing its weights.</p>
             </div>
             <span class="mono" id="hermesLearningProfile">data/agent-lab/hermes</span>
           </div>
@@ -587,8 +595,8 @@
 
           <div class="hermes-learning-actions">
             <span class="muted">Changes apply the next time Hermes Chat starts or restarts.</span>
-            <button id="hermesLearningSave" class="btn primary"><i class="fa-solid fa-floppy-disk"></i> Save learning settings</button>
-            <button id="hermesLearningOpenChat" class="btn"><i class="fa-solid fa-terminal"></i> Open Chat</button>
+            <button id="hermesLearningSave" class="btn primary"><i class="fa-solid fa-floppy-disk"><span data-i18n="ss.hermes.learning.save">Save learning settings</span></button>
+            <button id="hermesLearningOpenChat" class="btn"><i class="fa-solid fa-terminal"><span data-i18n="ss.hermes.learning.open_chat">Open Chat</span></button>
           </div>
         </div>
       </div>
@@ -606,16 +614,16 @@
               <span><strong>Active skin:</strong> <span class="mono" id="hermesModActiveSkin">default</span></span>
             </div>
             <div class="hermes-skin-actions">
-              <button id="hermesModInstall" class="btn primary" hidden><i class="fa-solid fa-download"></i> Install add-on</button>
-              <button id="hermesModStart" class="btn" hidden><i class="fa-solid fa-play"></i> Start</button>
-              <button id="hermesModStop" class="btn danger" hidden><i class="fa-solid fa-stop"></i> Stop</button>
-              <button id="hermesModOriginal" class="btn"><i class="fa-solid fa-rotate-left"></i> Use original Hermes</button>
+              <button id="hermesModInstall" class="btn primary" hidden><i class="fa-solid fa-download"><span data-i18n="ss.hermes.skins.install_addon">Install add-on</span></button>
+              <button id="hermesModStart" class="btn" hidden><i class="fa-solid fa-play"><span data-i18n="ss.hermes.skins.start">Start</span></button>
+              <button id="hermesModStop" class="btn danger" hidden><i class="fa-solid fa-stop"><span data-i18n="ss.overview.stop">Stop</span></button>
+              <button id="hermesModOriginal" class="btn"><i class="fa-solid fa-rotate-left"><span data-i18n="ss.hermes.skins.use_original">Use original Hermes</span></button>
               <label class="hermes-skin-delete-picker">Saved skin
-                <select id="hermesModSkinSelect" aria-label="Saved custom skin"></select>
+                <select id="hermesModSkinSelect" aria-label="Saved custom skin" data-i18n-aria="ss.hermes.skins.skin_aria"></select>
               </label>
-              <button id="hermesModDelete" class="btn danger" disabled><i class="fa-solid fa-trash"></i> Delete skin</button>
-              <button id="hermesModApply" class="btn primary" disabled><i class="fa-solid fa-rotate"></i> Restart Chat to apply</button>
-              <button id="hermesModOpenChat" class="btn"><i class="fa-solid fa-terminal"></i> Open Chat</button>
+              <button id="hermesModDelete" class="btn danger" disabled><i class="fa-solid fa-trash"><span data-i18n="ss.hermes.skins.delete_skin">Delete skin</span></button>
+              <button id="hermesModApply" class="btn primary" disabled><i class="fa-solid fa-rotate"><span data-i18n="ss.hermes.skins.restart_apply">Restart Chat to apply</span></button>
+              <button id="hermesModOpenChat" class="btn"><i class="fa-solid fa-terminal"><span data-i18n="ss.hermes.learning.open_chat">Open Chat</span></button>
             </div>
           </div>
           <div id="hermesModNotice" class="hermes-skin-notice muted">Skin Studio edits only Spark Studio's isolated Hermes profile. Your personal <code>~/.hermes</code> remains unchanged.</div>
@@ -625,14 +633,14 @@
               <strong>Skin Studio is ready to install</strong>
               <span>The pinned add-on is installed locally under Spark Studio data and starts only when you open this view.</span>
             </div>
-            <iframe id="hermesModFrame" title="Hermes Skin Studio" sandbox="allow-scripts allow-forms allow-modals allow-downloads" allow="clipboard-write" hidden></iframe>
+            <iframe id="hermesModFrame" title="Hermes Skin Studio" data-i18n-title="ss.hermes.skins.iframe_aria" sandbox="allow-scripts allow-forms allow-modals allow-downloads" allow="clipboard-write" hidden></iframe>
           </div>
         </div>
       </div>
     </section>
 
     <section class="panel" data-panel="cluster">
-      <header class="panel-header"><h1>Cluster</h1><p>Your Spark mesh, powered by sparkrun. Spark Studio reads what sparkrun reports — it never SSHes into your nodes.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.cluster">Cluster</h1><p data-i18n="ss.cluster.desc">Your Spark mesh, powered by sparkrun. Spark Studio reads what sparkrun reports — it never SSHes into your nodes.</p></header>
       <div class="grid grid-2">
         <div class="card">
           <h3><i class="fa-solid fa-circle-nodes"></i> <span id="clusterTitle">Cluster</span></h3>
@@ -640,19 +648,19 @@
           <div id="clusterTp" style="margin-top:10px"></div>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-clipboard-check"></i> Launch readiness</h3>
+          <h3><i class="fa-solid fa-clipboard-check"></i><span data-i18n="ss.cluster.readiness">Launch readiness</span></h3>
           <p class="muted">Checks this box + the mesh before a multi-node launch.</p>
           <div class="toolbar">
             <label>Nodes (TP)
               <select id="clusterTpSel"><option value="1">1</option></select>
             </label>
-            <button class="btn primary" id="clusterCheck">Run Checks</button>
+            <button class="btn primary" id="clusterCheck"><span data-i18n="ss.cluster.run_checks">Run Checks</span></button>
           </div>
           <div id="clusterReadiness"></div>
         </div>
       </div>
       <div class="card" style="margin-top:14px">
-        <h3><i class="fa-solid fa-list"></i> Running cluster jobs</h3>
+        <h3><i class="fa-solid fa-list"></i><span data-i18n="ss.cluster.running_jobs">Running cluster jobs</span></h3>
         <div id="clusterJobs" class="muted">None.</div>
         <pre id="clusterNodeLog" class="mono" style="display:none;max-height:300px;overflow:auto;font-size:11px"></pre>
       </div>
@@ -665,35 +673,35 @@
     </section>
 
     <section class="panel" data-panel="recovery">
-      <header class="panel-header"><h1>Recovery</h1><p>Something stuck or broken? Every action below says exactly what it does — none of them delete downloaded models.</p></header>
+      <header class="panel-header"><h1 data-i18n="ss.nav.recovery">Recovery</h1><p>Something stuck or broken? Every action below says exactly what it does — none of them delete downloaded models.</p></header>
       <div class="grid grid-2">
         <div class="card">
-          <h3><i class="fa-solid fa-broom"></i> Clear finished runs</h3>
+          <h3><i class="fa-solid fa-broom"></i><span data-i18n="ss.recovery.clear_runs.title">Clear finished runs</span></h3>
           <p class="muted">Removes exited runs from the run list. Run history stays in the database; nothing running is touched.</p>
-          <button class="btn primary" data-recover="clear-runs">Clear Finished Runs</button>
+          <button class="btn primary" data-recover="clear-runs"><span data-i18n="ss.recovery.clear_runs.btn">Clear Finished Runs</span></button>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-box-open"></i> Remove orphan containers</h3>
+          <h3><i class="fa-solid fa-box-open"></i><span data-i18n="ss.recovery.clean_containers.title">Remove orphan containers</span></h3>
           <p class="muted">Removes leftover <code>spark-vllm-*</code> / <code>sparkrun_*</code> containers that no live run controls. Containers owned by running workloads, active sparkrun jobs, and anything you manage yourself (like <code>vllm_node</code>) are never touched.</p>
-          <button class="btn primary" data-recover="clean-containers">Clean Containers</button>
+          <button class="btn primary" data-recover="clean-containers"><span data-i18n="ss.recovery.clean_containers.btn">Clean Containers</span></button>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-rotate"></i> Reset registry cache</h3>
+          <h3><i class="fa-solid fa-rotate"></i><span data-i18n="ss.recovery.reset_registry.title">Reset registry cache</span></h3>
           <p class="muted">Deletes the local mirror of the community recipe repos and forged YAML cache, then re-downloads fresh copies in the background. Fixes stale or corrupted recipe listings.</p>
-          <button class="btn" data-recover="reset-registry">Reset Registry Cache</button>
+          <button class="btn" data-recover="reset-registry"><span data-i18n="ss.recovery.reset_registry.btn">Reset Registry Cache</span></button>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-triangle-exclamation"></i> Reset app database</h3>
+          <h3><i class="fa-solid fa-triangle-exclamation"></i><span data-i18n="ss.recovery.reset_db.title">Reset app database</span></h3>
           <p class="muted"><b>Deletes saved recipes, run history, benchmark and eval history.</b> Does not stop a running model and does not delete downloaded model files. There is no undo.</p>
-          <button class="btn danger" id="recoverResetDb">Reset Database…</button>
+          <button class="btn danger" id="recoverResetDb"><span data-i18n="ss.recovery.reset_db.btn">Reset Database…</span></button>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-bug"></i> Copy bug report</h3>
+          <h3><i class="fa-solid fa-bug"></i><span data-i18n="ss.recovery.bug_report.title">Copy bug report</span></h3>
           <p class="muted">Copies a markdown report — system health, active run, recipe (secrets redacted), and the last 300 log lines — ready to paste into a GitHub issue or hand to an agent.</p>
-          <button class="btn primary" id="recoverBugReport"><i class="fa-solid fa-copy"></i> Copy Bug Report</button>
+          <button class="btn primary" id="recoverBugReport"><i class="fa-solid fa-copy"><span data-i18n="ss.recovery.bug_report.btn">Copy Bug Report</span></button>
         </div>
         <div class="card">
-          <h3><i class="fa-solid fa-terminal"></i> Full reset (terminal)</h3>
+          <h3><i class="fa-solid fa-terminal"></i><span data-i18n="ss.recovery.full_reset.title">Full reset (terminal)</span></h3>
           <p class="muted">If the app itself won't start, run these from the install folder:</p>
           <pre class="mono" style="font-size:11px">rm -f data/spark_studio.db     # settings/history only
 rm -rf env && ./start.sh       # rebuild Python env
@@ -708,7 +716,7 @@ rm -rf env && ./start.sh       # rebuild Python env
   <div class="modal" id="recipeModal" hidden>
     <div class="modal-body">
       <div class="modal-header">
-        <h3 id="recipeModalTitle">Edit recipe</h3>
+        <h3 id="recipeModalTitle"><span data-i18n="ss.modal.recipe.title">Edit recipe</span></h3>
         <button class="btn" data-close>&times;</button>
       </div>
       <div class="modal-content">
@@ -716,16 +724,16 @@ rm -rf env && ./start.sh       # rebuild Python env
           <label>Name <input id="rmName" type="text" /></label>
           <label>Engine
             <select id="rmEngine">
-              <option value="vllm">vLLM</option>
-              <option value="sglang">SGLang</option>
-              <option value="llamacpp">llama.cpp</option>
+              <option value="vllm"><span data-i18n="ss.nav.vllm">vLLM</span></option>
+              <option value="sglang"><span data-i18n="ss.nav.sglang">SGLang</span></option>
+              <option value="llamacpp"><span data-i18n="ss.nav.llamacpp">llama.cpp</span></option>
               <option value="sparkrun">sparkrun</option>
             </select>
           </label>
         </div>
         <div class="form-row">
-          <label style="flex:1">Model <input id="rmModel" type="text" placeholder="HF repo or local path" /></label>
-          <label>Tags <input id="rmTags" type="text" placeholder="comma,separated" /></label>
+          <label style="flex:1">Model <input id="rmModel" type="text" placeholder="HF repo or local path" data-i18n-placeholder="ss.modal.recipe.model_placeholder" /></label>
+          <label>Tags <input id="rmTags" type="text" placeholder="comma,separated" data-i18n-placeholder="ss.modal.recipe.tags_placeholder" /></label>
         </div>
         <div id="rmCaps" class="rm-caps" hidden>
           <span class="rm-caps-title">Capabilities</span>
@@ -739,9 +747,9 @@ rm -rf env && ./start.sh       # rebuild Python env
         <label>Env (JSON) <textarea id="rmEnv" rows="3" class="mono"></textarea></label>
       </div>
       <div class="modal-footer">
-        <button class="btn" data-close>Cancel</button>
-        <button class="btn primary" id="rmSave">Save</button>
-        <button class="btn success" id="rmSaveRun">Save &amp; Run</button>
+        <button class="btn" data-close><span data-i18n="ss.modal.recipe.cancel">Cancel</span></button>
+        <button class="btn primary" id="rmSave"><span data-i18n="ss.modal.recipe.save">Save</span></button>
+        <button class="btn success" id="rmSaveRun"><span data-i18n="ss.modal.recipe.save_run">Save &amp; Run</span></button>
       </div>
     </div>
   </div>
@@ -750,7 +758,7 @@ rm -rf env && ./start.sh       # rebuild Python env
   <div class="modal" id="launchModal" hidden>
     <div class="modal-body" style="max-width:480px">
       <div class="modal-header">
-        <h3 id="launchModalTitle">Launch Settings</h3>
+        <h3 id="launchModalTitle"><span data-i18n="ss.modal.launch.title">Launch Settings</span></h3>
         <button class="btn" data-close>&times;</button>
       </div>
       <div class="modal-content">
@@ -774,8 +782,8 @@ rm -rf env && ./start.sh       # rebuild Python env
         <p class="muted" style="margin:8px 0 0;font-size:0.82em">Model native max: <span id="lsNativeMax"></span> · DGX Spark 128 GB unified memory</p>
       </div>
       <div class="modal-footer">
-        <button class="btn" data-close>Cancel</button>
-        <button class="btn primary" id="lsRun">&#9654; Launch</button>
+        <button class="btn" data-close><span data-i18n="ss.modal.recipe.cancel">Cancel</span></button>
+        <button class="btn primary" id="lsRun"><span data-i18n="ss.modal.launch.launch">&#9654; Launch</span></button>
       </div>
     </div>
   </div>
@@ -784,25 +792,25 @@ rm -rf env && ./start.sh       # rebuild Python env
   <div class="modal" id="fixModal" hidden>
     <div class="modal-body">
       <div class="modal-header">
-        <h3 id="fixTitle">Agent suggestion</h3>
+        <h3 id="fixTitle"><span data-i18n="ss.logs.fix_idle">Agent suggestion</span></h3>
         <button class="btn" data-close>&times;</button>
       </div>
       <div class="modal-content">
         <label>Instruction for agent
-          <textarea id="fixGoal" rows="4" placeholder="Describe what you want: fix the launch, optimize throughput, reduce memory use, prefer docker, etc."></textarea>
+          <textarea id="fixGoal" rows="4" placeholder="Describe what you want: fix the launch, optimize throughput, reduce memory use, prefer docker, etc." data-i18n-placeholder="ss.logs.instruction_placeholder"></textarea>
         </label>
         <div class="toolbar">
-          <button class="btn" id="fixAnalyze"><i class="fa-solid fa-screwdriver-wrench"></i> Fix Recipe</button>
-          <button class="btn" id="fixOptimize"><i class="fa-solid fa-gauge-high"></i> Optimize</button>
-          <button class="btn primary" id="fixSend"><i class="fa-solid fa-paper-plane"></i> Send to Agent</button>
+          <button class="btn" id="fixAnalyze"><i class="fa-solid fa-screwdriver-wrench"><span data-i18n="ss.logs.fix_recipe_btn">Fix Recipe</span></button>
+          <button class="btn" id="fixOptimize"><i class="fa-solid fa-gauge-high"><span data-i18n="ss.logs.optimize_btn">Optimize</span></button>
+          <button class="btn primary" id="fixSend"><i class="fa-solid fa-paper-plane"><span data-i18n="ss.logs.send_to_agent">Send to Agent</span></button>
         </div>
         <div id="fixDiagnosis"></div>
         <label>Patched recipe <textarea id="fixPatched" rows="14" class="mono"></textarea></label>
         <div id="fixNotes"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn" data-close>Discard</button>
-        <button class="btn primary" id="fixApply">Save &amp; Run patch</button>
+        <button class="btn" data-close><span data-i18n="ss.logs.discard">Discard</span></button>
+        <button class="btn primary" id="fixApply"><span data-i18n="ss.logs.save_run_patch">Save &amp; Run patch</span></button>
       </div>
     </div>
   </div>
@@ -811,27 +819,27 @@ rm -rf env && ./start.sh       # rebuild Python env
   <div class="modal" id="wizardModal" hidden>
     <div class="modal-body" style="max-width:680px">
       <div class="modal-header">
-        <h3 id="wizTitle">Welcome to Spark Studio</h3>
-        <button class="btn" id="wizSkip" title="You can reopen the wizard any time from the Overview tab">Skip setup</button>
+        <h3 id="wizTitle"><span data-i18n="ss.wizard.title">Welcome to Spark Studio</span></h3>
+        <button class="btn" id="wizSkip" title="You can reopen the wizard any time from the Overview tab" data-i18n-title="ss.wizard.skip_hint"><span data-i18n="ss.wizard.skip">Skip setup</span></button>
       </div>
       <div class="modal-content">
         <!-- Step 1: system check -->
         <div class="wiz-step" data-step="1">
-          <p class="muted">Checking your Spark…</p>
+          <p class="muted" data-i18n="ss.wizard.checking">Checking your Spark…</p>
           <div id="wizChecks" class="wiz-checks"></div>
           <div class="modal-footer wiz-footer">
-            <button class="btn primary" id="wizNext1" disabled>Continue</button>
+            <button class="btn primary" id="wizNext1" disabled><span data-i18n="ss.wizard.continue">Continue</span></button>
           </div>
         </div>
         <!-- Step 2: goal -->
         <div class="wiz-step" data-step="2" hidden>
           <p class="muted">What do you want to do first? Spark Studio will pick the best model for your hardware.</p>
           <div class="wiz-goals">
-            <button class="btn wiz-goal" data-goal="fastest">💬 Fast chat<br /><span class="muted">snappiest responses</span></button>
-            <button class="btn wiz-goal" data-goal="best_quality">🧠 Best quality<br /><span class="muted">biggest model that fits</span></button>
-            <button class="btn wiz-goal" data-goal="coding">💻 Coding<br /><span class="muted">code generation</span></button>
-            <button class="btn wiz-goal" data-goal="tool_calling">🔧 Agents &amp; tools<br /><span class="muted">native tool calling</span></button>
-            <button class="btn wiz-goal" data-goal="low_memory">🪶 Low memory<br /><span class="muted">leave room for other work</span></button>
+            <button class="btn wiz-goal" data-goal="fastest"><span data-i18n="ss.wizard.goal_fastest">💬 Fast chat</span><br /><span class="muted" data-i18n="ss.wizard.goal_fastest_desc">snappiest responses</span></button>
+            <button class="btn wiz-goal" data-goal="best_quality"><span data-i18n="ss.wizard.goal_quality">🧠 Best quality</span><br /><span class="muted" data-i18n="ss.wizard.goal_quality_desc">biggest model that fits</span></button>
+            <button class="btn wiz-goal" data-goal="coding"><span data-i18n="ss.wizard.goal_coding">💻 Coding</span><br /><span class="muted" data-i18n="ss.wizard.goal_coding_desc">code generation</span></button>
+            <button class="btn wiz-goal" data-goal="tool_calling"><span data-i18n="ss.wizard.goal_tools">🔧 Agents &amp; tools</span><br /><span class="muted" data-i18n="ss.wizard.goal_tools_desc">native tool calling</span></button>
+            <button class="btn wiz-goal" data-goal="low_memory"><span data-i18n="ss.wizard.goal_lowmem">🪶 Low memory</span><br /><span class="muted" data-i18n="ss.wizard.goal_lowmem_desc">leave room for other work</span></button>
           </div>
         </div>
         <!-- Step 3: recommendation -->
@@ -839,25 +847,25 @@ rm -rf env && ./start.sh       # rebuild Python env
           <div id="wizRec"></div>
           <div id="wizAlts" class="wiz-alts"></div>
           <div class="modal-footer wiz-footer">
-            <button class="btn" id="wizBack3">Back</button>
-            <button class="btn success" id="wizLaunch">🚀 Launch</button>
+            <button class="btn" id="wizBack3"><span data-i18n="ss.wizard.back">Back</span></button>
+            <button class="btn success" id="wizLaunch"><span data-i18n="ss.wizard.launch">🚀 Launch</span></button>
           </div>
         </div>
         <!-- Step 4: launching -->
         <div class="wiz-step" data-step="4" hidden>
-          <div id="wizLaunchStatus" class="wiz-launching">Starting…</div>
+          <div id="wizLaunchStatus" class="wiz-launching" data-i18n="ss.wizard.starting">Starting…</div>
           <p class="muted">First launches can take a few minutes if the model needs to download. You can close this window — the run keeps going in Runs &amp; Logs.</p>
           <div class="modal-footer wiz-footer">
-            <button class="btn" id="wizWatchLogs">Watch full logs</button>
+            <button class="btn" id="wizWatchLogs"><span data-i18n="ss.wizard.watch_logs">Watch full logs</span></button>
           </div>
         </div>
         <!-- Step 5: success -->
         <div class="wiz-step" data-step="5" hidden>
           <div id="wizSuccess"></div>
           <div class="modal-footer wiz-footer">
-            <button class="btn primary" id="wizChat">💬 Chat Now</button>
-            <button class="btn" id="wizBench">📊 Benchmark</button>
-            <button class="btn" id="wizDone">Done</button>
+            <button class="btn primary" id="wizChat"><span data-i18n="ss.wizard.chat_now">💬 Chat Now</span></button>
+            <button class="btn" id="wizBench"><span data-i18n="ss.wizard.benchmark">📊 Benchmark</span></button>
+            <button class="btn" id="wizDone"><span data-i18n="ss.wizard.done">Done</span></button>
           </div>
         </div>
       </div>
@@ -868,12 +876,12 @@ rm -rf env && ./start.sh       # rebuild Python env
   <div class="modal" id="qrModal" hidden>
     <div class="modal-body" style="max-width:380px">
       <div class="modal-header">
-        <h3>Open on another device</h3>
+        <h3><span data-i18n="ss.qr.title">Open on another device</span></h3>
         <button class="btn" data-close>&times;</button>
       </div>
       <div class="modal-content" style="text-align:center">
         <div id="qrCode" class="qr-box"></div>
-        <p class="muted">Scan with your phone or tablet — same Wi‑Fi/LAN required.</p>
+        <p class="muted" data-i18n="ss.qr.scan">Scan with your phone or tablet — same Wi‑Fi/LAN required.</p>
         <div id="qrUrls" class="qr-urls mono"></div>
       </div>
     </div>
@@ -896,6 +904,9 @@ rm -rf env && ./start.sh       # rebuild Python env
     };
   </script>
   <script src="/static/vendor/monaco/vs/loader.js"></script>
+  <!-- i18n runtime: classic script, must run before the app.js module (modules
+       are deferred) so window.t / window.ssLang exist when the UI starts. -->
+  <script src="/static/i18n.js"></script>
   <script type="module" src="/static/app.js"></script>
 </body>
 </html>
