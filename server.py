@@ -3821,7 +3821,7 @@ def _serve_index() -> Response:
     """
     idx = WEB_DIR / "index.html"
     html = idx.read_text()
-    for asset in ("app.js", "style.css"):
+    for asset in ("app.js", "style.css", "i18n.js"):
         p = WEB_DIR / asset
         if p.exists():
             ver = int(p.stat().st_mtime)
