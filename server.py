@@ -1027,15 +1027,13 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
         stop_cmd=["bash", "-lc", stop_sh],
         recipe_id=recipe_id,
         detached=True,
-        meta={"ref": ref, "tp": tp},
+        meta={"ref": ref, "launch_target": launch_target, "tp": tp},
         skip_memory_guard=force,
     )
-    if tp == 1:
-        # Single-node sparkrun containers use host networking and community
-        # recipes default to port 8000 — set the URL proactively so chat and
-        # the watchdog don't depend on spotting a URL in the log stream.
-        run.port = run.port or int(spark_opts.get("port") or 8000)
-        run.url = run.url or f"http://127.0.0.1:{run.port}"
+    # sparkrun containers use host networking. Set the saved port for all TP
+    # sizes so the watchdog probes the real OpenAI endpoint.
+    run.port = run.port or int(spark_opts.get("port") or 8000)
+    run.url = run.url or f"http://127.0.0.1:{run.port}"
     return run
 
 
@@ -4162,7 +4160,15 @@ async def _watchdog_tick(tick: int) -> None:
         if run.engine == "sparkrun" and (not run.url or not run.meta.get("jobid")) and tick % 3 == 0:
             jobs = await asyncio.to_thread(sparkrun_service.parse_status)
             for job in jobs:
-                if job["jobid"] == run.meta.get("jobid") or job["ref"] == run.meta.get("ref"):
+                run_ref = (run.meta or {}).get("ref")
+                launch_target = (run.meta or {}).get("launch_target")
+                job_ref = job.get("ref")
+                # App-launched @studio refs can appear in sparkrun status as
+                # their resolved local YAML path. If this starting run has not
+                # learned its jobid yet and there is only one live sparkrun job,
+                # treat it as the owner so containers/logs are retained.
+                single_unclaimed_job = len(jobs) == 1 and not run.meta.get("jobid")
+                if job["jobid"] == run.meta.get("jobid") or job_ref in {run_ref, launch_target} or single_unclaimed_job:
                     run.meta.setdefault("jobid", job["jobid"])
                     for c in job.get("containers") or []:
                         if c not in run.managed_containers:
@@ -4171,7 +4177,7 @@ async def _watchdog_tick(tick: int) -> None:
                     if exe:
                         run.stop_cmd = [exe, "stop", run.meta["jobid"]]
                     run.port = run.port or 8000
-                    run.url = run.url or sparkrun_service.guess_url(job, run.port)
+                    run.url = run.url or sparkrun_service.guess_url(job, run.port) or f"http://127.0.0.1:{run.port}"
                     try:
                         db.runs_update(run.id, meta_json=json.dumps(run.persisted_meta()))
                     except Exception:  # noqa: BLE001
