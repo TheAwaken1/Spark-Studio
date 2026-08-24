@@ -1101,14 +1101,13 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
         stop_cmd=["bash", "-lc", stop_sh],
         recipe_id=recipe_id,
         detached=True,
-        meta={"ref": ref, "tp": tp},
+        meta={"ref": ref, "launch_target": launch_target, "tp": tp},
         skip_memory_guard=force,
     )
+    # Keep the saved port for TP>1, but let the watchdog resolve the head
+    # node's address from sparkrun status rather than assuming localhost.
+    run.port = run.port or int(spark_opts.get("port") or 8000)
     if tp == 1:
-        # Single-node sparkrun containers use host networking and community
-        # recipes default to port 8000 — set the URL proactively so chat and
-        # the watchdog don't depend on spotting a URL in the log stream.
-        run.port = run.port or int(spark_opts.get("port") or 8000)
         run.url = run.url or f"http://127.0.0.1:{run.port}"
     run.lint_findings = lint_findings
     return run
@@ -4373,7 +4372,7 @@ async def _reconcile_on_boot() -> None:
                 if not ref:
                     m = sparkrun_service.REF_RE.search(row.get("cmd") or "")
                     ref = m.group(0) if m else None
-                job = by_ref.get(ref)
+                job = by_ref.get(ref) or by_ref.get(meta.get("launch_target"))
             if job and job["jobid"] not in claimed:
                 claimed.add(job["jobid"])
                 await asyncio.to_thread(_adopt_sparkrun_job, job, row)
@@ -4463,7 +4462,7 @@ async def _watchdog_tick(tick: int) -> None:
                     await asyncio.to_thread(_adopt_sparkrun_job, job, None)
 
     for run in list(runner.runs.values()):
-        if run.status != "running":
+        if run.status != "running" or run.stop_requested or run.meta.get("_snapshot_pending"):
             continue
 
         # sparkrun: resolve jobid/containers/URL from `sparkrun status` until
@@ -4472,7 +4471,18 @@ async def _watchdog_tick(tick: int) -> None:
         if run.engine == "sparkrun" and (not run.url or not run.meta.get("jobid")) and tick % 3 == 0:
             jobs = await asyncio.to_thread(sparkrun_service.parse_status)
             for job in jobs:
-                if job["jobid"] == run.meta.get("jobid") or job["ref"] == run.meta.get("ref"):
+                run_ref = (run.meta or {}).get("ref")
+                launch_target = (run.meta or {}).get("launch_target")
+                job_ref = job.get("ref")
+                # Never claim an unrelated CLI job solely because it is the
+                # only one. Match its job id, saved ref, or resolved target.
+                if any(
+                    other is not run and other.status == "running"
+                    and other.meta.get("jobid") == job["jobid"]
+                    for other in runner.runs.values()
+                ):
+                    continue
+                if job["jobid"] == run.meta.get("jobid") or (job_ref is not None and job_ref in {run_ref, launch_target}):
                     run.meta.setdefault("jobid", job["jobid"])
                     for c in job.get("containers") or []:
                         if c not in run.managed_containers:
@@ -4481,7 +4491,13 @@ async def _watchdog_tick(tick: int) -> None:
                     if exe:
                         run.stop_cmd = [exe, "stop", run.meta["jobid"]]
                     run.port = run.port or 8000
-                    run.url = run.url or sparkrun_service.guess_url(job, run.port)
+                    head_url = sparkrun_service.guess_url(job, run.port)
+                    if int(run.meta.get("tp") or 1) > 1:
+                        # Replace any launcher-derived localhost URL; if the
+                        # head is unknown, don't probe the wrong host.
+                        run.url = head_url
+                    else:
+                        run.url = run.url or head_url or f"http://127.0.0.1:{run.port}"
                     try:
                         db.runs_update(run.id, meta_json=json.dumps(run.persisted_meta()))
                     except Exception:  # noqa: BLE001
@@ -4507,11 +4523,11 @@ async def _watchdog_tick(tick: int) -> None:
                             run.publish(f"[serve log] last {len(lines)} lines from {container}:/tmp/sparkrun_serve.log —")
                             for ln in lines:
                                 run.publish(ln)
-                        runner.finalize(run, exit_code=1, reason="serve process died inside the container — tearing the zombie container down", teardown=True)
+                        await asyncio.to_thread(runner.finalize, run, exit_code=1, reason="serve process died inside the container — tearing the zombie container down", teardown=True)
                         continue
             # Remote-only fallback: no local container signal ever seen.
             if not run.ready and age > _SPARKRUN_GRACE and not run.meta.get("serve_seen"):
-                runner.finalize(run, exit_code=1, reason=f"engine never became ready within {_SPARKRUN_GRACE}s (set SPARK_STUDIO_SPARKRUN_GRACE to extend)", teardown=True)
+                await asyncio.to_thread(runner.finalize, run, exit_code=1, reason=f"engine never became ready within {_SPARKRUN_GRACE}s (set SPARK_STUDIO_SPARKRUN_GRACE to extend)", teardown=True)
                 continue
 
         # Stall detection for LOADING engines (any engine, not just sparkrun):
@@ -4572,7 +4588,7 @@ async def _watchdog_tick(tick: int) -> None:
                     lines = await asyncio.to_thread(sparkrun_service.serve_log_tail, container, 200)
                     for ln in lines:
                         run.publish(ln)
-                runner.finalize(run, exit_code=1, reason="engine stopped answering after being ready", teardown=True)
+                await asyncio.to_thread(runner.finalize, run, exit_code=1, reason="engine stopped answering after being ready", teardown=True)
                 continue
             # External / plain-process runs: don't own the lifecycle — just
             # stop advertising readiness so chat won't target a dead URL.

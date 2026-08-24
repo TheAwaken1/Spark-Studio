@@ -1370,6 +1370,253 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertFalse(server.runner.active())
         self.assertIn("external endpoint stopped answering", "\n".join(run.ring))
 
+    def test_sparkrun_start_tracks_launch_target_and_tp_port(self):
+        run = runners.Run(
+            id="spark", engine="sparkrun", recipe_id=21, cmd=["sparkrun"], env={}
+        )
+        saved_recipe = {"args": {"_sparkrun": {"port": 8888}}}
+        with (
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "canonical_recipe_ref", return_value="@studio/prod"),
+            mock.patch.object(server.sparkrun_service, "resolve_recipe_target", return_value="/srv/recipes/prod.yaml"),
+            mock.patch.object(server, "_ensure_sparkrun_recipe", return_value=21),
+            mock.patch.object(server.db, "recipes_get", return_value=saved_recipe),
+            mock.patch.object(server.runner, "start", return_value=run) as start,
+        ):
+            result = server._start_sparkrun("@studio/prod", 2)
+
+        self.assertIs(result, run)
+        self.assertEqual(run.port, 8888)
+        self.assertIsNone(run.url)  # TP>1 head may not be localhost
+        self.assertEqual(start.call_args.kwargs["meta"]["ref"], "@studio/prod")
+        self.assertEqual(start.call_args.kwargs["meta"]["launch_target"], "/srv/recipes/prod.yaml")
+
+    def test_single_node_sparkrun_still_uses_localhost(self):
+        run = runners.Run(id="solo", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={})
+        with (
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "canonical_recipe_ref", return_value="@studio/solo"),
+            mock.patch.object(server.sparkrun_service, "resolve_recipe_target", return_value="/srv/solo.yaml"),
+            mock.patch.object(server, "_ensure_sparkrun_recipe", return_value=None),
+            mock.patch.object(server.runner, "start", return_value=run),
+        ):
+            server._start_sparkrun("@studio/solo", 1)
+        self.assertEqual(run.url, "http://127.0.0.1:8000")
+
+    def test_watchdog_does_not_claim_unrelated_single_job(self):
+        run = runners.Run(id="starting", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, detached=True,
+                          meta={"ref": "@studio/ours", "launch_target": "/srv/ours.yaml"})
+        run.status = "running"
+        job = {"jobid": "someone-else", "ref": "/srv/other.yaml",
+               "containers": ["other-container"]}
+        with (
+            mock.patch.object(server.runner, "runs", {run.id: run}),
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "parse_status", return_value=[job]),
+            mock.patch.object(server, "_sync_hermes_engine_models", new_callable=mock.AsyncMock),
+        ):
+            asyncio.run(server._watchdog_tick(3))
+        self.assertNotIn("jobid", run.meta)
+        self.assertFalse(run.managed_containers)
+
+    def test_watchdog_matches_resolved_target_and_uses_remote_head(self):
+        run = runners.Run(id="starting", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, detached=True,
+                          meta={"ref": "@studio/ours", "launch_target": "/srv/ours.yaml", "tp": 2})
+        run.status = "running"
+        run.port = 8888
+        job = {"jobid": "our-job", "ref": "/srv/ours.yaml",
+               "containers": ["our-container"]}
+        with (
+            mock.patch.object(server.runner, "runs", {run.id: run}),
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "parse_status", return_value=[job]),
+            mock.patch.object(server.sparkrun_service, "guess_url", return_value="http://192.168.100.11:8888"),
+            mock.patch.object(server, "_sync_hermes_engine_models", new_callable=mock.AsyncMock),
+            mock.patch.object(server.db, "runs_update"),
+        ):
+            asyncio.run(server._watchdog_tick(3))
+        self.assertEqual(run.meta["jobid"], "our-job")
+        self.assertEqual(run.managed_containers, ["our-container"])
+        self.assertEqual(run.url, "http://192.168.100.11:8888")
+
+    def test_remote_sparkrun_ignores_local_bind_url(self):
+        run = runners.Run(id="remote", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, detached=True, meta={"tp": 2})
+        run.publish("Uvicorn running on http://0.0.0.0:8888")
+        self.assertIsNone(run.url)
+        self.assertEqual(run.port, 8888)
+        run.url = "http://192.168.100.11:8888"
+        run.publish("Uvicorn running on http://0.0.0.0:8888")
+        self.assertEqual(run.url, "http://192.168.100.11:8888")
+
+    def test_boot_reconciles_saved_launch_target(self):
+        row = {"id": "old", "engine": "sparkrun",
+               "meta_json": json.dumps({"ref": "@studio/ours", "launch_target": "/srv/ours.yaml"})}
+        job = {"jobid": "our-job", "ref": "/srv/ours.yaml", "containers": []}
+        with (
+            mock.patch.object(server.db, "runs_list_running", return_value=[row]),
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "parse_status", return_value=[job]),
+            mock.patch.object(server.runner, "runs", {}),
+            mock.patch.object(server, "_adopt_sparkrun_job") as adopt,
+            mock.patch.object(server.db, "runs_update") as update,
+        ):
+            asyncio.run(server._reconcile_on_boot())
+        adopt.assert_called_once_with(job, row)
+        update.assert_not_called()
+
+    def test_watchdog_teardown_does_not_block_event_loop(self):
+        run = runners.Run(id="stale", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, detached=True)
+        run.status = "running"
+        run.started_at = time.time() - server._SPARKRUN_GRACE - 5
+        manager = runners.Runner()
+        manager.runs[run.id] = run
+        with (
+            mock.patch.object(server, "runner", manager),
+            mock.patch.object(server, "engine_available", return_value=False),
+            mock.patch.object(server, "_sync_hermes_engine_models", new_callable=mock.AsyncMock),
+            mock.patch.object(manager, "_snapshot_before_teardown", side_effect=lambda _r: time.sleep(0.1)),
+            mock.patch.object(manager, "_reclaim_after_teardown"),
+            mock.patch.object(runners.db, "runs_update"),
+        ):
+            async def probe():
+                tick = asyncio.create_task(server._watchdog_tick(1))
+                await asyncio.sleep(0.02)
+                responsive = not tick.done()  # timer fired before teardown ended
+                await tick
+                return responsive
+            self.assertTrue(asyncio.run(probe()))
+        self.assertEqual(run.status, "exited")
+
+    def test_non_sparkrun_teardown_does_not_snapshot(self):
+        manager = runners.Runner()
+        run = runners.Run(id="other", engine="vllm", recipe_id=None,
+                          cmd=["vllm"], env={}, status="running")
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), \
+             mock.patch.object(runners.db, "runs_update"), \
+             mock.patch.object(manager, "_reclaim_after_teardown"), \
+             mock.patch.object(runners.sparkrun_service, "sparkrun_bin") as executable:
+            manager.finalize(run, exit_code=1, teardown=True)
+            self.assertFalse((Path(tmp) / "other-artifacts").exists())
+        executable.assert_not_called()
+
+    def test_stop_snapshots_in_background_before_teardown(self):
+        manager = runners.Runner()
+        run = runners.Run(id="spark", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, status="running", adopted_pid=1234,
+                          managed_containers=["worker"])
+        manager.runs[run.id] = run
+        started = __import__("threading").Event()
+        finish = __import__("threading").Event()
+        teardown = __import__("threading").Event()
+        def snapshot(_run):
+            started.set()
+            finish.wait(2)
+        def stop_containers(*_args, **_kwargs):
+            self.assertTrue(_kwargs["force"])
+            teardown.set()
+        with (
+            mock.patch.object(manager, "_snapshot_before_teardown", side_effect=snapshot),
+            mock.patch.object(manager, "_stop_docker_containers", side_effect=stop_containers),
+            mock.patch.object(manager, "finalize"),
+            mock.patch.object(manager, "_reclaim_after_teardown"),
+            mock.patch.object(runners.os, "getpgid", return_value=1234),
+            mock.patch.object(runners.os, "killpg"),
+        ):
+            self.assertTrue(manager.stop(run.id))
+            self.assertTrue(started.wait(1))
+            self.assertFalse(teardown.is_set())
+            self.assertTrue(manager.stop(run.id, force=True))
+            finish.set()
+            self.assertTrue(teardown.wait(1))
+
+    def test_launcher_exit_during_snapshot_does_not_delete_containers(self):
+        manager = runners.Runner()
+        run = runners.Run(id="spark-pump", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, status="running", detached=True,
+                          managed_containers=["worker"])
+        run.proc = mock.Mock(returncode=0)
+        run.proc.wait.return_value = 0
+        manager.runs[run.id] = run
+        started = __import__("threading").Event()
+        finish = __import__("threading").Event()
+        finished = __import__("threading").Event()
+        def snapshot(_run):
+            started.set()
+            finish.wait(2)
+        with (
+            mock.patch.object(manager, "_snapshot_before_teardown", side_effect=snapshot),
+            mock.patch.object(manager, "_cleanup_run") as cleanup,
+            mock.patch.object(manager, "_stop_docker_containers", side_effect=lambda *_a, **_k: finished.set()),
+            mock.patch.object(manager, "_reclaim_after_teardown"),
+            mock.patch.object(runners.os, "getpgid", return_value=1234),
+            mock.patch.object(runners.os, "killpg"),
+        ):
+            manager.stop(run.id)
+            self.assertTrue(started.wait(1))
+            manager._finish_process(run)
+            cleanup.assert_not_called()
+            finish.set()
+            self.assertTrue(finished.wait(1))
+
+    def test_sparkrun_teardown_snapshots_container_artifacts(self):
+        manager = runners.Runner()
+        run = runners.Run(
+            id="spark",
+            engine="sparkrun",
+            recipe_id=None,
+            cmd=["sparkrun"],
+            env={},
+            managed_containers=["sparkrun_job_node_0"],
+            meta={"jobid": "job"},
+            status="running",
+        )
+
+        original_popen = runners.subprocess.Popen
+        def fake_popen(cmd, **kwargs):
+            return original_popen(
+                [runners.sys.executable, "-c",
+                 "import sys; print('ran: ' + ' '.join(sys.argv[1:]))", *cmd], **kwargs
+            )
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), \
+             mock.patch.object(runners.sparkrun_service, "sparkrun_bin", return_value="/usr/bin/sparkrun"), \
+             mock.patch.object(runners.shutil, "which", return_value="/usr/bin/docker"), \
+             mock.patch.object(runners.subprocess, "Popen", side_effect=fake_popen):
+            manager._snapshot_before_teardown(run)
+            out = Path(tmp) / "spark-artifacts"
+            self.assertTrue((out / "sparkrun-status.txt").exists())
+            self.assertTrue((out / "sparkrun-logs.txt").exists())
+            self.assertTrue((out / "sparkrun_job_node_0-serve-log.txt").exists())
+            self.assertIn("preserved teardown logs", "\n".join(run.ring))
+
+    def test_snapshot_truncates_large_logs_and_limits_total_time(self):
+        manager = runners.Runner()
+        run = runners.Run(id="large", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={}, meta={"jobid": "job"})
+        original_popen = runners.subprocess.Popen
+        def huge_log(_cmd, **kwargs):
+            return original_popen(
+                [runners.sys.executable, "-c", "print('X' * (512 * 1024))"], **kwargs
+            )
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), \
+             mock.patch.object(runners.sparkrun_service, "sparkrun_bin", return_value="sparkrun"), \
+             mock.patch.object(runners.shutil, "which", return_value=None), \
+             mock.patch.object(runners.subprocess, "Popen", side_effect=huge_log):
+            started = time.monotonic()
+            manager._snapshot_before_teardown(run)
+            artifact = Path(tmp) / "large-artifacts" / "sparkrun-logs.txt"
+            self.assertIn("output truncated", artifact.read_text())
+            self.assertLess(artifact.stat().st_size, 270 * 1024)
+            self.assertLess(time.monotonic() - started, 25)
+
 
 if __name__ == "__main__":
     unittest.main()

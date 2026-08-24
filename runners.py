@@ -11,6 +11,7 @@ import asyncio
 import json
 import os
 import re
+import selectors
 import shlex
 import shutil
 import signal
@@ -308,7 +309,7 @@ class Run:
         meta = {
             k: v
             for k, v in self.meta.items()
-            if k not in {"pump_cmd", "_reclaimed"}
+            if k not in {"pump_cmd", "_reclaimed", "_snapshot_pending", "_stop_force"}
         }
         if self.label:
             meta["_label"] = self.label
@@ -356,9 +357,14 @@ class Run:
         m = URL_RE.search(line)
         if m:
             url = m.group(0).replace("0.0.0.0", "127.0.0.1")
+            # For distributed sparkrun, a node's local bind address is not
+            # the remote head's address. Wait for the status-derived URL.
+            local_bind = url.startswith(("http://127.0.0.1:", "https://127.0.0.1:"))
+            remote_head = self.engine == "sparkrun" and int(self.meta.get("tp") or 1) > 1
             if "Uvicorn running on" in line or not self.url:
-                self.url = url
-                # Update port too so /api/runs reports the real one.
+                if not (remote_head and local_bind):
+                    self.url = url
+                # Update port even when the local bind URL is ignored.
                 try:
                     self.port = int(url.rsplit(":", 1)[1])
                 except (ValueError, IndexError):
@@ -717,10 +723,29 @@ class Runner:
         except Exception:  # noqa: BLE001
             pass
 
-    def stop(self, run_id: str, force: bool = False) -> bool:
+    def stop(self, run_id: str, force: bool = False, *, _snapshot_done: bool = False) -> bool:
         run = self.runs.get(run_id)
         if not run:
             return False
+        if run.status == "exited":
+            return True
+        if run.engine == "sparkrun" and not _snapshot_done:
+            # Do not block the Stop endpoint. Save diagnostics before teardown
+            # in the same worker so containers cannot vanish mid-snapshot.
+            if run.meta.get("_snapshot_pending"):
+                run.meta["_stop_force"] = run.meta.get("_stop_force", False) or force
+                return True
+            run.meta["_snapshot_pending"] = True
+            run.meta["_stop_force"] = force
+
+            def snapshot_then_stop() -> None:
+                try:
+                    self._snapshot_before_teardown(run)
+                finally:
+                    self.stop(run_id, force=run.meta.get("_stop_force", False), _snapshot_done=True)
+
+            threading.Thread(target=snapshot_then_stop, daemon=True).start()
+            return True
         # Console breadcrumb: every stop request is deliberate — make the
         # source traceable when a workload disappears unexpectedly.
         print(f"[stop] requested for {run_id} ({run.label or run.engine}, force={force})", flush=True)
@@ -1162,6 +1187,92 @@ class Runner:
         if pump_cmd:
             self._spawn_tail(run, pump_cmd)
 
+    def _snapshot_before_teardown(self, run: Run) -> None:
+        """Persist bounded sparkrun diagnostics before teardown removes them."""
+        if run.engine != "sparkrun":
+            return
+        deadline = time.monotonic() + 25
+        max_bytes = 256 * 1024
+        remaining_bytes = 4 * 1024 * 1024  # bound the entire artifact set
+        try:
+            out = RUN_LOG_DIR / f"{run.id}-artifacts"
+            out.mkdir(parents=True, exist_ok=True)
+        except Exception as e:  # noqa: BLE001
+            run.publish(f"[diagnostics] could not create artifact dir: {e}")
+            return
+
+        def _write_cmd(name: str, cmd: list[str], timeout: int = 30) -> None:
+            nonlocal remaining_bytes
+            remaining = deadline - time.monotonic()
+            if remaining <= 0 or remaining_bytes <= 0:
+                return
+            cap = min(max_bytes, remaining_bytes)
+            try:
+                # Drain continuously and retain only the last 256 KiB in RAM.
+                # Unlike a temp file this bounds disk use even while a command
+                # is producing an unending log stream.
+                tail = bytearray()
+                truncated = False
+                timed_out = False
+                with subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                      start_new_session=True) as proc:
+                    assert proc.stdout is not None
+                    with selectors.DefaultSelector() as sel:
+                        sel.register(proc.stdout, selectors.EVENT_READ)
+                        command_deadline = min(deadline, time.monotonic() + timeout)
+                        while sel.get_map():
+                            wait = command_deadline - time.monotonic()
+                            if wait <= 0:
+                                timed_out = True
+                                break
+                            for key, _ in sel.select(wait):
+                                chunk = os.read(key.fd, 65536)
+                                if not chunk:
+                                    sel.unregister(key.fileobj)
+                                    continue
+                                tail.extend(chunk)
+                                if len(tail) > cap:
+                                    del tail[:-cap]
+                                    truncated = True
+                    if timed_out:
+                        try:
+                            os.killpg(proc.pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                    proc.wait(timeout=1)
+                with (out / name).open("wb") as f:
+                    f.write(("$ " + " ".join(shlex.quote(str(x)) for x in cmd) + "\n").encode())
+                    if timed_out:
+                        f.write(b"[diagnostics] command timed out\n")
+                    if truncated:
+                        f.write(b"[diagnostics] output truncated\n")
+                    f.write(tail)
+                remaining_bytes -= (out / name).stat().st_size
+            except Exception as e:  # noqa: BLE001
+                try:
+                    (out / name).write_text(f"snapshot failed: {e}\n", encoding="utf-8")
+                except Exception:
+                    pass
+
+        exe = sparkrun_service.sparkrun_bin()
+        jobid = (run.meta or {}).get("jobid")
+        if exe:
+            _write_cmd("sparkrun-status.txt", [exe, "status"], timeout=25)
+            if jobid:
+                _write_cmd("sparkrun-logs.txt", [exe, "logs", str(jobid)], timeout=60)
+                _write_cmd("sparkrun-export-running-recipe.json", [exe, "export", "running-recipe", str(jobid), "--json"], timeout=30)
+
+        docker = shutil.which("docker")
+        if docker:
+            for container in list(run.managed_containers or []):
+                safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", container)
+                _write_cmd(f"{safe}-serve-log.txt", [docker, "exec", container, "tail", "-c", str(max_bytes), "/tmp/sparkrun_serve.log"], timeout=20)
+                _write_cmd(f"{safe}-docker-logs.txt", [docker, "logs", "--tail", "200", container], timeout=20)
+                _write_cmd(f"{safe}-docker-inspect.json", [docker, "inspect", container], timeout=20)
+                _write_cmd(f"{safe}-docker-top.txt", [docker, "top", container], timeout=12)
+
+        run.publish(f"[diagnostics] preserved teardown logs in {out}")
+
     def finalize(self, run: Run, exit_code: int | None, reason: str = "", teardown: bool = False) -> None:
         """Terminal-state a run from outside its pump (watchdog / stop of an
         adopted run): set exited, persist, tag the recipe, close streams.
@@ -1175,6 +1286,7 @@ class Runner:
         if reason:
             run.publish(f"[watchdog] {reason}")
         if teardown:
+            self._snapshot_before_teardown(run)
             if run.managed_containers:
                 self._stop_docker_containers(run, force=False)
             if run.stop_cmd:
