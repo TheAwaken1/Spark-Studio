@@ -726,6 +726,7 @@ class Runner:
             # Re-adopted run from a previous session: restore the same scoped
             # teardown guarantees as a run owned by this process.
             run.stop_requested = True
+            self._snapshot_before_teardown(run)
             if run.managed_containers:
                 self._stop_docker_containers(run, force=force)
             if run.stop_cmd:
@@ -748,6 +749,7 @@ class Runner:
         run.stop_requested = True
         # For docker-based runs, stop/kill the container immediately so the
         # wrapper bash exits quickly instead of blocking on `docker run`.
+        self._snapshot_before_teardown(run)
         if run.managed_containers:
             self._stop_docker_containers(run, force=force)
         # Workloads that survive their launcher (sparkrun) need an explicit
@@ -1157,6 +1159,45 @@ class Runner:
         if pump_cmd:
             self._spawn_tail(run, pump_cmd)
 
+    def _snapshot_before_teardown(self, run: Run) -> None:
+        """Persist sparkrun/container diagnostics before teardown removes them."""
+        try:
+            out = RUN_LOG_DIR / f"{run.id}-artifacts"
+            out.mkdir(parents=True, exist_ok=True)
+        except Exception as e:  # noqa: BLE001
+            run.publish(f"[diagnostics] could not create artifact dir: {e}")
+            return
+
+        def _write_cmd(name: str, cmd: list[str], timeout: int = 30) -> None:
+            try:
+                with (out / name).open("w", encoding="utf-8", errors="replace") as f:
+                    f.write("$ " + " ".join(shlex.quote(str(x)) for x in cmd) + "\n")
+                    subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, text=True, timeout=timeout)
+            except Exception as e:  # noqa: BLE001
+                try:
+                    (out / name).write_text(f"snapshot failed: {e}\n", encoding="utf-8")
+                except Exception:
+                    pass
+
+        exe = sparkrun_service.sparkrun_bin()
+        jobid = (run.meta or {}).get("jobid")
+        if exe:
+            _write_cmd("sparkrun-status.txt", [exe, "status"], timeout=25)
+            if jobid:
+                _write_cmd("sparkrun-logs.txt", [exe, "logs", str(jobid)], timeout=60)
+                _write_cmd("sparkrun-export-running-recipe.json", [exe, "export", "running-recipe", str(jobid), "--json"], timeout=30)
+
+        docker = shutil.which("docker")
+        if docker:
+            for container in list(run.managed_containers or []):
+                safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", container)
+                _write_cmd(f"{safe}-serve-log.txt", [docker, "exec", container, "cat", "/tmp/sparkrun_serve.log"], timeout=20)
+                _write_cmd(f"{safe}-docker-logs.txt", [docker, "logs", "--tail", "1000", container], timeout=20)
+                _write_cmd(f"{safe}-docker-inspect.json", [docker, "inspect", container], timeout=20)
+                _write_cmd(f"{safe}-docker-top.txt", [docker, "top", container], timeout=12)
+
+        run.publish(f"[diagnostics] preserved teardown logs in {out}")
+
     def finalize(self, run: Run, exit_code: int | None, reason: str = "", teardown: bool = False) -> None:
         """Terminal-state a run from outside its pump (watchdog / stop of an
         adopted run): set exited, persist, tag the recipe, close streams.
@@ -1170,6 +1211,7 @@ class Runner:
         if reason:
             run.publish(f"[watchdog] {reason}")
         if teardown:
+            self._snapshot_before_teardown(run)
             if run.managed_containers:
                 self._stop_docker_containers(run, force=False)
             if run.stop_cmd:

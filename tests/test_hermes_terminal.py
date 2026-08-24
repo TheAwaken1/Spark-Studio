@@ -1158,6 +1158,57 @@ class RestartRecoveryTests(unittest.TestCase):
         self.assertFalse(server.runner.active())
         self.assertIn("external endpoint stopped answering", "\n".join(run.ring))
 
+    def test_sparkrun_start_tracks_launch_target_and_tp_port(self):
+        run = runners.Run(
+            id="spark", engine="sparkrun", recipe_id=21, cmd=["sparkrun"], env={}
+        )
+        saved_recipe = {"args": {"_sparkrun": {"port": 8888}}}
+        with (
+            mock.patch.object(server, "engine_available", return_value=True),
+            mock.patch.object(server.sparkrun_service, "canonical_recipe_ref", return_value="@studio/prod"),
+            mock.patch.object(server.sparkrun_service, "resolve_recipe_target", return_value="/srv/recipes/prod.yaml"),
+            mock.patch.object(server, "_ensure_sparkrun_recipe", return_value=21),
+            mock.patch.object(server.db, "recipes_get", return_value=saved_recipe),
+            mock.patch.object(server.runner, "start", return_value=run) as start,
+        ):
+            result = server._start_sparkrun("@studio/prod", 2)
+
+        self.assertIs(result, run)
+        self.assertEqual(run.port, 8888)
+        self.assertEqual(run.url, "http://127.0.0.1:8888")
+        self.assertEqual(start.call_args.kwargs["meta"]["ref"], "@studio/prod")
+        self.assertEqual(start.call_args.kwargs["meta"]["launch_target"], "/srv/recipes/prod.yaml")
+
+    def test_sparkrun_teardown_snapshots_container_artifacts(self):
+        manager = runners.Runner()
+        run = runners.Run(
+            id="spark",
+            engine="sparkrun",
+            recipe_id=None,
+            cmd=["sparkrun"],
+            env={},
+            managed_containers=["sparkrun_job_node_0"],
+            meta={"jobid": "job"},
+            status="running",
+        )
+
+        def fake_run(cmd, stdout=None, **_kwargs):
+            if stdout:
+                stdout.write("ran: " + " ".join(cmd) + "\n")
+            return SimpleNamespace(returncode=0)
+
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), \
+             mock.patch.object(runners.sparkrun_service, "sparkrun_bin", return_value="/usr/bin/sparkrun"), \
+             mock.patch.object(runners.shutil, "which", return_value="/usr/bin/docker"), \
+             mock.patch.object(runners.subprocess, "run", side_effect=fake_run):
+            manager._snapshot_before_teardown(run)
+            out = Path(tmp) / "spark-artifacts"
+            self.assertTrue((out / "sparkrun-status.txt").exists())
+            self.assertTrue((out / "sparkrun-logs.txt").exists())
+            self.assertTrue((out / "sparkrun_job_node_0-serve-log.txt").exists())
+            self.assertIn("preserved teardown logs", "\n".join(run.ring))
+
 
 if __name__ == "__main__":
     unittest.main()
