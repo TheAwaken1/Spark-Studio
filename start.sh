@@ -247,7 +247,52 @@ then
         echo "  another Spark Studio may already be running — check http://127.0.0.1:$PORT" >&2
         echo "  or start on a different port: ./start.sh --port $((PORT + 1))" >&2
     fi
-    exit 1
+    # Port guard: two Spark Studios silently fighting over the port (a manual
+    # ./start.sh vs the background service) makes every fix look broken —
+    # whichever instance the browser reaches is not the one being restarted.
+    # When run interactively, offer to take the port over instead of bailing.
+    holder_cmd=$(ps -p "${holder:-0}" -o cmd= 2>/dev/null || true)
+    if [[ -t 0 ]] && [[ "$holder_cmd" == *"uvicorn server:app"* ]]; then
+        if systemctl --user is-active spark-studio.service >/dev/null 2>&1; then
+            echo >&2
+            read -r -p "  Spark Studio is running as the background service. Stop the service and run here instead? [Y/n] " reply
+            if [[ ! "$reply" =~ ^[Nn] ]]; then
+                systemctl --user stop spark-studio.service
+                echo "  (background service stopped — bring it back later with: systemctl --user start spark-studio)"
+            else
+                exit 1
+            fi
+        else
+            echo >&2
+            read -r -p "  Stop the other Spark Studio (pid $holder) and take the port? [Y/n] " reply
+            if [[ ! "$reply" =~ ^[Nn] ]]; then
+                kill "$holder" 2>/dev/null || true
+            else
+                exit 1
+            fi
+        fi
+        # Wait for the old instance to actually release the port.
+        for _ in $(seq 1 20); do
+            if env/bin/python - "$PORT" <<'PY'
+import socket, sys
+s = socket.socket()
+s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+try:
+    s.bind(("0.0.0.0", int(sys.argv[1])))
+except OSError:
+    sys.exit(1)
+finally:
+    s.close()
+PY
+            then
+                break
+            fi
+            sleep 0.5
+        done
+        echo "  port $PORT is free — continuing startup."
+    else
+        exit 1
+    fi
 fi
 
 # Print URLs as OSC-8 hyperlinks when on a terminal that renders them
