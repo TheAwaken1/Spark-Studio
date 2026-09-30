@@ -557,7 +557,11 @@ Use this skill when repairing recipes.
 
 
     def test_browser_command_launches_real_tui_with_agent_tools(self):
-        command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
+        # An empty profile, so MCP servers configured on this machine's real
+        # Hermes don't leak extra toolsets into the expected list.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(agentlab, "HERMES_HOME", Path(tmp)):
+            command = hermes_terminal.browser_tui_command("/opt/hermes", "fixture-model")
         self.assertEqual(command[:2], ["/opt/hermes", "--tui"])
         self.assertEqual(command[command.index("--model") + 1], "fixture-model")
         self.assertEqual(command[command.index("--provider") + 1], "custom")

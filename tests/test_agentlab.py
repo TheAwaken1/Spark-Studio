@@ -137,9 +137,13 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertIn("--yolo", command)
 
     def test_interactive_command_uses_current_model_and_no_query(self):
-        command = agentlab.build_hermes_interactive_command(
-            "hermes", "current-model", max_turns=55
-        )
+        # An empty profile, so MCP servers configured on this machine's real
+        # Hermes don't leak extra toolsets into the expected list.
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(agentlab, "HERMES_HOME", Path(tmp)):
+            command = agentlab.build_hermes_interactive_command(
+                "hermes", "current-model", max_turns=55
+            )
         self.assertEqual(command[:2], ["hermes", "chat"])
         self.assertEqual(command[command.index("--model") + 1], "current-model")
         self.assertEqual(command[command.index("--provider") + 1], "custom")
@@ -237,6 +241,40 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(server["tools"]["include"], ["web_search"])
         self.assertFalse(server["tools"]["resources"])
         self.assertFalse(server["tools"]["prompts"])
+
+    def test_interactive_config_preserves_and_launches_user_mcp_servers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            hermes_home = Path(tmp) / "hermes-profile"
+            hermes_home.mkdir()
+            (hermes_home / "config.yaml").write_text(
+                yaml.safe_dump(
+                    {
+                        "mcp_servers": {
+                            "vision-sidecar": {
+                                "command": "/opt/python",
+                                "args": ["/opt/vision_sidecar_mcp.py"],
+                                "enabled": True,
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            with mock.patch.object(agentlab, "HERMES_HOME", hermes_home):
+                path = agentlab._write_hermes_config(
+                    "http://127.0.0.1:8000/v1",
+                    "fixture-model",
+                    25,
+                    enable_search=True,
+                )
+                toolsets = agentlab.hermes_interactive_toolsets().split(",")
+            config = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(
+            config["mcp_servers"]["vision-sidecar"]["command"], "/opt/python"
+        )
+        self.assertIn("sparkstudio", config["mcp_servers"])
+        self.assertIn("mcp-vision-sidecar", toolsets)
 
 
 class AgentLabFixtureTests(unittest.TestCase):

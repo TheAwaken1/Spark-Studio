@@ -480,6 +480,21 @@ def hermes_interactive_toolsets(
     """Toolsets shared by dashboard Chat and ``sparkstudio hermes``."""
     selected = settings or hermes_learning_settings()
     toolsets = ["file", "terminal", "mcp-sparkstudio"]
+    try:
+        config = yaml.safe_load(
+            (HERMES_HOME / "config.yaml").read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, yaml.YAMLError):
+        config = {}
+    servers = config.get("mcp_servers") if isinstance(config, dict) else None
+    if isinstance(servers, dict):
+        for name, server in servers.items():
+            if (
+                name != "sparkstudio"
+                and isinstance(server, dict)
+                and server.get("enabled", True)
+            ):
+                toolsets.append(f"mcp-{name}")
     if selected["memory_enabled"] or selected["user_profile_enabled"]:
         toolsets.append("memory")
     if selected["skills_enabled"]:
@@ -1065,6 +1080,7 @@ def _write_hermes_config(
         preserved_display = None
         existing_model = None
         existing_providers: list[Any] = []
+        existing_mcp_servers: dict[str, Any] = {}
         try:
             existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             if isinstance(existing, dict):
@@ -1073,6 +1089,12 @@ def _write_hermes_config(
                 existing_model = existing.get("model")
                 if isinstance(existing.get("custom_providers"), list):
                     existing_providers = existing["custom_providers"]
+                if isinstance(existing.get("mcp_servers"), dict):
+                    existing_mcp_servers = {
+                        name: server
+                        for name, server in existing["mcp_servers"].items()
+                        if name != "sparkstudio"
+                    }
         except (OSError, yaml.YAMLError):
             pass
 
@@ -1100,9 +1122,9 @@ def _write_hermes_config(
         _apply_learning_config(config, learning)
         if preserved_display:
             config["display"] = preserved_display
+        mcp_servers = dict(existing_mcp_servers)
         if enable_search:
-            config["mcp_servers"] = {
-                "sparkstudio": {
+            mcp_servers["sparkstudio"] = {
                     "command": sys.executable,
                     "args": [
                         str(APP_DIR / "sparkstudio_mcp.py"),
@@ -1119,7 +1141,8 @@ def _write_hermes_config(
                         "prompts": False,
                     },
                 }
-            }
+        if mcp_servers:
+            config["mcp_servers"] = mcp_servers
         payload = yaml.safe_dump(config, sort_keys=False)
         temporary = HERMES_HOME / f"config-{threading.get_ident()}.tmp"
         temporary.write_text(payload, encoding="utf-8")
