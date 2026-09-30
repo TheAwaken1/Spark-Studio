@@ -3993,8 +3993,16 @@ const hermesTui = {
   httpStarting: false,
   httpGeneration: 0,
   preferHttp: false,
+  // Set once any WebSocket opens on this page: WSS works here, so a later drop
+  // is a network blip or a dashboard restart to wait out, not a reason to
+  // switch transports.
+  wsProven: false,
+  // Lease to pick the conversation back up from once the HTTPS fallback has
+  // to start a new Hermes (the old lease 404'd).
+  httpResumeFrom: '',
   observer: null,
   retryTimer: null,
+  retryFn: null,
   autoStarted: false,
   installing: false,
   pendingPoller: null,
@@ -4017,8 +4025,8 @@ function rememberHermesHttpSession(sessionId) {
 }
 
 // The WSS lease survives this page, so its id has to outlive it too. Kept
-// separate from the HTTPS one: the two transports lease independently and a
-// reload must not hand a WSS id to the HTTPS fallback.
+// separate from the HTTPS one so a reload knows which transport to reattach
+// with; the HTTPS fallback adopts a WSS lease explicitly when it takes over.
 const HERMES_WS_SESSION_KEY = 'spark-studio-hermes-ws-session';
 
 function storedHermesWsSession() {
@@ -4288,13 +4296,17 @@ async function startHermesHttpFallback(attempt = 0) {
   setHermesTuiState('Starting Hermes over HTTPS…');
   try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
   try {
-    const savedSession = attempt === 0 ? storedHermesHttpSession() : '';
+    // A tab whose WebSocket gave up hands its still-running lease over here
+    // instead of starting a second Hermes next to it.
+    const savedSession = storedHermesHttpSession() || storedHermesWsSession();
     if (savedSession) {
       try {
         await hermesHttpApi(`/${encodeURIComponent(savedSession)}`);
         if (generation !== hermesTui.httpGeneration) return;
         hermesTui.httpStarting = false;
         hermesTui.httpSession = savedSession;
+        rememberHermesHttpSession(savedSession);
+        rememberHermesWsSession('');
         setHermesControls(true);
         setHermesTuiState('Hermes reconnected over HTTPS', 'ready');
         sendHermesHttpInput({
@@ -4309,7 +4321,11 @@ async function startHermesHttpFallback(attempt = 0) {
         // A missing/expired lease needs a new PTY. For network and proxy
         // failures, retain the opaque ID so the next retry can reattach.
         if (!String(error.message || '').startsWith('404 ')) throw error;
+        // Gone for good (dashboard restart, TTL) — the new Hermes picks the
+        // conversation back up from it.
+        hermesTui.httpResumeFrom = savedSession;
         rememberHermesHttpSession('');
+        rememberHermesWsSession('');
       }
     }
     const result = await hermesHttpApi('', {
@@ -4319,6 +4335,7 @@ async function startHermesHttpFallback(attempt = 0) {
         max_turns: 90,
         cols: hermesTui.terminal.cols,
         rows: hermesTui.terminal.rows,
+        resume_from: hermesTui.httpResumeFrom || null,
       },
     });
     if (generation !== hermesTui.httpGeneration) {
@@ -4331,7 +4348,11 @@ async function startHermesHttpFallback(attempt = 0) {
     }
     hermesTui.httpStarting = false;
     hermesTui.httpSession = result.session_id;
+    hermesTui.httpResumeFrom = '';
     rememberHermesHttpSession(result.session_id);
+    if (result.continued) {
+      hermesTui.terminal.write('\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n');
+    }
     setHermesControls(true);
     setHermesTuiState('Hermes is running over HTTPS', 'ready');
     hermesTui.terminal.focus();
@@ -4340,8 +4361,9 @@ async function startHermesHttpFallback(attempt = 0) {
     if (generation !== hermesTui.httpGeneration) return;
     hermesTui.httpStarting = false;
     setHermesControls(false);
-    if (attempt < 4 && hermesMod.activeView === 'chat') {
-      const delayMs = Math.min(1500 * (2 ** attempt), 6000);
+    // ~1 minute in all — long enough to ride out a dashboard restart.
+    if (attempt < 7 && hermesMod.activeView === 'chat') {
+      const delayMs = Math.min(1500 * (2 ** attempt), 15000);
       const message = `HTTPS terminal is still starting — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
@@ -4363,6 +4385,7 @@ function stopHermesHttpTui() {
   hermesTui.httpStarting = false;
   hermesTui.httpSession = null;
   hermesTui.httpPolling = false;
+  hermesTui.httpResumeFrom = '';
   rememberHermesHttpSession('');
   if (!sessionId) return Promise.resolve();
   return fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(sessionId)}`, {
@@ -4378,6 +4401,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     clearTimeout(hermesTui.retryTimer);
     hermesTui.retryTimer = null;
   }
+  hermesTui.retryFn = null;
   if (!ensureHermesTerminal()) return;
   if (hermesTui.preferHttp || storedHermesHttpSession()) {
     startHermesHttpFallback(0);
@@ -4403,6 +4427,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
   socket.addEventListener('open', () => {
     if (hermesTui.socket !== socket) return;
     opened = true;
+    hermesTui.wsProven = true;
     hermesTui.preferHttp = false;
     setHermesTuiState('Hermes is running', 'ready');
     socket.send(JSON.stringify({
@@ -4427,7 +4452,9 @@ function startHermesTui({ retryCount = 0 } = {}) {
         else if (resuming) {
           // The lease expired or the dashboard restarted — say so rather than
           // leaving "Reattaching…" over what is actually a new agent.
-          hermesTui.terminal.write('\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
+          hermesTui.terminal.write(control.continued
+            ? '\r\n\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n'
+            : '\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
           setHermesTuiState('Hermes is running', 'ready');
         }
       } else {
@@ -4439,20 +4466,39 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (hermesTui.socket !== socket) return;
     hermesTui.socket = null;
     setHermesControls(false);
-    const retryable = event.code === 1006 && retryCount < 1;
+    // 1006 is an abnormal drop (sleep, Wi-Fi, proxy); 1001/1012 are the server
+    // going away or restarting. None of them mean Hermes itself is done — the
+    // lease is still held, or can be continued once the dashboard is back.
+    const dropped = [1001, 1006, 1012].includes(event.code);
+    const proven = opened || hermesTui.wsProven;
+    // Proven WSS: back off for ~1.5 minutes. Unproven: one quick retry, then
+    // assume a proxy that blocks WebSockets and switch to HTTPS.
+    const retryable = dropped && retryCount < (proven ? 8 : 1);
     if (retryable) {
-      const delayMs = Math.min(1500 * (2 ** retryCount), 6000);
-      const phase = opened ? 'connection dropped' : 'dashboard is still starting';
+      const delayMs = Math.min(1500 * (2 ** retryCount), 15000);
+      const phase = opened ? 'connection dropped' : proven ? 'still reconnecting' : 'dashboard is still starting';
       const message = `Hermes ${phase} — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
       refreshHermesTui(false);
-      hermesTui.retryTimer = setTimeout(() => {
+      const retry = () => {
         hermesTui.retryTimer = null;
+        hermesTui.retryFn = null;
         if (!hermesTui.socket && hermesMod.activeView === 'chat') {
           startHermesTui({ retryCount: retryCount + 1 });
         }
-      }, delayMs);
+      };
+      hermesTui.retryFn = retry;
+      hermesTui.retryTimer = setTimeout(retry, delayMs);
+      return;
+    }
+    if (dropped && proven) {
+      // Out of retries but the lease id is kept: Start reattaches to it, or
+      // continues its conversation if the dashboard lost it meanwhile.
+      const message = 'Lost the connection to Spark Studio — press Start to reconnect';
+      hermesTui.terminal.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);
+      setHermesTuiState(message, 'error');
+      refreshHermesTui(false);
       return;
     }
     if (event.code === 1006) {
@@ -4505,7 +4551,8 @@ function endHermesWsLease() {
 
 function restartHermesTui() {
   if (hermesTui.httpSession) {
-    stopHermesHttpTui().finally(() => setTimeout(startHermesTui, 120));
+    Promise.all([stopHermesHttpTui(), endHermesWsLease()])
+      .finally(() => setTimeout(startHermesTui, 120));
     return;
   }
   const socket = hermesTui.socket;
@@ -4524,6 +4571,17 @@ function restartHermesTui() {
 }
 
 $('#hermesInstall').addEventListener('click', installHermes);
+// A pending backoff shouldn't make a user who just opened the lid wait out
+// the rest of it.
+function retryHermesNow() {
+  if (!hermesTui.retryTimer || !hermesTui.retryFn) return;
+  if (document.visibilityState === 'hidden' || !navigator.onLine) return;
+  clearTimeout(hermesTui.retryTimer);
+  hermesTui.retryFn();
+}
+document.addEventListener('visibilitychange', retryHermesNow);
+window.addEventListener('online', retryHermesNow);
+
 $('#hermesTuiStart').addEventListener('click', startHermesTui);
 $('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);

@@ -3071,6 +3071,9 @@ class HttpTerminalSessionReq(BaseModel):
     max_turns: int = 90
     cols: int = 120
     rows: int = 36
+    # The lease this browser held before it went missing (dashboard restart,
+    # TTL). Its Hermes is gone, but its conversation can be picked back up.
+    resume_from: str | None = None
 
 
 class HttpTerminalInputReq(BaseModel):
@@ -3085,7 +3088,9 @@ _HTTP_TERMINAL_HEADER = "X-Spark-Studio-Terminal"
 # created it so a page reload reattaches to the running Hermes instead of
 # killing it and spawning a new one.
 _TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
-_HTTP_TERMINAL_TTL_SECONDS = 600.0
+# Long enough to outlast a laptop lid or a coffee break; a lease reaped anyway
+# still gets its conversation back through the lease ledger.
+_HTTP_TERMINAL_TTL_SECONDS = 1800.0
 # Output retained while no client is attached. The tail is what a reattaching
 # terminal renders, so an overflow drops from the front.
 _TERMINAL_BUFFER_LIMIT = 262144
@@ -3228,10 +3233,34 @@ async def _resolve_terminal_endpoint() -> dict[str, Any]:
     return agentlab.detached_endpoint()
 
 
+async def _lost_lease_conversation(lease_id: str | None) -> str | None:
+    """The conversation behind a lease the browser still names but this
+    process no longer holds. Live leases reattach instead, so they never
+    get here."""
+    if not lease_id or lease_id in _TERMINAL_SESSIONS:
+        return None
+    try:
+        return await asyncio.to_thread(hermes_terminal.conversation_for_lease, lease_id)
+    except Exception:  # noqa: BLE001 - continuity is best-effort
+        return None
+
+
+def _register_terminal_lease(
+    bridge: hermes_terminal.PtyBridge, workspace: Path, resumed: str | None
+) -> str:
+    session_id = _new_terminal_session(bridge)
+    try:
+        hermes_terminal.record_lease(session_id, workspace, resumed)
+    except Exception:  # noqa: BLE001 - never fail a spawn over the ledger
+        pass
+    return session_id
+
+
 async def _spawn_http_terminal(
     request: Request,
     req: HttpTerminalSessionReq,
-) -> hermes_terminal.PtyBridge:
+    resume_session: str | None = None,
+) -> tuple[hermes_terminal.PtyBridge, Path]:
     workspace = Path(req.workspace or str(APP_DIR)).expanduser().resolve()
     endpoint = await _resolve_terminal_endpoint()
     internal_url = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
@@ -3244,10 +3273,11 @@ async def _spawn_http_terminal(
             endpoint,
             workspace,
             max_turns=max(1, min(int(req.max_turns), 1000)),
+            resume_session=resume_session,
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return await asyncio.to_thread(
+    bridge = await asyncio.to_thread(
         hermes_terminal.PtyBridge.spawn,
         command,
         cwd=workspace,
@@ -3255,6 +3285,7 @@ async def _spawn_http_terminal(
         cols=req.cols,
         rows=req.rows,
     )
+    return bridge, workspace
 
 
 @app.post("/api/agentlab/terminal/sessions")
@@ -3262,15 +3293,27 @@ async def create_http_terminal_session(req: HttpTerminalSessionReq, request: Req
     """Create a PTY transported over same-origin HTTPS when WSS is unavailable."""
     _require_http_terminal_access(request)
     _prune_http_terminal_sessions()
-    bridge = await _spawn_http_terminal(request, req)
-    return {"session_id": _new_terminal_session(bridge), "transport": "https"}
+    resume = await _lost_lease_conversation(req.resume_from)
+    bridge, workspace = await _spawn_http_terminal(request, req, resume)
+    return {
+        "session_id": _register_terminal_lease(bridge, workspace, resume),
+        "transport": "https",
+        "continued": bool(resume),
+    }
 
 
 @app.get("/api/agentlab/terminal/sessions/{session_id}")
 async def inspect_http_terminal_session(session_id: str, request: Request):
-    """Refresh a live HTTPS PTY lease so a reloaded dashboard can reattach."""
+    """Refresh a live PTY lease so a reloaded dashboard can reattach.
+
+    Either transport's lease works: a tab whose WebSocket gave up hands its
+    lease to the HTTPS fallback rather than starting a second Hermes.
+    """
     _require_http_terminal_access(request)
-    _http_terminal_session(session_id)
+    session = _http_terminal_session(session_id)
+    # Retire any socket forwarder the server hasn't noticed is dead yet, so it
+    # can't drain output the HTTPS poller is now responsible for.
+    session["generation"] += 1
     return {"session_id": session_id, "transport": "https", "active": True}
 
 
@@ -3355,9 +3398,14 @@ async def agentlab_terminal(ws: WebSocket):
         requested = ws.query_params.get("session") or ""
         session_id = requested if requested in _TERMINAL_SESSIONS else ""
         resumed = bool(session_id)
+        continued = False
         if session_id:
             session = _TERMINAL_SESSIONS[session_id]
         else:
+            # The lease is gone (dashboard restart, TTL) but the browser
+            # still wants it: start a new Hermes on the same conversation.
+            resume = await _lost_lease_conversation(requested)
+            continued = bool(resume)
             endpoint = await _resolve_terminal_endpoint()
             endpoint["studio_url"] = _studio_url_for_websocket(ws)
             command, env = await asyncio.to_thread(
@@ -3365,6 +3413,7 @@ async def agentlab_terminal(ws: WebSocket):
                 endpoint,
                 workspace,
                 max_turns=max_turns,
+                resume_session=resume,
             )
             bridge = await asyncio.to_thread(
                 hermes_terminal.PtyBridge.spawn,
@@ -3372,7 +3421,7 @@ async def agentlab_terminal(ws: WebSocket):
                 cwd=workspace,
                 env=env,
             )
-            session_id = _new_terminal_session(bridge)
+            session_id = _register_terminal_lease(bridge, workspace, resume)
             session = _TERMINAL_SESSIONS[session_id]
 
         session["attached"] = True
@@ -3382,7 +3431,14 @@ async def agentlab_terminal(ws: WebSocket):
         # Text frames are the control channel; the pty stream is always binary,
         # so the client can tell them apart without framing of its own.
         await ws.send_text(
-            json.dumps({"type": "session", "id": session_id, "resumed": resumed})
+            json.dumps(
+                {
+                    "type": "session",
+                    "id": session_id,
+                    "resumed": resumed,
+                    "continued": continued,
+                }
+            )
         )
 
         async def pump_output() -> None:

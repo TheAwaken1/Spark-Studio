@@ -32,7 +32,35 @@ def _close_terminal_leases() -> None:
     server._TERMINAL_SESSIONS.clear()
 
 
+def _isolate_lease_ledger(test: unittest.TestCase) -> Path:
+    """Point the lease ledger at a temp dir so tests never touch the real one."""
+    tmp = tempfile.TemporaryDirectory()
+    test.addCleanup(tmp.cleanup)
+    ledger = Path(tmp.name) / "terminal-leases.json"
+    patcher = mock.patch.object(hermes_terminal, "LEASE_LEDGER", ledger)
+    patcher.start()
+    test.addCleanup(patcher.stop)
+    return ledger
+
+
+def _hermes_state_db(home: Path, rows: list[tuple[str, str, str, float]]) -> None:
+    """A minimal Hermes state.db: (id, source, cwd, started_at) rows."""
+    import sqlite3
+
+    conn = sqlite3.connect(home / "state.db")
+    conn.execute(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL,"
+        " cwd TEXT, started_at REAL NOT NULL)"
+    )
+    conn.executemany("INSERT INTO sessions VALUES (?, ?, ?, ?)", rows)
+    conn.commit()
+    conn.close()
+
+
 class HermesBrowserTerminalTests(unittest.TestCase):
+    def setUp(self):
+        _isolate_lease_ledger(self)
+
     def tearDown(self):
         _close_terminal_leases()
 
@@ -230,7 +258,7 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         # One burst then silence: the lease pump drains continuously, so a
         # bridge that always returned bytes would never stop producing.
         bridge.read.side_effect = itertools.chain([b"ready"], itertools.repeat(b""))
-        spawn = mock.AsyncMock(return_value=bridge)
+        spawn = mock.AsyncMock(return_value=(bridge, Path(".").resolve()))
         client = TestClient(server.app)
         headers = {"X-Spark-Studio-Terminal": "1"}
 
@@ -691,6 +719,7 @@ class TerminalLeaseTests(unittest.TestCase):
     def setUp(self):
         _close_terminal_leases()
         self.addCleanup(_close_terminal_leases)
+        self.ledger = _isolate_lease_ledger(self)
 
     @staticmethod
     def _shell():
@@ -826,6 +855,131 @@ class TerminalLeaseTests(unittest.TestCase):
         self.assertNotIn(expired["id"], server._TERMINAL_SESSIONS)
         self.assertNotEqual(fresh["id"], stopped["id"])
         self.assertFalse(fresh["resumed"])
+
+    @unittest.skipUnless(hermes_terminal.PtyBridge.available(), "POSIX PTY required")
+    def test_lost_lease_starts_a_new_hermes_on_the_same_conversation(self):
+        # The dashboard restarted: the browser names a lease this process never
+        # held, but the ledger knows which conversation that lease was having.
+        workspace = Path(".").resolve()
+        with tempfile.TemporaryDirectory() as home:
+            hermes_terminal.record_lease("old-lease", workspace)
+            spawned = json.loads(self.ledger.read_text())
+            (entry,) = spawned.values()
+            _hermes_state_db(
+                Path(home),
+                [("conv-1", "tui", str(workspace), entry["spawned_at"] + 1)],
+            )
+            client = TestClient(server.app)
+            headers = {"origin": "http://testserver"}
+            with (
+                mock.patch.object(server.agentlab, "HERMES_HOME", Path(home)),
+                mock.patch.object(server, "_resolve_terminal_endpoint", new=mock.AsyncMock(return_value={})),
+                mock.patch.object(
+                    server.hermes_terminal,
+                    "prepare_browser_tui",
+                    return_value=(self._shell(), os.environ.copy()),
+                ) as prepare,
+            ):
+                with client.websocket_connect(
+                    "/api/agentlab/terminal?workspace=.&session=old-lease", headers=headers
+                ) as ws:
+                    lease = json.loads(ws.receive_text())
+
+        self.assertFalse(lease["resumed"])
+        self.assertTrue(lease["continued"])
+        self.assertNotEqual(lease["id"], "old-lease")
+        self.assertEqual(prepare.call_args.kwargs["resume_session"], "conv-1")
+        # The new lease inherits the conversation, so a second restart before
+        # any new session is opened still lands on conv-1.
+        self.assertEqual(
+            json.loads(self.ledger.read_text())[hermes_terminal._lease_key(lease["id"])]["resumed"],
+            "conv-1",
+        )
+
+    def test_http_fallback_continues_a_lost_lease_and_adopts_live_ones(self):
+        bridge = mock.Mock()
+        bridge.read.side_effect = itertools.repeat(b"")
+        spawn = mock.AsyncMock(return_value=(bridge, Path(".").resolve()))
+        client = TestClient(server.app)
+        headers = {"X-Spark-Studio-Terminal": "1"}
+        with (
+            mock.patch.object(server, "_spawn_http_terminal", new=spawn),
+            mock.patch.object(
+                server.hermes_terminal, "conversation_for_lease", return_value="conv-9"
+            ) as lookup,
+        ):
+            created = client.post(
+                "/api/agentlab/terminal/sessions",
+                headers=headers,
+                json={"workspace": ".", "resume_from": "gone-lease"},
+            )
+        self.assertEqual(created.status_code, 200)
+        self.assertTrue(created.json()["continued"])
+        lookup.assert_called_once_with("gone-lease")
+        self.assertEqual(spawn.await_args.args[2], "conv-9")
+
+        # A WebSocket tab falling back to HTTPS hands over its live lease: the
+        # inspect call adopts it and retires any stale socket forwarder.
+        session_id = created.json()["session_id"]
+        before = server._TERMINAL_SESSIONS[session_id]["generation"]
+        inspected = client.get(f"/api/agentlab/terminal/sessions/{session_id}", headers=headers)
+        self.assertEqual(inspected.status_code, 200)
+        self.assertEqual(server._TERMINAL_SESSIONS[session_id]["generation"], before + 1)
+
+
+class LeaseLedgerTests(unittest.TestCase):
+    def setUp(self):
+        self.ledger = _isolate_lease_ledger(self)
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.home = Path(tmp.name)
+        patcher = mock.patch.object(agentlab, "HERMES_HOME", self.home)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_picks_the_newest_session_within_the_lease_window(self):
+        ws = Path("/work/a")
+        t0 = time.time() - 600
+        t1 = t0 + 300
+        with mock.patch.object(hermes_terminal.time, "time", return_value=t0):
+            hermes_terminal.record_lease("lease-a", ws)
+        with mock.patch.object(hermes_terminal.time, "time", return_value=t1):
+            hermes_terminal.record_lease("lease-b", ws)
+        _hermes_state_db(
+            self.home,
+            [
+                ("before", "tui", str(ws), t0 - 100),
+                ("first", "tui", str(ws), t0 + 2),
+                # /new mid-lease: the newer conversation wins.
+                ("second", "tui", str(ws), t0 + 100),
+                ("other-dir", "tui", "/work/b", t0 + 200),
+                ("headless", "oneshot", str(ws), t0 + 250),
+                ("next-lease", "tui", str(ws), t1 + 5),
+            ],
+        )
+        self.assertEqual(hermes_terminal.conversation_for_lease("lease-a"), "second")
+        self.assertEqual(hermes_terminal.conversation_for_lease("lease-b"), "next-lease")
+        # The digest is what's stored, never the lease credential itself.
+        self.assertNotIn("lease-a", self.ledger.read_text())
+
+    def test_unknown_lease_or_missing_db_starts_fresh(self):
+        self.assertIsNone(hermes_terminal.conversation_for_lease("never-seen"))
+        hermes_terminal.record_lease("lease-a", Path("/work/a"))
+        self.assertIsNone(hermes_terminal.conversation_for_lease("lease-a"))
+
+    def test_resumed_conversation_carries_forward_until_a_new_one_opens(self):
+        hermes_terminal.record_lease("lease-a", Path("/work/a"), resumed="conv-1")
+        _hermes_state_db(self.home, [("conv-1", "tui", "/work/a", 1.0)])
+        self.assertEqual(hermes_terminal.conversation_for_lease("lease-a"), "conv-1")
+
+    def test_resume_flag_reaches_the_hermes_command(self):
+        with mock.patch.object(agentlab, "hermes_interactive_toolsets", return_value="x"):
+            command = hermes_terminal.browser_tui_command(
+                "hermes", "m", "custom", resume_session="conv-1"
+            )
+            fresh = hermes_terminal.browser_tui_command("hermes", "m", "custom")
+        self.assertEqual(command[-2:], ["--resume", "conv-1"])
+        self.assertNotIn("--resume", fresh)
 
 
 class _FakeEngine:
