@@ -1044,6 +1044,38 @@ class EngineResolutionTests(unittest.TestCase):
 
 
 class RestartRecoveryTests(unittest.TestCase):
+    def test_only_running_sparkrun_runs_block_mid_session_adoption(self):
+        exited = runners.Run(
+            id="exited", engine="sparkrun", recipe_id=None, cmd=["adopted"], env={},
+            status="exited", meta={"jobid": "reused-job"},
+        )
+        running = runners.Run(
+            id="running", engine="sparkrun", recipe_id=None, cmd=["adopted"], env={},
+            status="running", meta={"jobid": "live-job"},
+        )
+
+        self.assertEqual(
+            server._running_sparkrun_jobids({exited.id: exited, running.id: running}),
+            {"live-job"},
+        )
+
+    def test_adopted_bundled_recipe_path_uses_canonical_studio_ref(self):
+        job = {
+            "ref": "recipes/qwen3.6-35b-a3b-unsloth-nvfp4-fast.yaml",
+            "jobid": "reused-job",
+            "tp": 1,
+            "hosts": [{"role": "solo", "ip": "127.0.0.1", "status": "Up"}],
+            "containers": ["sparkrun_reused-job_solo"],
+        }
+        with (
+            mock.patch.object(server, "_ensure_sparkrun_recipe", return_value=70) as ensure,
+            mock.patch.object(server.sparkrun_service, "export_running_recipe", return_value=None),
+            mock.patch.object(server.runner, "adopt", return_value=None),
+        ):
+            server._adopt_sparkrun_job(job, None)
+
+        ensure.assert_called_once_with("@studio/qwen3.6-35b-a3b-unsloth-nvfp4-fast")
+
     def test_adopted_run_restores_ownership_metadata_and_pid(self):
         run = runners.Run(
             id="retained",

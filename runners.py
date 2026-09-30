@@ -1057,8 +1057,11 @@ class Runner:
         old run id so history and recipe links stay intact."""
         if run_id in self.runs:
             return self.runs[run_id]
-        if jobid and any((r.meta or {}).get("jobid") == jobid for r in self.runs.values()):
-            return None  # this job is already adopted under another run id
+        if jobid and any(
+            r.status == "running" and (r.meta or {}).get("jobid") == jobid
+            for r in self.runs.values()
+        ):
+            return None  # this job is already adopted under another live run id
         run = Run(
             id=run_id,
             engine=engine,

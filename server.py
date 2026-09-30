@@ -961,6 +961,7 @@ def _sparkrun_ref_index() -> dict[str, dict]:
 def _ensure_sparkrun_recipe(ref: str) -> int | None:
     """Find-or-create the auto-saved My Recipes entry for a sparkrun ref.
     Dedupe key is args._sparkrun.ref, so user renames don't cause duplicates."""
+    ref = sparkrun_service.canonical_recipe_ref(ref)
     existing = db.recipes_find_sparkrun(ref)
     if existing:
         return existing["id"]
@@ -3935,8 +3936,10 @@ _EXTERNAL_PROBE_FAILURES = 2
 _STALL_AFTER = int(os.environ.get("SPARK_STUDIO_STALL_AFTER", "300"))
 # Never-ready deadline for sparkrun runs where no container liveness signal is
 # available (remote tp>1 heads). Local containers are judged by `docker top`
-# instead, which stays positive during long AWQ loads.
-_SPARKRUN_GRACE = int(os.environ.get("SPARK_STUDIO_SPARKRUN_GRACE", "1200"))
+# instead, which stays positive during long AWQ loads. A cold DeepSeek V4 EXL3
+# boot needs about 20 minutes for weights, draft model, and warmup, so leave
+# enough margin for the API to bind before declaring a no-container load dead.
+_SPARKRUN_GRACE = int(os.environ.get("SPARK_STUDIO_SPARKRUN_GRACE", "1800"))
 
 
 def _cmd_fragment_alive(pid: int | None, cmd: str | None) -> bool:
@@ -3961,7 +3964,8 @@ def _adopt_sparkrun_job(job: dict, row: dict | None) -> None:
     reusing its old run row when we have one."""
     import uuid as _uuid
 
-    ref, jobid = job["ref"], job["jobid"]
+    ref = sparkrun_service.canonical_recipe_ref(job["ref"])
+    jobid = job["jobid"]
     # Carry the original launch's load stats through the restart so the run
     # card keeps showing "loaded in Xs · +Y GB".
     prev_meta: dict[str, Any] = {}
@@ -4127,6 +4131,22 @@ async def _watchdog_loop() -> None:
             pass
 
 
+def _running_sparkrun_jobids(runs: dict[str, Any]) -> set[str]:
+    """Job IDs currently represented by a live dashboard run.
+
+    sparkrun can reuse a deterministic job ID when the same recipe is launched
+    again. Historical exited runs must not suppress adoption of that new live
+    workload.
+    """
+    return {
+        run.meta.get("jobid")
+        for run in runs.values()
+        if run.engine == "sparkrun"
+        and run.status == "running"
+        and run.meta.get("jobid")
+    }
+
+
 async def _watchdog_tick(tick: int) -> None:
     import httpx
 
@@ -4139,7 +4159,7 @@ async def _watchdog_tick(tick: int) -> None:
         except Exception:  # noqa: BLE001
             jobs = []
         if jobs:
-            known_jobids = {(r.meta or {}).get("jobid") for r in runner.runs.values()}
+            known_jobids = _running_sparkrun_jobids(runner.runs)
             # An app-launched sparkrun run that hasn't learned its jobid yet
             # could be ANY of these jobs — adopting now would duplicate it.
             starting = any(
