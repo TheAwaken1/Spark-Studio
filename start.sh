@@ -110,8 +110,15 @@ KillMode=process
 Environment=SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1
 # Tells the app it may self-restart after an in-app update.
 Environment=SPARK_STUDIO_SERVICE=1
-# NOTE: user units cannot LOWER oom_score_adj without privilege. For full OOM
-# protection of the dashboard, apply the earlyoom fix from the README instead.
+# systemd-oomd kills by cgroup memory PRESSURE and takes down the WHOLE unit at
+# once (dashboard + any adopted engine children + the Hermes TUI PTY), ignoring
+# oom_score_adj entirely — so oomguard.py can't protect against it. 'omit'
+# removes this unit from oomd candidate selection; memory pressure then falls to
+# the kernel OOM killer, which DOES honor oom_score_adj, so oomguard's
+# deprioritized model gets killed first and the control plane survives.
+ManagedOOMPreference=omit
+# NOTE: user units cannot LOWER oom_score_adj without privilege. For full
+# kernel-OOM protection of the dashboard, apply the earlyoom fix from the README.
 
 [Install]
 WantedBy=default.target

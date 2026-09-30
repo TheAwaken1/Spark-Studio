@@ -1026,6 +1026,23 @@ class EnginePassthroughTests(unittest.TestCase):
         self.assertNotIn("models", relaunched)
 
 
+class EngineResolutionTests(unittest.TestCase):
+    def test_resolve_finds_user_local_bin_outside_service_path(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home = Path(tmp)
+            binary = home / ".local" / "bin" / "sparkrun"
+            binary.parent.mkdir(parents=True)
+            binary.write_text("#!/bin/sh\n", encoding="utf-8")
+            binary.chmod(0o755)
+
+            with (
+                mock.patch.object(runners, "VENV_BIN", home / "venv"),
+                mock.patch.object(runners.Path, "home", return_value=home),
+                mock.patch.object(runners.shutil, "which", return_value=None),
+            ):
+                self.assertEqual(runners._resolve("sparkrun"), str(binary))
+
+
 class RestartRecoveryTests(unittest.TestCase):
     def test_adopted_run_restores_ownership_metadata_and_pid(self):
         run = runners.Run(

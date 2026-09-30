@@ -58,23 +58,25 @@ def _guess_label(args: dict[str, Any] | None, raw_cmd: str | None) -> str | None
 
 
 def _resolve(binary: str) -> str | None:
-    """Find a binary: venv bin dir first, then PATH, then common conda locations."""
+    """Find a binary in app, shell, user-local, or common conda locations."""
     local = VENV_BIN / binary
     if local.exists() and os.access(local, os.X_OK):
         return str(local)
     found = shutil.which(binary)
     if found:
         return found
-    # conda may not be on PATH when the server is started without sourcing .bashrc
+    # User services do not source shell startup files, so ~/.local/bin and
+    # conda may both be absent from PATH even when their tools are installed.
     home = Path.home()
-    for conda_bin in [
+    for fallback_bin in [
+        home / ".local" / "bin" / binary,
         home / "miniconda3" / "bin" / binary,
         home / "anaconda3" / "bin" / binary,
         home / "miniforge3" / "bin" / binary,
         Path("/opt/conda/bin") / binary,
     ]:
-        if conda_bin.exists() and os.access(conda_bin, os.X_OK):
-            return str(conda_bin)
+        if fallback_bin.exists() and os.access(fallback_bin, os.X_OK):
+            return str(fallback_bin)
     return None
 
 
