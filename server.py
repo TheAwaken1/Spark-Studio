@@ -2011,12 +2011,86 @@ _ENGINE_PROXY_PATHS = {
 }
 
 
-async def _retarget_engine_model(base: str, body: bytes) -> bytes:
-    """Repoint a stale model id at whatever the active engine actually serves.
+def _apply_thinking_default(payload: dict, path: str, served: list) -> bool:
+    """Translate Qwen3 reasoning controls without overriding explicit choices.
+
+    Qwen3.8 Flash Next exposes a boolean
+    ``chat_template_kwargs.enable_thinking`` switch, while Hermes Desktop sends
+    graduated ``reasoning_effort`` values. Map medium-or-higher effort to
+    thinking-on and low-or-lower effort to thinking-off, then remove the
+    unsupported graduated field. When Hermes sends no preference, Flash Next
+    remains thinking-off so routine agent/tool loops do not reason on every
+    iteration. General Qwen3 models keep medium thinking by default.
+
+    Explicit caller choices always win:
+
+    - only ``chat/completions`` (thinking is a chat-template concept);
+    - only Qwen3-family served models (other models use different template
+      kwargs; don't force this on GLM/Nemotron/etc.);
+    - never override an explicit ``chat_template_kwargs.enable_thinking`` the
+      caller already set, nor a request that carries an inline ``/think`` or
+      ``/no_think`` directive in its last message.
+
+    Returns True when the payload was modified.
+    """
+    if path != "chat/completions" or not isinstance(payload, dict):
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    if "qwen3" not in fleet:
+        return False
+    ctk = payload.get("chat_template_kwargs")
+    if isinstance(ctk, dict) and "enable_thinking" in ctk:
+        return False  # explicit caller choice — respect it
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                content = msg.get("content")
+                text = content if isinstance(content, str) else json.dumps(content)
+                if "/think" in text or "/no_think" in text:
+                    return False  # inline directive — respect it
+                break
+    if not isinstance(ctk, dict):
+        ctk = {}
+    if "qwen3.8-flash-next" in fleet:
+        effort = str(payload.pop("reasoning_effort", "") or "").strip().lower()
+        ctk["enable_thinking"] = effort in {"medium", "high", "xhigh", "ultra"}
+        payload["chat_template_kwargs"] = ctk
+        return True
+    ctk["enable_thinking"] = True
+    payload["chat_template_kwargs"] = ctk
+    payload.setdefault("reasoning_effort", "medium")
+    return True
+
+
+def _apply_prompt_cache_safety(payload: dict, path: str, served: list) -> bool:
+    """Disable llama.cpp prompt reuse for the experimental Flash-Next port.
+
+    Its hybrid-index/graph-reuse path can retain stale task state even when the
+    next request has a matching prefix.  That presents as unrelated tool work
+    appearing mid-session, so correctness wins over incremental-prefill speed
+    until the upstream cache path is fixed.
+    """
+    if path not in {"chat/completions", "completions"} or not isinstance(payload, dict):
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    if "qwen3.8-flash-next" not in fleet or payload.get("cache_prompt") is False:
+        return False
+    payload["cache_prompt"] = False
+    return True
+
+
+async def _retarget_engine_model(base: str, path: str, body: bytes) -> bytes:
+    """Repoint a stale model id at whatever the active engine actually serves,
+    and apply the Qwen3 thinking-default policy.
 
     A model selected before a recipe swap no longer exists upstream, and vLLM
     rejects the request outright. This base URL means "the active engine", so
-    retargeting is the honest reading of the request rather than a 404.
+    retargeting is the honest reading of the request rather than a 404. While
+    we already have the parsed body and the served-model list in hand, we also
+    default Qwen3 reasoning models to thinking-off (see _apply_thinking_default).
     """
     import httpx
 
@@ -2024,18 +2098,23 @@ async def _retarget_engine_model(base: str, body: bytes) -> bytes:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return body
-    if not isinstance(payload, dict) or not payload.get("model"):
+    if not isinstance(payload, dict):
         return body
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get(f"{base}/v1/models")
         served = [m.get("id") for m in (response.json().get("data") or []) if m.get("id")]
     except Exception:  # noqa: BLE001 - upstream decides; don't rewrite blind
-        return body
-    if not served or payload["model"] in served:
-        return body
-    payload["model"] = served[0]
-    return json.dumps(payload).encode()
+        served = []
+    changed = False
+    if served and payload.get("model") and payload["model"] not in served:
+        payload["model"] = served[0]
+        changed = True
+    if _apply_thinking_default(payload, path, served):
+        changed = True
+    if _apply_prompt_cache_safety(payload, path, served):
+        changed = True
+    return json.dumps(payload).encode() if changed else body
 
 
 @app.api_route("/api/engine/v1/{path:path}", methods=["GET", "POST"])
@@ -2059,7 +2138,7 @@ async def engine_openai_proxy(path: str, request: Request):
 
     body = await request.body()
     if body and path in {"chat/completions", "completions"}:
-        body = await _retarget_engine_model(base, body)
+        body = await _retarget_engine_model(base, path, body)
 
     # read=None: generation streams for as long as the engine needs.
     client = httpx.AsyncClient(
@@ -2191,6 +2270,13 @@ async def chat_proxy(request: Request):
         body["model"] = served_models[0].get("id") or "local"
     else:
         body["model"] = requested
+
+    # Default Qwen3 reasoning models to medium thinking. Same policy as
+    # the /api/engine/v1 proxy so the dashboard chat box and Hermes' /model
+    # picker behave identically. Explicit caller choices are left untouched.
+    _served_ids = [m.get("id") for m in served_models if m.get("id")]
+    _apply_thinking_default(body, "chat/completions", _served_ids)
+    _apply_prompt_cache_safety(body, "chat/completions", _served_ids)
 
     # Compute how many tokens the engine can actually allocate for generation.
     # The real constraint is: prompt_tokens + max_tokens ≤ max_model_len.
