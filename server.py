@@ -210,6 +210,9 @@ class BenchReq(BaseModel):
     prompt: str | None = None
     max_tokens: int = 256
     runs: int = 3
+    # e.g. [1, 4, 8]: also measure aggregate vs per-stream throughput at these
+    # concurrency levels — the honest counterpart to "N tok/s serving" claims.
+    concurrency: list[int] | None = None
 
 
 def _normalize_raw_cmd(raw_cmd: str | None) -> str | None:
@@ -2483,6 +2486,15 @@ async def run_bench(req: BenchReq):
         runs=req.runs,
     )
     result["resolved_model"] = model
+    if req.concurrency:
+        levels = [max(1, min(int(n), 32)) for n in req.concurrency][:6]
+        result["concurrency"] = await bench.concurrency_sweep(
+            url=base,
+            model=model,
+            prompt=req.prompt or bench.DEFAULT_PROMPT,
+            max_tokens=req.max_tokens,
+            streams=levels,
+        )
     result["engine_version"] = await _detect_engine_version(base)
     if run:
         db.bench_insert(run.id, run.recipe_id, result, engine_version=result["engine_version"])

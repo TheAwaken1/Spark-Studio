@@ -3868,18 +3868,49 @@ function formatBenchyCell(v) {
 }
 
 $('#benchGo').addEventListener('click', async () => {
+  const sweep = $('#benchSweepOn').checked;
   const body = {
     run_id: $('#benchRun').value || undefined,
     prompt: $('#benchPrompt').value || undefined,
     max_tokens: Number($('#benchTokens').value),
     runs: Number($('#benchRuns').value),
+    concurrency: sweep ? [1, 4, 8] : undefined,
   };
+  const btn = $('#benchGo');
+  btn.disabled = true;
+  if (sweep) toast('Concurrency sweep running — 1, then 4, then 8 parallel streams…');
   try {
     const res = await api('/bench', { method: 'POST', body });
     toast(`tokens/s ${(res.tokens_per_sec || 0).toFixed(1)} · TTFT ${(res.ttft_ms || 0).toFixed(0)}ms`);
+    renderBenchSweep(res.concurrency);
     refreshBenchTab();
   } catch (e) { toast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
 });
+
+// Aggregate vs per-stream table: "59 tok/s serving" claims from forums are
+// aggregate numbers at concurrency — showing both next to each other is what
+// keeps a recipe's single-chat feel from looking like a defect.
+function renderBenchSweep(levels) {
+  const box = $('#benchSweep');
+  if (!levels || !levels.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `
+    <table class="bench-sweep-table">
+      <thead><tr><th>Streams</th><th>Aggregate tok/s</th><th>Per-stream tok/s</th><th>TTFT</th><th>Tokens</th></tr></thead>
+      <tbody>
+        ${levels.map((l) => `
+          <tr>
+            <td>${l.streams}${l.completed < l.streams ? ` <span class="badge no" title="${escapeHtml((l.errors || []).join('; '))}">${l.streams - l.completed} failed</span>` : ''}</td>
+            <td><strong>${(l.aggregate_tokens_per_sec || 0).toFixed(1)}</strong></td>
+            <td>${(l.per_stream_tokens_per_sec || 0).toFixed(1)}</td>
+            <td>${l.ttft_ms != null ? l.ttft_ms.toFixed(0) + ' ms' : '—'}</td>
+            <td>${l.completion_tokens ?? '—'}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="muted" style="font-size:12px;margin:6px 0 10px">Aggregate = all streams combined (what "multi-agent serving" claims quote) · Per-stream = what each individual chat experiences at that load.</div>`;
+}
 
 // ---------- agents login -------------------------------------------------
 async function refreshAgents() {

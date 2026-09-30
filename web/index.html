@@ -412,8 +412,10 @@
           <input id="benchPrompt" type="text" placeholder="Custom prompt (optional)" style="flex:1" />
           <input id="benchTokens" type="number" value="256" min="16" max="4096" style="width:100px" />
           <input id="benchRuns" type="number" value="3" min="1" max="20" style="width:80px" />
+          <label class="checkbox" title="Also measure aggregate throughput at 1, 4, and 8 concurrent streams — community &quot;multi-agent serving&quot; numbers are aggregate, not what one chat sees"><input type="checkbox" id="benchSweepOn" /> + concurrency sweep (1/4/8)</label>
           <button id="benchGo" class="btn primary"><i class="fa-solid fa-play"></i> Run</button>
         </div>
+        <div id="benchSweep" hidden></div>
         <canvas id="benchChart" height="100"></canvas>
         <div id="benchTable"></div>
       </div>
