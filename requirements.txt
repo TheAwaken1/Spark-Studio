@@ -16,3 +16,5 @@ llama-benchy>=0.3.8
 ddgs>=9.0
 scipy
 lxml>=5.0
+# vision_sidecar_mcp.py (screenshot downscaling for the Qwen3-VL sidecar)
+pillow>=10.0
