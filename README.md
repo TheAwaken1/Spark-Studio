@@ -446,6 +446,26 @@ only by a clean post-run test command. Markdown and JSON reports land under
 `data/agent-lab/results/`; `sparkstudio agent history` and
 `sparkstudio agent show <run-id>` retrieve the SQLite-backed history.
 
+Run Task Bench to demonstrate real-world agent workflows with tangible,
+machine-checked artifacts:
+
+```bash
+# All three cases: Python audit, current AI news, and GPU/CUDA health
+sparkstudio bench task-bench
+
+# Run selected cases
+sparkstudio bench task-bench --case file-audit --case system-health
+```
+
+Task Bench runs the loaded model, Hermes processes, isolated workspaces,
+verification, SQLite history, and reports locally. Artifacts and reports are
+stored under `data/agent-lab/task-bench/`; tasks cannot write outside their
+individual workspace. The `file-audit` and `system-health` cases do not use the
+network. The `news-research` case is explicitly network-enabled through only
+Spark Studio's managed web-search tool, so search queries and ordinary requests
+to cited news websites leave the machine. Select the other two cases when a
+fully offline evaluation is required.
+
 Use the same harness on your own repository:
 
 ```bash

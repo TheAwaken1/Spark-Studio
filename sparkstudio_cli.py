@@ -195,6 +195,48 @@ def cmd_bench_tools(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_bench_task_bench(args: argparse.Namespace) -> int:
+    """Run the Task Bench — real-world multi-step agentic capability eval."""
+    payload = {
+        "base_url": args.base_url,
+        "model": args.model,
+        "cases": args.case,
+        "max_turns": args.max_turns,
+        "timeout": args.timeout,
+        "unsafe_yolo": args.unsafe_yolo,
+    }
+    with _client(args, timeout=30) as client:
+        response = client.post("/api/taskbench/run", json=payload)
+        response.raise_for_status()
+        state = response.json()
+        while state.get("running"):
+            if not args.json:
+                print(f"  {state.get('done', 0)}/{state.get('total', '?')} complete", end="\r", flush=True)
+            time.sleep(3)
+            response = client.get("/api/taskbench/status")
+            response.raise_for_status()
+            state = response.json()
+    if not args.json:
+        print(" " * 50, end="\r")
+    if args.json:
+        _json(state)
+    else:
+        if state.get("error"):
+            print(f"Task Bench failed: {state['error']}")
+            return 1
+        score = state.get("score")
+        cases = state.get("cases") or []
+        passed = sum(1 for c in cases if c.get("passed"))
+        total = len(cases) or 1
+        print(f"Task Bench: {score} / 100 ({passed}/{total} passed)")
+        for c in cases:
+            result_str = "✅ PASS" if c.get("passed") else "❌ FAIL"
+            print(f"  {result_str} {c.get('case', '?')}: {c.get('detail', '')[:120]}")
+        if state.get("report_path"):
+            print(f"Report: {state['report_path']}")
+    return 0
+
+
 def cmd_agent_doctor(args: argparse.Namespace) -> int:
     endpoint = None
     endpoint_error = None
@@ -419,6 +461,19 @@ def build_parser() -> argparse.ArgumentParser:
     speed.set_defaults(func=cmd_bench_speed)
     tools = bench_commands.add_parser("tools", help="built-in deterministic tool-use benchmark")
     tools.set_defaults(func=cmd_bench_tools)
+    task_bench = bench_commands.add_parser(
+        "task-bench", help="real-world multi-step agentic capability eval"
+    )
+    task_bench.add_argument(
+        "--case",
+        action="append",
+        choices=("file-audit", "news-research", "system-health"),
+        help="case to run; repeat to select several (default: all)",
+    )
+    task_bench.add_argument("--max-turns", type=int, default=90)
+    task_bench.add_argument("--timeout", type=float, default=1800)
+    task_bench.add_argument("--unsafe-yolo", action="store_true", help="disable Hermes command approvals (not recommended)")
+    task_bench.set_defaults(func=cmd_bench_task_bench)
 
     agent = commands.add_parser("agent", help="Hermes Agent Lab")
     agent_commands = agent.add_subparsers(dest="agent_command", required=True)

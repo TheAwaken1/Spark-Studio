@@ -1176,6 +1176,7 @@ def build_hermes_command(
     *,
     max_turns: int = 90,
     unsafe_yolo: bool = False,
+    toolsets: str = "file,terminal",
 ) -> list[str]:
     command = [
         binary,
@@ -1188,7 +1189,7 @@ def build_hermes_command(
         "--provider",
         "custom",
         "--toolsets",
-        "file,terminal",
+        toolsets,
         "--checkpoints",
         "--source",
         "tool",
@@ -1295,14 +1296,34 @@ class _TelemetrySampler:
         return summary
 
 
-def _agent_prompt(task: str, evaluation: bool = False) -> str:
-    preface = (
-        "You are running inside Spark Studio Agent Lab. Work only inside the "
-        "current repository. Do not use the network, sudo, Docker, Git remotes, "
-        "or modify files outside this repository. Inspect the existing code, "
-        "make the smallest correct changes, and run the repository's tests. "
-        "Do not commit or push. "
-    )
+def _agent_prompt(
+    task: str,
+    evaluation: bool = False,
+    *,
+    mode: str = "repository",
+    allow_web_search: bool = False,
+) -> str:
+    if mode == "task-bench":
+        network_rule = (
+            "Use only the provided read-only web_search tool for internet research. "
+            if allow_web_search
+            else "Do not use the network. "
+        )
+        preface = (
+            "You are running inside Spark Studio Task Bench. Work only inside the "
+            "current workspace and write every requested artifact there. "
+            f"{network_rule}Do not use sudo, Docker, Git remotes, or modify files "
+            "outside the current workspace. Use terminal commands only for local "
+            "inspection and calculations. Do not commit or push. "
+        )
+    else:
+        preface = (
+            "You are running inside Spark Studio Agent Lab. Work only inside the "
+            "current repository. Do not use the network, sudo, Docker, Git remotes, "
+            "or modify files outside this repository. Inspect the existing code, "
+            "make the smallest correct changes, and run the repository's tests. "
+            "Do not commit or push. "
+        )
     if evaluation:
         preface += (
             "This is an unattended deterministic evaluation. Do not ask questions; "
@@ -1320,11 +1341,20 @@ def _invoke_hermes(
     timeout: float,
     unsafe_yolo: bool,
     evaluation: bool,
+    mode: str = "repository",
+    allow_web_search: bool = False,
+    toolsets: str = "file,terminal",
 ) -> dict[str, Any]:
     binary = find_hermes()
     if not binary:
         raise RuntimeError(f"Hermes Agent is not installed. Run: {HERMES_INSTALL}")
-    _write_hermes_config(endpoint["base_url"], endpoint["model"], max_turns)
+    _write_hermes_config(
+        endpoint["base_url"],
+        endpoint["model"],
+        max_turns,
+        studio_url=endpoint.get("studio_url") or "http://127.0.0.1:7860",
+        enable_search=allow_web_search,
+    )
     env = os.environ.copy()
     env.update(
         {
@@ -1335,10 +1365,16 @@ def _invoke_hermes(
     )
     command = build_hermes_command(
         binary,
-        _agent_prompt(task, evaluation=evaluation),
+        _agent_prompt(
+            task,
+            evaluation=evaluation,
+            mode=mode,
+            allow_web_search=allow_web_search,
+        ),
         endpoint["model"],
         max_turns=max_turns,
         unsafe_yolo=unsafe_yolo,
+        toolsets=toolsets,
     )
     sampler = _TelemetrySampler()
     started = time.time()

@@ -61,6 +61,7 @@ import searxng_service
 import oomguard
 import sparkrun_service
 import recipe_guard
+import taskbench
 import tooleval
 from runners import runner, engine_available, MemoryTooTight
 
@@ -2564,6 +2565,67 @@ def tooleval_history(limit: int = 50):
             r["results"] = json.loads(r.pop("results_json") or "{}")
         except Exception:  # noqa: BLE001
             r["results"] = {}
+    return rows
+
+
+# ----- Task Bench ------------------------------------------------------------
+
+class TaskBenchReq(BaseModel):
+    run_id: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    cases: list[str] | None = None
+    max_turns: int = 90
+    timeout: float = 1800
+    unsafe_yolo: bool = False
+
+
+@app.post("/api/taskbench/run")
+async def taskbench_run(req: TaskBenchReq):
+    """Start the Task Bench against the active engine. Poll
+    /api/taskbench/status for progress and scores."""
+    base_url = req.base_url
+    if req.run_id:
+        selected_run = runner.get(req.run_id)
+        if not selected_run or not selected_run.url:
+            raise HTTPException(404, "Task Bench run target not found or has no endpoint")
+        base_url = selected_run.url
+    if not base_url:
+        active = runner.active()
+        if not active or not active.url:
+            raise HTTPException(400, "no run_id, base_url, or active engine to evaluate")
+        base_url = active.url
+    studio_url = os.environ.get(
+        "SPARK_STUDIO_INTERNAL_URL", "http://127.0.0.1:7860"
+    ).rstrip("/")
+    try:
+        endpoint = agentlab.discover_endpoint(studio_url, base_url, req.model)
+        return taskbench.start_eval(
+            endpoint,
+            case_ids=req.cases,
+            max_turns=req.max_turns,
+            timeout=req.timeout,
+            unsafe_yolo=req.unsafe_yolo,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/taskbench/status")
+def taskbench_status():
+    return taskbench.eval_status()
+
+
+@app.get("/api/taskbench/history")
+def taskbench_history(limit: int = 50):
+    rows = db.taskbench_list(limit)
+    for r in rows:
+        try:
+            r["cases"] = json.loads(r.pop("cases_json") or "{}")
+        except Exception:  # noqa: BLE001
+            r["cases"] = {}
     return rows
 
 

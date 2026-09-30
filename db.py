@@ -111,6 +111,16 @@ def init():
             created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agentlab_created ON agentlab_runs(created_at);
+        CREATE TABLE IF NOT EXISTS taskbench_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            model TEXT,
+            base_url TEXT,
+            score REAL,
+            cases_json TEXT,
+            duration_seconds REAL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_taskbench_model ON taskbench_runs(model);
         CREATE TABLE IF NOT EXISTS recipe_snapshots (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             recipe_id INTEGER NOT NULL,
@@ -481,6 +491,29 @@ def agentlab_get(run_id):
         c.execute("SELECT * FROM agentlab_runs WHERE id=?", (run_id,))
         row = c.fetchone()
         return dict(row) if row else None
+
+
+def taskbench_upsert(data):
+    with cur() as c:
+        c.execute(
+            "INSERT INTO taskbench_runs (model, base_url, score, cases_json, duration_seconds, created_at) VALUES (?,?,?,?,?,?)",
+            (
+                data.get("model"),
+                data.get("base_url"),
+                data.get("score"),
+                data.get("cases_json"),
+                data.get("duration_seconds"),
+                now(),
+            ),
+        )
+        return c.lastrowid
+
+
+def taskbench_list(limit=50):
+    with cur() as c:
+        c.execute("SELECT * FROM taskbench_runs ORDER BY created_at DESC LIMIT ?", (limit,))
+        return [dict(r) for r in c.fetchall()]
+
 
 init()
 _add_col_if_missing("recipes", "raw_cmd", "TEXT")

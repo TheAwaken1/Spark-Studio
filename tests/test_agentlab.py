@@ -65,6 +65,71 @@ class AgentLabConfigurationTests(unittest.TestCase):
         self.assertEqual(command[command.index("--max-turns") + 1], "42")
         self.assertNotIn("--yolo", command)
 
+    def test_hermes_command_accepts_explicit_task_bench_toolsets(self):
+        command = agentlab.build_hermes_command(
+            "/usr/bin/hermes",
+            "research the task",
+            "local-model",
+            toolsets="file,terminal,mcp-sparkstudio",
+        )
+
+        self.assertEqual(
+            command[command.index("--toolsets") + 1],
+            "file,terminal,mcp-sparkstudio",
+        )
+
+    def test_task_bench_prompt_allows_managed_search_but_keeps_local_write_scope(self):
+        prompt = agentlab._agent_prompt(
+            "research current AI news",
+            evaluation=True,
+            mode="task-bench",
+            allow_web_search=True,
+        )
+
+        self.assertIn("current workspace", prompt)
+        self.assertIn("web_search", prompt)
+        self.assertNotIn("Do not use the network", prompt)
+        self.assertNotIn("run the repository's tests", prompt)
+
+    def test_invoke_hermes_enables_managed_search_for_task_bench(self):
+        completed = subprocess.CompletedProcess(["hermes"], 0, stdout="done", stderr="")
+        endpoint = {
+            "base_url": "http://127.0.0.1:8000/v1",
+            "model": "local-model",
+            "studio_url": "http://127.0.0.1:7860",
+        }
+        with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(agentlab, "find_hermes", return_value="/usr/bin/hermes"),
+            mock.patch.object(agentlab, "_write_hermes_config") as write_config,
+            mock.patch.object(agentlab, "_run", return_value=completed),
+        ):
+            result = agentlab._invoke_hermes(
+                endpoint,
+                Path(tmp),
+                "research current AI news",
+                max_turns=12,
+                timeout=30,
+                unsafe_yolo=False,
+                evaluation=True,
+                mode="task-bench",
+                allow_web_search=True,
+                toolsets="file,terminal,mcp-sparkstudio",
+            )
+
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(
+            result["command"][result["command"].index("--toolsets") + 1],
+            "file,terminal,mcp-sparkstudio",
+        )
+        write_config.assert_called_once_with(
+            endpoint["base_url"],
+            endpoint["model"],
+            12,
+            studio_url=endpoint["studio_url"],
+            enable_search=True,
+        )
+
     def test_yolo_requires_explicit_opt_in(self):
         command = agentlab.build_hermes_command(
             "hermes", "task", "model", unsafe_yolo=True
