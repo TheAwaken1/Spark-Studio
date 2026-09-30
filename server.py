@@ -60,6 +60,7 @@ import registry
 import searxng_service
 import oomguard
 import sparkrun_service
+import recipe_guard
 import tooleval
 from runners import runner, engine_available, MemoryTooTight
 
@@ -630,7 +631,11 @@ async def save_recipe(recipe: Recipe):
     if (data.get("engine") or "").lower() == "vllm" and not data.get("raw_cmd"):
         native = await _native_context_for(data.get("model") or (data.get("args") or {}).get("model"))
         recipe_brain.apply_perf_defaults(data, native_context=native, add_capabilities=False)
-    return db.recipes_upsert(data)
+    saved = db.recipes_upsert(data)
+    # Lint rides along on the saved recipe so the editor can surface warnings
+    # (e.g. a context window Hermes Agent will refuse) without a second call.
+    saved["lint"] = recipe_guard.lint(saved)
+    return saved
 
 
 @app.get("/api/recipes/capabilities")
@@ -646,6 +651,57 @@ async def recipe_capabilities(model: str):
     )
     caps["max_num_batched_tokens"] = recipe_brain.TARGET_MAX_NUM_BATCHED_TOKENS
     return caps
+
+
+class LintReq(BaseModel):
+    yaml_text: str | None = None
+    recipe: dict[str, Any] | None = None
+
+
+@app.post("/api/recipes/lint")
+def lint_recipe(req: LintReq):
+    """Standalone lint for editors: pass raw YAML or a recipe dict."""
+    if req.yaml_text is not None:
+        return {"findings": recipe_guard.lint_yaml(req.yaml_text)}
+    return {"findings": recipe_guard.lint(req.recipe)}
+
+
+@app.get("/api/recipes/files/{stem}/history")
+def recipe_file_history(stem: str):
+    """Pre-launch snapshots of a bundled recipes/<stem>.yaml file."""
+    return recipe_guard.file_snapshots(stem)
+
+
+@app.get("/api/recipes/files/{stem}/history/{name}")
+def recipe_file_snapshot(stem: str, name: str):
+    content = recipe_guard.file_snapshot_read(stem, name)
+    if content is None:
+        raise HTTPException(404, "snapshot not found")
+    return {"name": name, "content": content}
+
+
+@app.post("/api/recipes/files/{stem}/restore/{name}")
+def recipe_file_restore(stem: str, name: str):
+    restored = recipe_guard.file_snapshot_restore(stem, name)
+    if restored is None:
+        raise HTTPException(404, "snapshot not found")
+    return {"ok": True, "path": str(restored), "lint": recipe_guard.lint_yaml(restored.read_text(encoding="utf-8"))}
+
+
+@app.get("/api/recipes/{rid}/history")
+def recipe_history(rid: int):
+    if not db.recipes_get(rid):
+        raise HTTPException(404, "recipe not found")
+    return db.recipe_snapshots_list(rid)
+
+
+@app.post("/api/recipes/{rid}/restore/{snap_id}")
+def recipe_restore(rid: int, snap_id: int):
+    restored = db.recipe_snapshot_restore(rid, snap_id)
+    if restored is None:
+        raise HTTPException(404, "snapshot not found")
+    restored["lint"] = recipe_guard.lint(restored)
+    return restored
 
 
 @app.get("/api/recipes/{rid}")
@@ -729,7 +785,8 @@ def start_run(req: StartReq):
         if not ref:
             raise HTTPException(400, "sparkrun recipe is missing its ref (args._sparkrun.ref)")
         try:
-            return _start_sparkrun(ref, spark_args.get("tp"), recipe_id=req.recipe_id, force=req.force).summary()
+            spark_run = _start_sparkrun(ref, spark_args.get("tp"), recipe_id=req.recipe_id, force=req.force)
+            return {**spark_run.summary(), "lint": getattr(spark_run, "lint_findings", [])}
         except MemoryTooTight as e:
             raise HTTPException(507, str(e)) from e
     try:
@@ -992,6 +1049,18 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
     launch_target = sparkrun_service.resolve_recipe_target(ref)
     if ref.startswith("@studio/") and launch_target == ref:
         raise HTTPException(404, f"bundled sparkrun recipe not found: {ref}")
+    # Bundled YAMLs are editable by agents through the shell with no other
+    # undo path: keep a "last launched" snapshot and lint what's about to run
+    # so a broken edit (e.g. a context window Hermes will refuse) is visible
+    # at launch time instead of minutes later.
+    lint_findings: list[dict[str, str]] = []
+    target_path = Path(launch_target)
+    if target_path.suffix.lower() in {".yaml", ".yml"} and target_path.is_file():
+        recipe_guard.snapshot_file(target_path, source="launch")
+        try:
+            lint_findings = recipe_guard.lint_yaml(target_path.read_text(encoding="utf-8"))
+        except OSError:
+            lint_findings = []
     # Always pass --tp: recipes carry their own tensor_parallel default (often
     # 2+), which would silently override a single-node launch otherwise.
     tp = max(1, int(tp or 1))
@@ -1037,13 +1106,15 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
         # the watchdog don't depend on spotting a URL in the log stream.
         run.port = run.port or int(spark_opts.get("port") or 8000)
         run.url = run.url or f"http://127.0.0.1:{run.port}"
+    run.lint_findings = lint_findings
     return run
 
 
 @app.post("/api/sparkrun/run")
 def sparkrun_run(req: SparkrunReq):
     try:
-        return _start_sparkrun(req.ref, req.tp, force=req.force).summary()
+        run = _start_sparkrun(req.ref, req.tp, force=req.force)
+        return {**run.summary(), "lint": getattr(run, "lint_findings", [])}
     except MemoryTooTight as e:
         raise HTTPException(507, str(e)) from e
 
@@ -1598,6 +1669,7 @@ async def agents_autofix(rid: str, request: Request, agent: str = "claude", atte
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": new_raw,
+                "_snapshot_source": "agent",
             })
             yield _ev({"type": "status", "attempt": attempt, "of": tries,
                        "text": "Launching the patched recipe…"})
@@ -1790,6 +1862,7 @@ async def agents_optimize(rid: str, request: Request, agent: str = "claude", att
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": new_raw,
+                "_snapshot_source": "agent",
             })
             yield _ev({"type": "status", "attempt": attempt, "of": tries,
                        "text": "Relaunching with the tuned settings… (model reload can take minutes)"})
@@ -1883,6 +1956,7 @@ async def agents_optimize(rid: str, request: Request, agent: str = "claude", att
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": best_recipe.get("raw_cmd"),
+                "_snapshot_source": "agent",
             })
             try:
                 body = StartReq(

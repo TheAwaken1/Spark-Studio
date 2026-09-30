@@ -934,6 +934,7 @@ async function refreshRecipes() {
       <div class="rc-actions">
         <button class="btn primary" data-run="${r.id}">▶ Run</button>
         <button class="btn" data-edit="${r.id}">Edit</button>
+        <button class="btn" data-history="${r.id}" title="Every edit (yours or an agent's) keeps the previous version — restore any of them">⟲ History</button>
         <button class="btn" data-share="${r.id}" title="Copy recipe in the community spark-arena YAML format (falls back to JSON for pipeline recipes)">⧉ Share</button>
         <button class="btn danger" data-del="${r.id}">Del</button>
       </div>
@@ -953,6 +954,7 @@ async function refreshRecipes() {
           : { engine: r.engine, args: { model: r.model, ...r.args }, env: r.env || {}, recipe_id: r.id };
         const run = await api('/runs', { method: 'POST', body });
         toast(`Started run ${run.id}`);
+        lintToast(run.lint);
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
       }
@@ -960,6 +962,20 @@ async function refreshRecipes() {
   }));
   $$('#recipesList [data-edit]').forEach((b) => b.addEventListener('click', async () => {
     openRecipeModal(await api(`/recipes/${b.dataset.edit}`));
+  }));
+  $$('#recipesList [data-history]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const rid = b.dataset.history;
+      const rows = await api(`/recipes/${rid}/history`);
+      showHistoryModal('Recipe history', rows.map((s) => ({
+        ...s, summary: recipeSnapshotSummary(s.recipe),
+      })), async (row) => {
+        const restored = await api(`/recipes/${rid}/restore/${row.id}`, { method: 'POST' });
+        toast(`Restored "${restored.name}" to ${new Date(row.taken_at * 1000).toLocaleString()}`);
+        lintToast(restored.lint);
+        refreshRecipes();
+      });
+    } catch (e) { toast(e.message, 'danger'); }
   }));
   $$('#recipesList [data-share]').forEach((b) => b.addEventListener('click', async () => {
     try {
@@ -1052,6 +1068,7 @@ async function refreshSparkrun() {
         ${r.description ? `<div class="rc-notes">${escapeHtml(r.description)}</div>` : ''}
         <div class="rc-actions">
           <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Install sparkrun first"'}>▶ Run via sparkrun</button>
+          ${r.ref.startsWith('@studio/') ? `<button class="btn" data-file-history="${escapeHtml(r.ref.split('/')[1])}" title="Snapshots of the bundled YAML taken before every launch — restore if an edit broke it">⟲ History</button>` : ''}
         </div>
       </div>`).join('') || `<div class="muted">No recipes fit ${tp} node${tp > 1 ? 's' : ''}${q ? ' matching your search' : ''}. Raise Nodes (TP) to see multi-Spark recipes.</div>`;
     bindFavButtons('#sparkrunList', refreshSparkrun);
@@ -1060,9 +1077,23 @@ async function refreshSparkrun() {
         const tp = Number($('#sparkrunTp').value) || 1;
         const run = await api('/sparkrun/run', { method: 'POST', body: { ref: btn.dataset.sparkrun, tp } });
         toast(`Started ${run.id} — ${btn.dataset.sparkrun}${tp > 1 ? ` on ${tp} nodes` : ''}${run.recipe_id ? ' · saved to My Recipes' : ''}`);
+        lintToast(run.lint);
         refreshRecipes();
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
+      } catch (e) { toast(e.message, 'danger'); }
+    }));
+    $$('#sparkrunList [data-file-history]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        const stem = btn.dataset.fileHistory;
+        const rows = await api(`/recipes/files/${encodeURIComponent(stem)}/history`);
+        showHistoryModal(`Bundled recipe history — ${stem}`, rows.map((s) => ({
+          ...s, id: s.name, summary: `${(s.size / 1024).toFixed(1)} KB`,
+        })), async (row) => {
+          const res = await api(`/recipes/files/${encodeURIComponent(stem)}/restore/${encodeURIComponent(row.name)}`, { method: 'POST' });
+          toast(`Restored ${stem}.yaml to ${new Date(row.taken_at * 1000).toLocaleString()} — next launch uses it`);
+          lintToast(res.lint);
+        });
       } catch (e) { toast(e.message, 'danger'); }
     }));
   } catch (e) {
@@ -1320,6 +1351,7 @@ async function saveRecipeFromModal(thenRun) {
     const validation = validateRecipePayload(recipe);
     if (!validation.ok) throw new Error(validation.error);
     const saved = await api('/recipes', { method: 'POST', body: recipe });
+    lintToast(saved.lint);
     $('#recipeModal').hidden = true;
     refreshRecipes();
     if (thenRun) {
@@ -5206,9 +5238,9 @@ function toast(msg, kind = 'ok') {
   const t = h('div', { class: `toast ${kind}` }, msg);
   Object.assign(t.style, {
     position: 'fixed', bottom: '24px', right: '24px', padding: '10px 14px',
-    background: kind === 'danger' ? 'var(--danger)' : 'var(--bg-elev)',
-    color: kind === 'danger' ? '#fff' : 'var(--text)',
-    border: '1px solid var(--border)', borderRadius: '10px',
+    background: kind === 'danger' ? 'var(--danger)' : kind === 'warn' ? '#3a2f14' : 'var(--bg-elev)',
+    color: kind === 'danger' ? '#fff' : kind === 'warn' ? '#f0d47a' : 'var(--text)',
+    border: kind === 'warn' ? '1px solid #c9a227' : '1px solid var(--border)', borderRadius: '10px',
     boxShadow: '0 10px 40px rgba(0,0,0,0.4)', zIndex: 200, fontSize: '13px',
   });
   document.body.appendChild(t);
@@ -5216,6 +5248,56 @@ function toast(msg, kind = 'ok') {
 }
 
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ---------- recipe guard rails --------------------------------------------
+// Lint findings ride along on save/launch responses; surface each as a toast
+// so a change that will break something downstream is visible immediately.
+function lintToast(lint) {
+  (lint || []).forEach((f, i) => setTimeout(
+    () => toast(`Recipe check: ${f.message}`, f.level === 'error' ? 'danger' : 'warn'),
+    350 * (i + 1),
+  ));
+}
+
+// Generic snapshot-history modal shared by DB recipes and bundled YAML files.
+// rows: [{id/name, taken_at, source, summary}], restore(row) does the work.
+function showHistoryModal(title, rows, restore) {
+  const close = () => overlay.remove();
+  const overlay = h('div', { class: 'snap-overlay', onclick: (e) => { if (e.target === overlay) close(); } },
+    h('div', { class: 'snap-modal' },
+      h('div', { class: 'snap-head' },
+        h('strong', {}, title),
+        h('button', { class: 'btn', onclick: close }, '✕'),
+      ),
+      rows.length ? h('div', { class: 'snap-list' },
+        rows.map((row) => h('div', { class: 'snap-row' },
+          h('div', {},
+            h('div', { class: 'snap-when' }, new Date(row.taken_at * 1000).toLocaleString()),
+            h('div', { class: 'snap-meta' }, `${row.source || 'edit'}${row.summary ? ' · ' + row.summary : ''}`),
+          ),
+          h('button', {
+            class: 'btn',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try { await restore(row); close(); }
+              catch (err) { toast(err.message, 'danger'); e.target.disabled = false; }
+            },
+          }, '⟲ Restore'),
+        )),
+      ) : h('div', { class: 'muted', style: 'padding:18px' },
+        'No snapshots yet — one is taken automatically before every edit and launch.'),
+    ),
+  );
+  document.body.appendChild(overlay);
+}
+
+function recipeSnapshotSummary(rec) {
+  const parts = [];
+  if (rec?.model) parts.push(rec.model);
+  const ctx = rec?.args?.max_model_len ?? rec?.args?.['max-model-len'] ?? rec?.args?._sparkrun?.max_model_len;
+  if (ctx) parts.push(`ctx ${Number(ctx).toLocaleString()}`);
+  return parts.join(' · ');
+}
 
 // Copy text to the clipboard. navigator.clipboard only exists in secure
 // contexts (https / localhost); when the app is served over plain http on the

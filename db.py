@@ -111,6 +111,15 @@ def init():
             created_at INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS idx_agentlab_created ON agentlab_runs(created_at);
+        CREATE TABLE IF NOT EXISTS recipe_snapshots (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            recipe_id INTEGER NOT NULL,
+            taken_at INTEGER NOT NULL,
+            source TEXT NOT NULL DEFAULT 'edit',
+            payload TEXT NOT NULL,
+            FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_recipe_snapshots ON recipe_snapshots(recipe_id, taken_at);
         """
     )
 
@@ -150,11 +159,81 @@ def _recipe_row(r):
     return d
 
 
-def recipes_upsert(data):
+# Keep enough history to undo a bad agent loop (3 attempts × a few edits)
+# without letting the table grow unbounded.
+_SNAPSHOT_KEEP = 20
+
+
+def recipe_snapshot_take(rid, source="edit"):
+    """Store the recipe's current content as an immutable pre-change copy.
+
+    Skips when nothing changed since the newest snapshot, so repeated saves
+    (auto-save on every launch, agent retries) don't spam identical history.
+    """
+    rec = recipes_get(rid)
+    if not rec:
+        return None
+    payload = json.dumps({k: v for k, v in rec.items() if k not in {"id"}}, sort_keys=True)
+    with cur() as c:
+        c.execute(
+            "SELECT id, payload FROM recipe_snapshots WHERE recipe_id=? ORDER BY taken_at DESC, id DESC LIMIT 1",
+            (rid,),
+        )
+        newest = c.fetchone()
+        if newest and newest["payload"] == payload:
+            return newest["id"]
+        c.execute(
+            "INSERT INTO recipe_snapshots (recipe_id, taken_at, source, payload) VALUES (?,?,?,?)",
+            (rid, now(), source, payload),
+        )
+        snap_id = c.lastrowid
+        c.execute(
+            "DELETE FROM recipe_snapshots WHERE recipe_id=? AND id NOT IN "
+            "(SELECT id FROM recipe_snapshots WHERE recipe_id=? ORDER BY taken_at DESC, id DESC LIMIT ?)",
+            (rid, rid, _SNAPSHOT_KEEP),
+        )
+        return snap_id
+
+
+def recipe_snapshots_list(rid):
+    with cur() as c:
+        c.execute(
+            "SELECT id, recipe_id, taken_at, source, payload FROM recipe_snapshots "
+            "WHERE recipe_id=? ORDER BY taken_at DESC, id DESC",
+            (rid,),
+        )
+        rows = []
+        for r in c.fetchall():
+            d = dict(r)
+            d["recipe"] = json.loads(d.pop("payload"))
+            rows.append(d)
+        return rows
+
+
+def recipe_snapshot_restore(rid, snap_id):
+    """Roll the recipe back to a snapshot; the pre-restore state is itself
+    snapshotted first, so a restore is always undoable."""
+    with cur() as c:
+        c.execute(
+            "SELECT payload FROM recipe_snapshots WHERE id=? AND recipe_id=?",
+            (snap_id, rid),
+        )
+        row = c.fetchone()
+    if not row:
+        return None
+    recipe_snapshot_take(rid, source="pre-restore")
+    old = json.loads(row["payload"])
+    old["id"] = rid
+    return recipes_upsert(old, _snapshot=False)
+
+
+def recipes_upsert(data, _snapshot=True):
     t = now()
     args_json = json.dumps(data.get("args") or {})
     env_json = json.dumps(data.get("env") or {})
     raw_cmd = data.get("raw_cmd")
+    if data.get("id") and _snapshot:
+        recipe_snapshot_take(data["id"], source=data.pop("_snapshot_source", "edit"))
     with cur() as c:
         if data.get("id"):
             c.execute(

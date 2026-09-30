@@ -1617,3 +1617,28 @@ th { color: var(--muted); font-weight: 500; font-size: 12px; }
   .hermes-skin-actions { justify-content: stretch; }
   .hermes-skin-actions .btn { flex: 1; }
 }
+
+/* ---------- recipe snapshot history --------------------------------------- */
+.snap-overlay {
+  position: fixed; inset: 0; z-index: 950;
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(4, 8, 15, 0.7);
+}
+.snap-modal {
+  background: var(--bg-elev); border: 1px solid var(--bg-elev-2);
+  border-radius: 14px; width: min(560px, 92vw); max-height: 80vh;
+  display: flex; flex-direction: column; overflow: hidden;
+  box-shadow: 0 18px 60px rgba(0,0,0,0.5);
+}
+.snap-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 14px 18px; border-bottom: 1px solid var(--bg-elev-2);
+}
+.snap-list { overflow-y: auto; }
+.snap-row {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 12px 18px; border-bottom: 1px solid var(--bg-elev-2);
+}
+.snap-row:last-child { border-bottom: none; }
+.snap-when { font-size: 13.5px; }
+.snap-meta { font-size: 12px; color: var(--muted); font-family: 'JetBrains Mono', monospace; }
