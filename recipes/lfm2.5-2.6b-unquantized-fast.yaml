@@ -1,0 +1,57 @@
+recipe_version: "2"
+name: LFM2.5-2.6B-unquantized-fast
+model: LiquidAI/LFM2.5-2.6B
+model_revision: a4e00e83c0979ee9deb88d04b6360599fa956656
+runtime: vllm
+min_nodes: 1
+max_nodes: 1
+container: ghcr.io/spark-arena/dgx-vllm-eugr-nightly:latest
+
+metadata:
+  description: >-
+    Fast single-DGX-Spark profile for LiquidAI's native BF16 LFM2.5-2.6B
+    checkpoint, with prefix caching and OpenAI-compatible reasoning and tool
+    calls. The 16K default leaves ample room for concurrent agent workloads;
+    override max_model_len up to the model's native 131072-token context.
+  maintainer: Spark Studio local recipe
+  model_params: 2.69B
+  model_dtype: bfloat16
+  kv_dtype: bfloat16
+  num_layers: 30
+  num_kv_heads: 8
+  head_dim: 64
+
+defaults:
+  model_revision: a4e00e83c0979ee9deb88d04b6360599fa956656
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  gpu_memory_utilization: 0.90
+  max_model_len: 16384
+  max_num_batched_tokens: 32768
+  served_model_name: LFM2.5-2.6B-unquantized-fast
+  tool_call_parser: lfm2
+  reasoning_parser: qwen3
+
+command: |
+  vllm serve {model} \
+    --revision {model_revision} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --load-format fastsafetensors \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser}
+
+benchmark:
+  framework: llama-benchy
+  pp: [2048]
+  depth: [0, 4096]
+  prefix_caching: true

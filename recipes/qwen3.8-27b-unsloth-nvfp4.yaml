@@ -1,0 +1,139 @@
+recipe_version: "2"
+name: Qwen3.8-27B Unsloth NVFP4
+model: unsloth/Qwen3.8-27B-NVFP4
+model_revision: 38bd651c3a121aa4c6dbe5e5acc1e0b82dc1f5c3
+runtime: vllm
+min_nodes: 1
+max_nodes: 1
+# NATIVE-NVFP4 + MTP-3 PROFILE (measured on this GB10, 08-15).
+# The upstream vllm/vllm-openai:nightly-aarch64 image has NO Blackwell GB10
+# NVFP4 GEMM, so it can only serve this checkpoint via a slower compressed-
+# tensors dequant path with triton_attn (~13-14 tok/s flat). The eugr
+# spark-vllm-b12x nightly (this pinned digest = vLLM 0.26.1rc1 d20260810)
+# registers the Qwen3_5MTP / Qwen3_5ForConditionalGeneration arch and selects
+# the native FlashInferCutlassNvFp4LinearKernel for the NVFP4 weight group plus
+# CutlassFP8ScaledMMLinearKernel for the FP8 group (mixed-precision checkpoint),
+# confirmed in the engine log. MTP self-speculative decoding runs at depth 3
+# (the checkpoint has ONE MTP layer -> autoregressive for n<=3; n>=4 crashes).
+#
+# MEASURED single-stream tok/s on this box (thinking OFF, native path, MTP-3):
+#   structured/counting 21.5 | code+tests 20.7 | reasoning prose 13.0 |
+#   creative prose 11.6.  MTP acceptance is CONTENT-DEPENDENT: it lifts
+#   predictable/structured output (code, agentic tool calls) to ~20-21 tok/s
+#   but sags to ~12-13 on novel natural-language prose, which is the GB10
+#   memory-bandwidth floor for a 27B model no config escapes on ONE Spark.
+#   The widely-cited "31.7 tok/s" (drowzeys) is a best-case, MTP-friendly
+#   generation, NOT a general-prose number -- do not expect it on chat prose.
+#
+# The bigger real-world win for agentic/chat use is DISABLING THINKING (this
+# model's reasoning trace burns tokens: "17*23" spends 43 tokens thinking vs 4
+# with thinking off, and can eat the whole context "just thinking"). Pass
+#   "chat_template_kwargs": {"enable_thinking": false}
+# in the request body for snappy agentic responses; leave it on only when you
+# actually want chain-of-thought.
+container: eugr/spark-vllm@sha256:2858d85ca468c917fa27575675da8a4d48969c743eb2730af694f077e48b0019
+
+metadata:
+  description: >-
+    DGX Spark/GB10 native-NVFP4 speed profile for Unsloth's Qwen3.8 27B NVFP4
+    checkpoint (Qwen3_5ForConditionalGeneration, dense hybrid: 48 Gated
+    DeltaNet + 16 full-attention layers, SwiGLU MLP, NO experts -> no MoE
+    backend). Served through the eugr b12x nightly's native Blackwell NVFP4
+    GEMM (no --quantization flag; that would force a slower compressed-tensors
+    dequant). The repo ships a 1-layer MTP head (model_mtp.safetensors) used
+    here for self-speculative decoding at depth 3 -- the primary decode lever,
+    ~2.85x tok/s (11.1 -> 31.7 measured). KV is fp8 (auto under MTP, set
+    explicitly). Native 262k context; extend to 1M via YaRN (see longctx note).
+  maintainer: Spark Studio local recipe
+  model_params: 27B
+  model_dtype: nvfp4
+  model_vram: 22.6
+  kv_dtype: fp8
+
+defaults:
+  model_revision: 38bd651c3a121aa4c6dbe5e5acc1e0b82dc1f5c3
+  port: 8000
+  host: 0.0.0.0
+  tensor_parallel: 1
+  # 0.90 per the drowzeys champion config -> a ~2.31M-token fp8 KV pool at
+  # 262144 context (8.8x concurrency at 256K). The native NVFP4 path frees more
+  # headroom than the compressed-tensors path, so 0.90 fits where the old
+  # upstream-image profile needed 0.85. If a launch aborts with "Free memory
+  # less than desired utilization" (other containers holding GB10 UMA), drop to
+  # 0.85 with -o gpu_memory_utilization=0.85.
+  gpu_memory_utilization: 0.90
+  # 262144 (native). The native-NVFP4 KV pool is large enough to hold this at
+  # util 0.90; MTP scratch fits here on the eugr image (unlike the upstream
+  # compressed-tensors path, which needed 64K for a deterministic boot). For 1M
+  # context add YaRN: -o max_model_len=1048576 and pass
+  #   --rope-scaling '{"rope_type":"yarn","factor":4.0,"original_max_position_embeddings":262144}'
+  # (~2 concurrent full-1M requests; YaRN slightly softens short-context
+  # quality, so only use it when you actually exceed 256K).
+  max_model_len: 262144
+  max_num_seqs: 8
+  max_num_batched_tokens: 8192
+  served_model_name: qwen3.8-27b-nvfp4
+  kv_cache_dtype: fp8
+  tool_call_parser: hermes
+  reasoning_parser: qwen3
+  # MTP self-speculative decoding at depth 3 -- THE decode-speed lever on this
+  # build. The checkpoint has exactly ONE MTP layer (mtp_num_hidden_layers=1);
+  # vLLM runs it autoregressively for n<=3 (acceptance ladder n1->19.4, n2->26.3,
+  # n3->31.7 tok/s). n>=4 emits invalid tokens and CRASHES -- 3 is the ceiling.
+  # Disable entirely with -o speculative_config='' (and drop the flag line).
+  speculative_config: '{"method":"mtp","num_speculative_tokens":3}'
+  # Multimodal DISABLED (image:0,video:0). This is a TEXT/agentic serving
+  # profile and the vision path must be off for TWO reasons on this build:
+  #   1) BOOT CRASH: with mm enabled, vLLM's online-renderer warmup builds a
+  #      dummy multimodal input at seq_len=max_model_len (262144) and the
+  #      Qwen3-VL image processor dies in torch.cat during that warmup, which
+  #      trips _interrupt_init -> KeyboardInterrupt("terminated") and kills the
+  #      server ~2s before it would have bound the API (engine init otherwise
+  #      fully succeeds). Setting every modality limit to 0 removes the
+  #      mm_processor from warmup entirely (base.py: mm_limits = {k:v if v>0}).
+  #   2) It also frees the vision-tower weights/activation from the budget.
+  # To actually serve images/video, override -o limit_mm_per_prompt='{"image":4,"video":1}'
+  # AND drop --skip-mm-profiling / lower max_model_len so mm warmup can't OOM.
+  limit_mm_per_prompt: '{"image":0,"video":0}'
+  media_io_kwargs: '{"video":{"num_frames":-1}}'
+
+env:
+  # eugr b12x native FP4 kernel selection + guards (drowzeys champion env).
+  # FLASHINFER_CUDA_ARCH_LIST targets GB10 SM 12.1a; the version check is
+  # disabled because the pinned FlashInfer predates the running CUDA minor;
+  # VLLM_ALLOW_LONG_MAX_MODEL_LEN permits the native 262144 window.
+  FLASHINFER_CUDA_ARCH_LIST: 12.1a
+  FLASHINFER_DISABLE_VERSION_CHECK: "1"
+  VLLM_ALLOW_LONG_MAX_MODEL_LEN: "1"
+  # Also kept for Unsloth's CUTE-DSL NVFP4 kernels on SM 12.1.
+  CUTE_DSL_ARCH: sm_121a
+
+command: |
+  vllm serve {model} \
+    --revision {model_revision} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --tensor-parallel-size {tensor_parallel} \
+    --gpu-memory-utilization {gpu_memory_utilization} \
+    --max-model-len {max_model_len} \
+    --max-num-seqs {max_num_seqs} \
+    --max-num-batched-tokens {max_num_batched_tokens} \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --speculative-config '{speculative_config}' \
+    --limit-mm-per-prompt '{limit_mm_per_prompt}' \
+    --media-io-kwargs '{media_io_kwargs}' \
+    --skip-mm-profiling \
+    --enable-flashinfer-autotune \
+    --enable-prefix-caching \
+    --enable-chunked-prefill \
+    --trust-remote-code \
+    --enable-auto-tool-choice \
+    --tool-call-parser {tool_call_parser} \
+    --reasoning-parser {reasoning_parser}
+
+benchmark:
+  framework: llama-benchy
+  pp: [2048]
+  depth: [0, 4096]
+  prefix_caching: true

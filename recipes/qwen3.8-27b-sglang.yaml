@@ -1,0 +1,92 @@
+recipe_version: "2"
+name: Qwen3.8-27B SGLang DGX Spark
+model: RadixArk/Qwen3.8-27B-NVFP4
+runtime: sglang
+min_nodes: 1
+max_nodes: 1
+container: lmsysorg/sglang:qwen38-27b
+
+metadata:
+  description: >-
+    Upstream MiaAI-Lab DGX Spark profile for Qwen3.8-27B NVFP4 on GB10.
+    Uses FlashInfer attention, FP8 KV cache, the DSpark speculative drafter,
+    torch compile/decode graphs, and an explicitly sized GDN state pool for
+    predictable concurrency. DSpark is measured faster for code and agents,
+    while the bundled MTP path remains better for long-form prose.
+  maintainer: Spark Studio local recipe
+  model_params: 27B
+  model_dtype: nvfp4
+  model_vram: 22.0
+  kv_dtype: fp8
+
+defaults:
+  port: 8000
+  host: 0.0.0.0
+  served_model_name: qwen3.8-27b-sglang
+  model_path: RadixArk/Qwen3.8-27B-NVFP4
+  context_length: 262144
+  max_running_requests: 10
+  mem_fraction_static: 0.85
+  chunked_prefill_size: 8192
+  max_mamba_cache_size: 40
+  mamba_full_memory_ratio: 4.21
+  mamba_radix_cache_strategy: extra_buffer_lazy
+  speculative_algorithm: DSPARK
+  speculative_draft_model_path: RadixArk/Qwen3.8-27B-DSpark
+  speculative_dspark_block_size: 7
+  speculative_draft_model_quantization: unquant
+  dspark_num_draft_tokens: 8
+  enable_torch_compile: true
+  torch_compile_max_bs: 4
+  cuda_graph_max_bs_decode: 4
+  num_continuous_decode_steps: 2
+  kv_cache_dtype: fp8_e4m3
+  mamba_ssm_dtype: bfloat16
+  attention_backend: flashinfer
+  mm_feature_transport: cpu
+  reasoning_parser: qwen3
+  tool_call_parser: qwen3_coder
+
+command: |
+  python3 -m sglang.launch_server \
+    --model-path {model_path} \
+    --served-model-name {served_model_name} \
+    --host {host} \
+    --port {port} \
+    --trust-remote-code \
+    --mem-fraction-static {mem_fraction_static} \
+    --attention-backend {attention_backend} \
+    --mm-feature-transport {mm_feature_transport} \
+    --chunked-prefill-size {chunked_prefill_size} \
+    --disable-prefill-cuda-graph \
+    --kv-cache-dtype {kv_cache_dtype} \
+    --mamba-ssm-dtype {mamba_ssm_dtype} \
+    --mamba-full-memory-ratio {mamba_full_memory_ratio} \
+    --mamba-radix-cache-strategy {mamba_radix_cache_strategy} \
+    --max-mamba-cache-size {max_mamba_cache_size} \
+    --max-running-requests {max_running_requests} \
+    --context-length {context_length} \
+    --speculative-algorithm {speculative_algorithm} \
+    --speculative-draft-model-path {speculative_draft_model_path} \
+    --speculative-dspark-block-size {speculative_dspark_block_size} \
+    --speculative-draft-model-quantization {speculative_draft_model_quantization} \
+    --speculative-num-draft-tokens {dspark_num_draft_tokens} \
+    --enable-torch-compile \
+    --torch-compile-max-bs {torch_compile_max_bs} \
+    --cuda-graph-max-bs-decode {cuda_graph_max_bs_decode} \
+    --num-continuous-decode-steps {num_continuous_decode_steps} \
+    --reasoning-parser {reasoning_parser} \
+    --tool-call-parser {tool_call_parser} \
+    --sampling-defaults model
+
+benchmark:
+  framework: llama-benchy
+  model: RadixArk/Qwen3.8-27B-NVFP4
+  tokenizer: RadixArk/Qwen3.8-27B-NVFP4
+  served_model_name: qwen3.8-27b-sglang
+  pp: [2048]
+  tg: [32, 128]
+  depth: [0, 4096]
+  runs: 3
+  concurrency: [1]
+  prefix_caching: true

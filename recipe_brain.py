@@ -86,6 +86,8 @@ def detect_family(report: dict[str, Any]) -> str:
     arch = (report.get("architecture") or "").lower()
     blob = repo + " " + arch
 
+    if "lfm2.5" in blob or "lfm2" in blob or "lfm_2" in blob:
+        return "lfm2.5"
     if "glm-4.7" in blob or "glm47" in blob or "glm-4-7" in blob:
         if "flash" in blob:
             return "glm-4.7-flash"
@@ -189,6 +191,18 @@ QUANT_PROFILES: dict[str, dict[str, Any]] = {
 # the suggested mod folder names. Mods are looked up in the registry mod
 # index at synth time so we only attach mods that actually exist on disk.
 FAMILY_PROFILES: dict[str, dict[str, Any]] = {
+    "lfm2.5": {
+        # LFM2/LFM2.5 emit Python-style calls between the dedicated
+        # <|tool_call_start|> / <|tool_call_end|> tokens. vLLM's lfm2 parser
+        # converts those into OpenAI-compatible tool_calls. The instruct
+        # checkpoint always reasons in <think> tags, which qwen3 parses.
+        "tool_call_parser": "lfm2",
+        "reasoning_parser": "qwen3",
+        "chat_template": None,
+        "trust_remote_code": False,
+        "needs_tf5": False,
+        "mod_hints": [],
+    },
     "glm-4.7": {
         "tool_call_parser": "glm47",
         "reasoning_parser": "glm45",

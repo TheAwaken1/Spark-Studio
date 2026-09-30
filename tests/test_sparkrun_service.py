@@ -42,12 +42,12 @@ class BundledRecipeTests(unittest.TestCase):
     def test_bundled_recipe_path_is_canonicalized_to_studio_ref(self):
         path = (
             sparkrun_service.BUNDLED_RECIPES_DIR
-            / "deepseek-v4-flash-0731-ds4-fast-agent.yaml"
+            / "qwen3.6-35b-a3b-unsloth-nvfp4-fast.yaml"
         )
 
         self.assertEqual(
             sparkrun_service.canonical_recipe_ref(str(path)),
-            "@studio/deepseek-v4-flash-0731-ds4-fast-agent",
+            "@studio/qwen3.6-35b-a3b-unsloth-nvfp4-fast",
         )
         self.assertEqual(
             sparkrun_service.canonical_recipe_ref("@official/example"),
@@ -70,6 +70,57 @@ class BundledRecipeTests(unittest.TestCase):
         self.assertEqual(recipe["executor_config"], {"entrypoint": "", "user": "root"})
         self.assertEqual(recipe["defaults"]["max_model_len"], 20000)
         self.assertEqual(recipe["mods"], ["mods/qwen35-122b-hybrid-dflash"])
+
+    def test_lfm25_recipe_preserves_agent_and_serving_requirements(self):
+        path = Path(
+            sparkrun_service.resolve_recipe_target(
+                "@studio/lfm2.5-2.6b-unquantized-fast"
+            )
+        )
+        recipe = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(recipe["name"], "LFM2.5-2.6B-unquantized-fast")
+        self.assertEqual(recipe["min_nodes"], 1)
+        self.assertEqual(recipe["max_nodes"], 1)
+        self.assertEqual(recipe["defaults"]["served_model_name"], recipe["name"])
+        self.assertEqual(recipe["defaults"]["tool_call_parser"], "lfm2")
+        self.assertEqual(recipe["defaults"]["reasoning_parser"], "qwen3")
+        self.assertIn("--tensor-parallel-size {tensor_parallel}", recipe["command"])
+        self.assertNotIn("--trust-remote-code", recipe["command"])
+
+    def test_qwen38_flash_next_uses_managed_miaai_launcher(self):
+        path = Path(
+            sparkrun_service.resolve_recipe_target(
+                "@studio/qwen3.8-flash-next-miaai"
+            )
+        )
+        if not path.is_file():
+            # Machine-specific recipe (hardcoded local paths), gitignored.
+            self.skipTest("local-only MiaAI recipe not present")
+        recipe = yaml.safe_load(path.read_text(encoding="utf-8"))
+
+        self.assertEqual(recipe["runtime"], "vllm")
+        self.assertEqual(recipe["executor"], "local")
+        self.assertEqual(
+            recipe["executor_config"]["working_dir"],
+            "/mnt/ai-spaces/Github_Projects/Spark-Studio/data/qwen38-flash-next-miaai",
+        )
+        self.assertEqual(recipe["defaults"]["port"], 8888)
+        self.assertEqual(recipe["defaults"]["max_model_len"], 262144)
+        self.assertEqual(recipe["defaults"]["max_num_seqs"], 2)
+        self.assertEqual(recipe["defaults"]["kv_cache_dtype"], "auto")
+        self.assertEqual(recipe["defaults"]["kv_target_gib"], 20)
+        self.assertEqual(recipe["defaults"]["host_reserve_gib"], 26)
+        self.assertEqual(recipe["defaults"]["mamba_ssm_cache_dtype"], "bfloat16")
+        self.assertEqual(recipe["defaults"]["cudagraph_capture_sizes"], "auto")
+        self.assertEqual(recipe["defaults"]["compilation_mode"], 0)
+        self.assertIn("HOST_RESERVE_GIB={host_reserve_gib}", recipe["command"])
+        self.assertIn("MAMBA_SSM_CACHE_DTYPE={mamba_ssm_cache_dtype}", recipe["command"])
+        self.assertIn("EXTRA_DOCKER_ARGS='-e VLLM_USE_V2_MODEL_RUNNER=1'", recipe["command"])
+        self.assertIn("CUDAGRAPH_CAPTURE_SIZES={cudagraph_capture_sizes}", recipe["command"])
+        self.assertIn("MTP_DRAFT_VOCAB={mtp_draft_vocab}", recipe["command"])
+        self.assertFalse(recipe["defaults"]["require_idle_gpu"])
+        self.assertIn("./spark-studio-serve.sh", recipe["command"])
 
 
 class DockerFallbackTests(unittest.TestCase):
