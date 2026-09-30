@@ -26,3 +26,28 @@ contra-spark-force.html
 robo-fight-64.html
 super-mario.html
 speculative_benchmark_results.json
+chicken-crossing.html
+space-invaders.html
+supermario.html
+games/
+infographics/
+results/
+
+# Personal / agent scratch space — may hold private documents, never commit
+.hermes/
+.scratch/
+.scratch-*/
+.tmp_*
+hermes-tui-active-session-*.json
+
+# Ad-hoc local evals and machine-specific helpers
+quick_eval.py
+app/
+scripts/nightly-hermes-backup.sh
+SPARK_VOICE_OPTIONAL_FEATURE_IMPLEMENTATION.md
+
+# Recipes that hardcode this machine's paths — they work here but don't ship
+recipes/assets/
+recipes/deepseek-v4-flash-0731-exl3-dspark-384k.yaml
+recipes/qwen3.8-flash-next-miaai.yaml
+recipes/qwen3.8-flash-next-tensorfold.yaml
