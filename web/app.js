@@ -132,7 +132,7 @@ async function refreshSystem() {
       const lan = (sys.urls?.lan || [])[0];
       window._lanUrls = sys.urls || {};
       const upd = window._updateAvailable
-        ? ` · <span class="update-badge" title="Click for update options">⬆ v${escapeHtml(window._updateAvailable)}</span>` : '';
+        ? ` · <span class="update-badge" title="${t('ss.update.badge_hint')}">⬆ v${escapeHtml(window._updateAvailable)}</span>` : '';
       meta.innerHTML = `v${escapeHtml(sys.version)}${lan ? ` · <span class="mono">${escapeHtml(lan)}</span>` : ''}${upd}`;
       meta.style.cursor = 'pointer';
     }
@@ -143,7 +143,7 @@ async function refreshSystem() {
     if (rn) rn.hidden = !sys.restart_needed;
     if (sys.restart_needed && !window._restartNagged) {
       window._restartNagged = true;
-      toast('Update applied on disk — restart Spark Studio to finish (new features will 404 until then)', 'danger');
+      toast(t('ss.update.restart_toast'), 'danger');
     }
   } catch (e) { console.error(e); }
   try {
@@ -165,7 +165,7 @@ async function updateTitle() {
   try {
     const act = await api('/active');
     document.title = act?.engine ? `▶ ${act.engine} · Spark Studio` : 'Spark Studio';
-  } catch { document.title = 'Spark Studio'; }
+  } catch { document.title = t('ss.app.title'); }
 }
 
 // ---------- overview ------------------------------------------------------
@@ -516,7 +516,7 @@ function buildEnginePanel(panel) {
   ui.querySelector('[data-ext="connect"]').addEventListener('click', async () => {
     const name = ui.querySelector('[data-ext="name"]').value.trim() || `external-${engine}`;
     const url = ui.querySelector('[data-ext="url"]').value.trim();
-    if (!url) { toast('Enter a URL', 'danger'); return; }
+    if (!url) { toast(t('ss.t.enter_url'), 'danger'); return; }
     try {
       const r = await api('/external', { method: 'POST', body: { engine, name, url } });
       toast(`Connected ${name} (${r.id})`);
@@ -598,18 +598,18 @@ function buildEnginePanel(panel) {
       const validation = validateRecipePayload(body);
       if (!validation.ok) throw new Error(validation.error);
       const run = await api('/runs', { method: 'POST', body });
-      toast(`Started ${engine} run ${run.id}${run.port ? ' on :' + run.port : ''}`);
+      toast(`${t('ss.t.started_engine_run', { engine, id: run.id, port: run.port ? ' on ' + run.port : '' })}`);
       updateTitle();
       $('.tab[data-tab="logs"]').click();
       setTimeout(() => window.selectRun(run.id), 50);
       setTimeout(async () => {
         try {
           const r = await api(`/runs/${run.id}`);
-          if (runOutcome(r) === 'failed') toast(`${engine} failed (code ${r.exit_code}). Click Ask Claude on Logs tab.`, 'danger');
-          else if (r.status === 'exited') toast(`${engine} exited.`);
+          if (runOutcome(r) === 'failed') toast(t('ss.t.engine_failed', { engine, code: r.exit_code }), 'danger');
+          else if (r.status === 'exited') toast(t('ss.t.engine_exited', { engine }));
         } catch {}
       }, 4000);
-    } catch (e) { toast(`Run failed: ${e.message}`, 'danger'); }
+    } catch (e) { toast(t('ss.t.run_failed', { err: e.message }), 'danger'); }
   });
   ui.querySelector('[data-action="save"]').addEventListener('click', () => {
     const mode = ui.dataset.mode || 'spark';
@@ -634,7 +634,7 @@ function buildEnginePanel(panel) {
         if (!validation.ok) throw new Error(validation.error);
         openRecipeModal({ engine, raw_cmd: rawEditor.value, name: `${engine} · docker recipe` });
       } else {
-        let args; try { args = JSON.parse(editor.value); } catch (e) { toast('Invalid JSON', 'danger'); return; }
+        let args; try { args = JSON.parse(editor.value); } catch (e) { toast(t('ss.t.invalid_json'), 'danger'); return; }
         openRecipeModal({ engine, model: args.model, args, name: `${engine} · ${args.model || 'untitled'}` });
       }
     } catch (e) { toast(e.message, 'danger'); }
@@ -708,7 +708,7 @@ function streamInstall(engine, bannerEl) {
     st.active = false;
     st.code = Number(ev.data);
     if (st.code === 0) {
-      toast(`${engine} installed`);
+      toast(t('ss.t.engine_installed', { engine }));
       delete _installs[engine];
     } else {
       st.lines.push(`[install failed — exit ${st.code}]`);
@@ -722,7 +722,7 @@ function streamInstall(engine, bannerEl) {
     st.active = false;
     st.code = st.code ?? -1;
     st.lines.push('[install stream disconnected — the pip process may still be running; re-check in a minute]');
-    toast('Install stream disconnected', 'danger');
+    toast(t('ss.t.install_stream_lost'), 'danger');
     refreshEnginePanel(engine);
   });
 }
@@ -911,9 +911,9 @@ async function refreshRecipes() {
     const isFailed  = tagList.includes('fix') && !isWorking;
     const displayTags = tagList.filter((t) => t !== 'working' && t !== 'fix');
     const statusBadge = isWorking
-      ? '<span class="rc-status-badge working" title="Last run succeeded">✓ working</span>'
+      ? '<span class="rc-status-badge working" title="' + t('ss.t.last_run_ok') + '">✓ working</span>'
       : isFailed
-        ? '<span class="rc-status-badge failed" title="Last run failed">✗ failed</span>'
+        ? '<span class="rc-status-badge failed" title="' + t('ss.t.last_run_failed') + '">✗ failed</span>'
         : '';
     return `
     <div class="recipe-card${activeByRecipe.has(Number(r.id)) ? ' is-running' : ''}${isFav ? ' is-fav' : ''}">
@@ -922,7 +922,7 @@ async function refreshRecipes() {
         <div style="display:flex;gap:4px;align-items:center">
           ${favBtn('recipeFavs', r.id, isFav)}
           ${statusBadge}
-          ${isDocker ? '<span class="rc-source registry" title="Runs via spark-vllm-docker pipeline">Docker</span>' : ''}
+          ${isDocker ? '<span class="rc-source registry" title="' + t('ss.t.via_docker') + '">Docker</span>' : ''}
           <div class="rc-engine">${r.engine}</div>
         </div>
       </div>
@@ -934,7 +934,7 @@ async function refreshRecipes() {
       <div class="rc-actions">
         <button class="btn primary" data-run="${r.id}">▶ Run</button>
         <button class="btn" data-edit="${r.id}">Edit</button>
-        <button class="btn" data-history="${r.id}" title="Every edit (yours or an agent's) keeps the previous version — restore any of them">⟲ History</button>
+        <button class="btn" data-history="${r.id}" title="${t('ss.t.recipe_history_hint')}">${t('ss.history.button')}</button>
         <button class="btn" data-share="${r.id}" title="Copy recipe in the community spark-arena YAML format (falls back to JSON for pipeline recipes)">⧉ Share</button>
         <button class="btn danger" data-del="${r.id}">Del</button>
       </div>
@@ -953,7 +953,7 @@ async function refreshRecipes() {
           ? { engine: r.engine, raw_cmd: r.raw_cmd, args: r.args || {}, env: r.env || {}, recipe_id: r.id }
           : { engine: r.engine, args: { model: r.model, ...r.args }, env: r.env || {}, recipe_id: r.id };
         const run = await api('/runs', { method: 'POST', body });
-        toast(`Started run ${run.id}`);
+        toast(t('ss.t.started_run', { id: run.id }));
         lintToast(run.lint);
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
@@ -967,11 +967,11 @@ async function refreshRecipes() {
     try {
       const rid = b.dataset.history;
       const rows = await api(`/recipes/${rid}/history`);
-      showHistoryModal('Recipe history', rows.map((s) => ({
+      showHistoryModal(t('ss.history.title.recipe'), rows.map((s) => ({
         ...s, summary: recipeSnapshotSummary(s.recipe),
       })), async (row) => {
         const restored = await api(`/recipes/${rid}/restore/${row.id}`, { method: 'POST' });
-        toast(`Restored "${restored.name}" to ${new Date(row.taken_at * 1000).toLocaleString()}`);
+        toast(t('ss.t.restored_recipe', { name: restored.name, when: new Date(row.taken_at * 1000).toLocaleString() }));
         lintToast(restored.lint);
         refreshRecipes();
       });
@@ -990,7 +990,7 @@ async function refreshRecipes() {
       const yaml = buildSparkYaml(r);
       if (yaml) {
         await copyText(yaml);
-        toast('Recipe copied as spark-arena YAML — share it anywhere; Paste on the Recipes tab imports it');
+        toast(t('ss.t.recipe_copied_yaml'));
         return;
       }
       // Strip local-only state: the DB id and the working/fix status tags.
@@ -1006,11 +1006,11 @@ async function refreshRecipes() {
         raw_cmd: r.raw_cmd || null,
       };
       await copyText(JSON.stringify(shareable, null, 2));
-      toast('Recipe copied as JSON — others can add it with Import or Paste on their Recipes tab');
+      toast(t('ss.t.recipe_copied_json'));
     } catch (e) { toast(e.message, 'danger'); }
   }));
   $$('#recipesList [data-del]').forEach((b) => b.addEventListener('click', async () => {
-    if (!confirm('Delete recipe?')) return;
+    if (!confirm(t('ss.t.delete_recipe'))) return;
     await api(`/recipes/${b.dataset.del}`, { method: 'DELETE' });
     refreshRecipes();
   }));
@@ -1018,7 +1018,7 @@ async function refreshRecipes() {
     ev.stopPropagation();
     try {
       await api(`/runs/${b.dataset.stopRun}/stop?force=true`, { method: 'POST' });
-      toast(`Stopping run ${b.dataset.stopRun}…`);
+      toast(t('ss.t.stopping_run', { id: b.dataset.stopRun }));
       setTimeout(refreshRecipes, 2500);
     } catch (e) { toast(e.message, 'danger'); }
   }));
@@ -1060,7 +1060,7 @@ async function refreshSparkrun() {
           <div style="display:flex;gap:4px;align-items:center">
             ${favBtn('communityFavs', r.ref, favs.has(r.ref))}
             ${(r.min_nodes || 1) > 1 ? `<span class="badge" title="Requires ${r.min_nodes} DGX Sparks (tensor parallelism)">${r.min_nodes}× Spark</span>` : ''}
-            <span class="rc-source registry" title="Runs on your Spark mesh via sparkrun">${escapeHtml(r.namespace)}</span>
+            <span class="rc-source registry" title="${t('ss.t.via_sparkrun')}">${escapeHtml(r.namespace)}</span>
             <div class="rc-engine">${escapeHtml(r.engine || '')}</div>
           </div>
         </div>
@@ -1068,7 +1068,7 @@ async function refreshSparkrun() {
         ${r.description ? `<div class="rc-notes">${escapeHtml(r.description)}</div>` : ''}
         <div class="rc-actions">
           <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Install sparkrun first"'}>▶ Run via sparkrun</button>
-          ${r.ref.startsWith('@studio/') ? `<button class="btn" data-file-history="${escapeHtml(r.ref.split('/')[1])}" title="Snapshots of the bundled YAML taken before every launch — restore if an edit broke it">⟲ History</button>` : ''}
+          ${r.ref.startsWith('@studio/') ? `<button class="btn" data-file-history="${escapeHtml(r.ref.split('/')[1])}" title="${t('ss.t.file_history_hint')}">${t('ss.history.button')}</button>` : ''}
         </div>
       </div>`).join('') || `<div class="muted">No recipes fit ${tp} node${tp > 1 ? 's' : ''}${q ? ' matching your search' : ''}. Raise Nodes (TP) to see multi-Spark recipes.</div>`;
     bindFavButtons('#sparkrunList', refreshSparkrun);
@@ -1087,11 +1087,11 @@ async function refreshSparkrun() {
       try {
         const stem = btn.dataset.fileHistory;
         const rows = await api(`/recipes/files/${encodeURIComponent(stem)}/history`);
-        showHistoryModal(`Bundled recipe history — ${stem}`, rows.map((s) => ({
+        showHistoryModal(t('ss.history.title.bundled', { name: stem }), rows.map((s) => ({
           ...s, id: s.name, summary: `${(s.size / 1024).toFixed(1)} KB`,
         })), async (row) => {
           const res = await api(`/recipes/files/${encodeURIComponent(stem)}/restore/${encodeURIComponent(row.name)}`, { method: 'POST' });
-          toast(`Restored ${stem}.yaml to ${new Date(row.taken_at * 1000).toLocaleString()} — next launch uses it`);
+          toast(t('ss.t.restored_file', { name: stem, when: new Date(row.taken_at * 1000).toLocaleString() }));
           lintToast(res.lint);
         });
       } catch (e) { toast(e.message, 'danger'); }
@@ -1150,7 +1150,7 @@ $('#sparkrunUpdate').addEventListener('click', async () => {
 
 $('#recSearch').addEventListener('input', refreshRecipes);
 $('#recPaste').addEventListener('click', () => {
-  const text = prompt('Paste a shared recipe (JSON/YAML), a spark-arena link, an HF id, or a @ref:');
+  const text = prompt(t('ss.t.paste_recipe_prompt'));
   if (!text) return;
   try {
     openRecipeModal(JSON.parse(text));
@@ -1239,7 +1239,7 @@ $('#recImportFile').addEventListener('change', async (e) => {
     const text = await file.text();
     const parsed = JSON.parse(text);
     openRecipeModal(parsed);
-  } catch (err) { toast(`Import failed: ${err.message}`, 'danger'); }
+  } catch (err) { toast(t('ss.t.import_failed', { err: err.message }), 'danger'); }
 });
 
 // Recipe modal -----------------------------------------------------------
@@ -1364,7 +1364,7 @@ async function saveRecipeFromModal(thenRun) {
       $('.tab[data-tab="logs"]').click();
       setTimeout(() => window.selectRun(run.id), 50);
     } else {
-      toast('Recipe saved');
+      toast(t('ss.t.recipe_saved'));
     }
   } catch (e) { toast(e.message, 'danger'); }
 }
@@ -1862,7 +1862,7 @@ function startAgentLoop(agentName, kind) {
   });
   autofixES.addEventListener('error', () => {
     finish();
-    text.textContent = `${label} stream disconnected.`;
+    text.textContent = t('ss.logs.stream_disconnected', { label });
   });
 }
 const startAutofix = (agentName) => startAgentLoop(agentName, 'autofix');
@@ -2008,7 +2008,7 @@ $('#fixApply').addEventListener('click', async () => {
     try {
       const active = await api('/active').catch(() => null);
       if (active && active.id) {
-        toast('Stopping current engine…');
+        toast(t('ss.t.stopping_current'));
         await api(`/runs/${active.id}/stop`, { method: 'POST' });
         // Give it a moment to release GPU memory before starting the new run.
         await new Promise((r) => setTimeout(r, 3000));
@@ -2234,14 +2234,14 @@ function stopCanvasPreview() {
 function popoutCanvasPreview() {
   const doc = canvasPreviewDoc || ($('#canvasPreview').srcdoc || '');
   if (!doc) {
-    toast('Nothing to preview yet', 'danger');
+    toast(t('ss.t.nothing_to_preview'), 'danger');
     return;
   }
   canvasPopup = (canvasPopup && !canvasPopup.closed)
     ? canvasPopup
     : window.open('about:blank', 'spark-studio-canvas-preview');
   if (!canvasPopup) {
-    toast('Popup blocked', 'danger');
+    toast(t('ss.t.popup_blocked'), 'danger');
     return;
   }
   canvasPopup.document.open();
@@ -3456,7 +3456,7 @@ async function refreshBenchTab() {
     try {
       const { markdown } = await api(`/benchy/${el.dataset.benchShare}/export`);
       await copyText(markdown);
-      toast('Benchmark report copied as markdown — paste it anywhere to share');
+      toast(t('ss.bench.report_copied'));
     } catch (e) { toast(e.message, 'danger'); }
   }));
   const cmpBoxes = $$('#benchyHistory [data-bench-cmp]');
@@ -3584,10 +3584,10 @@ $('#benchyGo').addEventListener('click', () => {
             try {
               const obj = JSON.parse(data);
               renderBenchyResult(obj.result);
-              toast('llama-benchy completed');
+              toast(t('ss.bench.completion'));
             } catch (e) { toast(`Result parse: ${e.message}`, 'danger'); }
           } else if (evt === 'error') {
-            toast(`benchy error: ${data}`, 'danger');
+            toast(t('ss.bench.benchy_error', { err: data }), 'danger');
           }
         }
       }
@@ -3878,7 +3878,7 @@ $('#benchGo').addEventListener('click', async () => {
   };
   const btn = $('#benchGo');
   btn.disabled = true;
-  if (sweep) toast('Concurrency sweep running — 1, then 4, then 8 parallel streams…');
+  if (sweep) toast(t('ss.bench.sweep_running'));
   try {
     const res = await api('/bench', { method: 'POST', body });
     toast(`tokens/s ${(res.tokens_per_sec || 0).toFixed(1)} · TTFT ${(res.ttft_ms || 0).toFixed(0)}ms`);
@@ -3897,11 +3897,11 @@ function renderBenchSweep(levels) {
   box.hidden = false;
   box.innerHTML = `
     <table class="bench-sweep-table">
-      <thead><tr><th>Streams</th><th>Aggregate tok/s</th><th>Per-stream tok/s</th><th>TTFT</th><th>Tokens</th></tr></thead>
+      <thead><tr><th>${t('ss.bench.sweep.streams')}</th><th>${t('ss.bench.sweep.aggregate')}</th><th>${t('ss.bench.sweep.per_stream')}</th><th>TTFT</th><th>${t('ss.bench.sweep.tokens')}</th></tr></thead>
       <tbody>
         ${levels.map((l) => `
           <tr>
-            <td>${l.streams}${l.completed < l.streams ? ` <span class="badge no" title="${escapeHtml((l.errors || []).join('; '))}">${l.streams - l.completed} failed</span>` : ''}</td>
+            <td>${l.streams}${l.completed < l.streams ? ` <span class="badge no" title="${escapeHtml((l.errors || []).join('; '))}">${t('ss.bench.sweep.failed', { n: l.streams - l.completed })}</span>` : ''}</td>
             <td><strong>${(l.aggregate_tokens_per_sec || 0).toFixed(1)}</strong></td>
             <td>${(l.per_stream_tokens_per_sec || 0).toFixed(1)}</td>
             <td>${l.ttft_ms != null ? l.ttft_ms.toFixed(0) + ' ms' : '—'}</td>
@@ -3909,7 +3909,7 @@ function renderBenchSweep(levels) {
           </tr>`).join('')}
       </tbody>
     </table>
-    <div class="muted" style="font-size:12px;margin:6px 0 10px">Aggregate = all streams combined (what "multi-agent serving" claims quote) · Per-stream = what each individual chat experiences at that load.</div>`;
+    <div class="muted" style="font-size:12px;margin:6px 0 10px">${t('ss.bench.sweep.footer')}</div>`;
 }
 
 // ---------- agents login -------------------------------------------------
@@ -4269,7 +4269,7 @@ async function pollHermesHttpOutput(sessionId) {
     if (hermesTui.httpSession !== sessionId) return;
     hermesTui.httpSession = null;
     setHermesControls(false);
-    const message = `HTTPS terminal interrupted — reconnecting: ${error.message}`;
+    const message = t('ss.t.hermes_https_interrupted', { err: error.message });
     hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
     setHermesTuiState(message);
     hermesTui.retryTimer = setTimeout(() => {
@@ -4308,7 +4308,7 @@ async function startHermesHttpFallback(attempt = 0) {
         rememberHermesHttpSession(savedSession);
         rememberHermesWsSession('');
         setHermesControls(true);
-        setHermesTuiState('Hermes reconnected over HTTPS', 'ready');
+        setHermesTuiState(t('ss.t.hermes_reconnected'), 'ready');
         sendHermesHttpInput({
           type: 'resize',
           cols: hermesTui.terminal.cols,
@@ -4351,7 +4351,7 @@ async function startHermesHttpFallback(attempt = 0) {
     hermesTui.httpResumeFrom = '';
     rememberHermesHttpSession(result.session_id);
     if (result.continued) {
-      hermesTui.terminal.write('\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n');
+      hermesTui.terminal.write(`\x1b[33m${t('ss.t.hermes_terminal_continued')}\x1b[0m\r\n`);
     }
     setHermesControls(true);
     setHermesTuiState('Hermes is running over HTTPS', 'ready');
@@ -4364,7 +4364,7 @@ async function startHermesHttpFallback(attempt = 0) {
     // ~1 minute in all — long enough to ride out a dashboard restart.
     if (attempt < 7 && hermesMod.activeView === 'chat') {
       const delayMs = Math.min(1500 * (2 ** attempt), 15000);
-      const message = `HTTPS terminal is still starting — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
+      const message = t('ss.t.hermes_https_retrying', { secs: (delayMs / 1000).toFixed(1) });
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
       hermesTui.retryTimer = setTimeout(() => {
@@ -4453,8 +4453,8 @@ function startHermesTui({ retryCount = 0 } = {}) {
           // The lease expired or the dashboard restarted — say so rather than
           // leaving "Reattaching…" over what is actually a new agent.
           hermesTui.terminal.write(control.continued
-            ? '\r\n\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n'
-            : '\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
+            ? `\r\n\x1b[33m${t('ss.t.hermes_terminal_continued')}\x1b[0m\r\n`
+            : `\r\n\x1b[33m${t('ss.t.hermes_session_ended')}\x1b[0m\r\n`);
           setHermesTuiState('Hermes is running', 'ready');
         }
       } else {
@@ -4476,8 +4476,8 @@ function startHermesTui({ retryCount = 0 } = {}) {
     const retryable = dropped && retryCount < (proven ? 8 : 1);
     if (retryable) {
       const delayMs = Math.min(1500 * (2 ** retryCount), 15000);
-      const phase = opened ? 'connection dropped' : proven ? 'still reconnecting' : 'dashboard is still starting';
-      const message = `Hermes ${phase} — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
+      const phase = opened ? t('ss.t.hermes_phase_dropped') : proven ? t('ss.t.hermes_phase_reconnecting') : t('ss.t.hermes_phase_starting');
+      const message = t('ss.t.hermes_retrying', { phase, secs: (delayMs / 1000).toFixed(1) });
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
       refreshHermesTui(false);
@@ -4495,7 +4495,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (dropped && proven) {
       // Out of retries but the lease id is kept: Start reattaches to it, or
       // continues its conversation if the dashboard lost it meanwhile.
-      const message = 'Lost the connection to Spark Studio — press Start to reconnect';
+      const message = t('ss.t.hermes_connection_lost');
       hermesTui.terminal.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);
       setHermesTuiState(message, 'error');
       refreshHermesTui(false);
@@ -4503,7 +4503,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     }
     if (event.code === 1006) {
       hermesTui.preferHttp = true;
-      const message = 'WebSocket unavailable — switching to secure HTTPS transport…';
+      const message = t('ss.t.hermes_ws_fallback');
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
       startHermesHttpFallback(0);
@@ -4740,7 +4740,7 @@ async function runHermesModAction(action) {
 }
 
 async function useOriginalHermesSkin() {
-  if (!window.confirm("Switch back to the original Hermes design? Your saved custom skins will be kept.")) return;
+  if (!window.confirm(t('ss.t.revert_skin'))) return;
   document.getElementById("hermesModOriginal").disabled = true;
   setHermesModState("Selecting original Hermes design…");
   try {
@@ -4760,7 +4760,7 @@ async function deleteSelectedHermesSkin() {
   const select = $('#hermesModSkinSelect');
   const name = select.value;
   if (!name) return;
-  if (!window.confirm(`Delete custom skin "${name}" from Spark Studio's isolated Hermes profile?`)) return;
+  if (!window.confirm(t('ss.t.delete_skin', { name }))) return;
   $('#hermesModDelete').disabled = true;
   setHermesModState(`Deleting ${name}…`);
   try {
@@ -4953,7 +4953,7 @@ async function refreshHermesPending() {
 async function resolveHermesPending(button) {
   const { pendingAction: action, pendingSubsystem: subsystem, pendingId: id } = button.dataset;
   if (!['approve', 'reject'].includes(action)) return;
-  if (action === 'reject' && !window.confirm(`Reject this pending ${subsystem} change?`)) return;
+  if (action === 'reject' && !window.confirm(t('ss.t.reject_change', { subsystem }))) return;
   const card = button.closest('.hermes-pending-card');
   const inlineError = card?.querySelector('.hermes-pending-error');
   if (inlineError) {
@@ -5343,7 +5343,7 @@ function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (m) => ({'&'
 // so a change that will break something downstream is visible immediately.
 function lintToast(lint) {
   (lint || []).forEach((f, i) => setTimeout(
-    () => toast(`Recipe check: ${f.message}`, f.level === 'error' ? 'danger' : 'warn'),
+    () => toast(t('ss.t.recipe_check', { msg: f.message }), f.level === 'error' ? 'danger' : 'warn'),
     350 * (i + 1),
   ));
 }
@@ -5362,7 +5362,7 @@ function showHistoryModal(title, rows, restore) {
         rows.map((row) => h('div', { class: 'snap-row' },
           h('div', {},
             h('div', { class: 'snap-when' }, new Date(row.taken_at * 1000).toLocaleString()),
-            h('div', { class: 'snap-meta' }, `${row.source || 'edit'}${row.summary ? ' · ' + row.summary : ''}`),
+            h('div', { class: 'snap-meta' }, `${row.source || t('ss.history.source_edit')}${row.summary ? ' · ' + row.summary : ''}`),
           ),
           h('button', {
             class: 'btn',
@@ -5371,10 +5371,10 @@ function showHistoryModal(title, rows, restore) {
               try { await restore(row); close(); }
               catch (err) { toast(err.message, 'danger'); e.target.disabled = false; }
             },
-          }, '⟲ Restore'),
+          }, t('ss.history.restore')),
         )),
       ) : h('div', { class: 'muted', style: 'padding:18px' },
-        'No snapshots yet — one is taken automatically before every edit and launch.'),
+        t('ss.history.empty')),
     ),
   );
   document.body.appendChild(overlay);
@@ -5750,7 +5750,7 @@ $('#vitalsToggle').addEventListener('click', () => {
     if (reconnectNotice) clearTimeout(reconnectNotice);
     reconnectNotice = null;
     $('#vitalsWidget').classList.remove('telemetry-reconnecting');
-    $('#vitalsToggle').title = 'Click to expand live vitals';
+    $('#vitalsToggle').title = t('ss.vitals.expand');
   };
   es.addEventListener('open', markHealthy);
   es.addEventListener('vitals', (ev) => {
@@ -5771,8 +5771,8 @@ $('#vitalsToggle').addEventListener('click', () => {
       reconnectNotice = null;
       if (lastReadingAt && Date.now() - lastReadingAt < 8000) return;
       $('#vitalsWidget').classList.add('telemetry-reconnecting');
-      $('#vitalsStatsText').textContent = 'Telemetry reconnecting · model stays online';
-      $('#vitalsToggle').title = 'Hardware telemetry is reconnecting; Spark Studio, the model, and Hermes are unaffected';
+      $('#vitalsStatsText').textContent = t('ss.t.telemetry_reconnecting');
+      $('#vitalsToggle').title = t('ss.t.telemetry_reconnecting_hint');
     }, 5000);
   });
 })();
@@ -5971,7 +5971,7 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
   if (_imgBuild.active) return;
   const mode = b.dataset.imgbuild;
   const flags = mode === 'advanced' ? ($('#imgFlags').value || '').trim() : '';
-  if (mode === 'advanced' && !flags) { toast('Enter build flags first (e.g. --vllm-ref v0.24.0)', 'danger'); return; }
+  if (mode === 'advanced' && !flags) { toast(t('ss.t.enter_build_flags'), 'danger'); return; }
   if (!confirm(mode === 'nightly'
     ? 'Pull the tested nightly and retag vllm-node?\n\nUsually a few minutes. Running models keep serving their old image until relaunched.'
     : 'Start an image build?\n\nSource builds can take 30–60+ minutes. It keeps running even if you close this page.')) return;
@@ -6000,7 +6000,7 @@ $$('#engineImagesCard [data-imgbuild]').forEach((b) => b.addEventListener('click
     if (_imgBuild.lines.length === 0) {
       _imgBuild.lines.push('[could not start — the server did not accept the request.'
         + ' If you just updated, the running process is still on the old code: restart Spark Studio and retry.]');
-      toast('Build did not start — restart Spark Studio after an update, then retry', 'danger');
+      toast(t('ss.t.build_not_started'), 'danger');
     } else {
       _imgBuild.lines.push('[stream disconnected — the build continues server-side; revisit this tab to check]');
     }
@@ -6028,25 +6028,25 @@ $$('[data-recover]').forEach((b) => b.addEventListener('click', async () => {
     } else if (action === 'reset-registry') {
       recoveryReport('Registry cache cleared — re-downloading community recipes in the background.');
     }
-    toast('Done');
+    toast(t('ss.wizard.done'));
   } catch (e) { recoveryReport(''); toast(e.message, 'danger'); }
   b.disabled = false;
 }));
 $('#recoverResetDb')?.addEventListener('click', async () => {
-  if (!confirm('Delete ALL saved recipes, run history, and benchmark history?\n\nDownloaded models are NOT deleted. A running model keeps serving.\n\nThere is no undo.')) return;
+  if (!confirm(t('ss.recovery.reset_db_confirm'))) return;
   try {
     const r = await api('/recovery/reset-db', { method: 'POST', body: { confirm: true } });
     recoveryReport('Database reset: ' + Object.entries(r.deleted).map(([t, n]) => `${t} ${n}`).join(' · '));
-    toast('Database reset');
+    toast(t('ss.t.db_reset'));
     refreshRecipes(); refreshRuns(); refreshOverview();
   } catch (e) { toast(e.message, 'danger'); }
 });
 async function copyBugReport(runId) {
   try {
-    toast('Building bug report…');
+    toast(t('ss.t.building_bug_report'));
     const r = await api(`/bugreport${runId ? `?run_id=${runId}` : ''}`);
     await copyText(r.markdown);
-    toast('Bug report copied to clipboard 📋');
+    toast(t('ss.t.bug_report_copied'));
   } catch (e) { toast(`Bug report failed: ${e.message}`, 'danger'); }
 }
 $('#recoverBugReport')?.addEventListener('click', () => copyBugReport(null));
