@@ -150,9 +150,14 @@ class HermesBrowserTerminalTests(unittest.TestCase):
 
     def test_missing_model_returns_visible_terminal_error(self):
         # No engine AND no saved provider is the only remaining hard stop:
-        # there is nothing for Hermes to talk to.
+        # there is nothing for Hermes to talk to. Hermes itself is faked into
+        # a temp profile so this neither needs it installed nor touches the
+        # real one.
         client = TestClient(server.app)
         with (
+            tempfile.TemporaryDirectory() as tmp,
+            mock.patch.object(agentlab, "HERMES_HOME", Path(tmp)),
+            mock.patch.object(agentlab, "find_hermes", return_value="/opt/hermes"),
             mock.patch.object(server.runner, "active", return_value=None),
             mock.patch.object(
                 server.agentlab,
