@@ -20,6 +20,7 @@ import re
 import shutil
 import subprocess
 import unittest
+from html.parser import HTMLParser
 from pathlib import Path
 
 WEB = Path(__file__).resolve().parent.parent / "web"
@@ -308,6 +309,143 @@ console.log(JSON.stringify({
         # {plural} derivation: fr 1 => "modèle", 3 => "modèles".
         self.assertIn("modèle ·", fr_probe["plural1"])
         self.assertIn("modèles ·", fr_probe["plural2"])
+
+
+# --- Markup structure -------------------------------------------------------
+#
+# applyStaticI18n() does `el.textContent = t(key)` on every [data-i18n]
+# element, which deletes all of that element's children. A data-i18n placed
+# on a <label> that wraps an <input> therefore removes the input from the DOM
+# (this broke the Engine Chat sliders #wgTemp / #wgMaxTokens). These tests
+# parse index.html into a small tree and enforce the invariants the runtime
+# relies on, so the regression cannot come back silently.
+
+VOID_TAGS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr",
+}
+
+
+class _Node:
+    __slots__ = ("tag", "attrs", "line", "children", "text", "parent")
+
+    def __init__(self, tag, attrs, line, parent):
+        self.tag = tag
+        self.attrs = dict(attrs)
+        self.line = line
+        self.children = []
+        self.text = ""
+        self.parent = parent
+
+
+class _TreeBuilder(HTMLParser):
+    """Strict tree builder: no implicit closing, every mismatch is recorded."""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.root = _Node("#root", [], 0, None)
+        self.stack = [self.root]
+        self.errors = []
+
+    def handle_starttag(self, tag, attrs):
+        node = _Node(tag, attrs, self.getpos()[0], self.stack[-1])
+        self.stack[-1].children.append(node)
+        if tag not in VOID_TAGS:
+            self.stack.append(node)
+
+    def handle_startendtag(self, tag, attrs):
+        node = _Node(tag, attrs, self.getpos()[0], self.stack[-1])
+        self.stack[-1].children.append(node)
+
+    def handle_endtag(self, tag):
+        if tag in VOID_TAGS:
+            return
+        top = self.stack[-1]
+        if top.tag == tag:
+            self.stack.pop()
+            return
+        self.errors.append(
+            f"line {self.getpos()[0]}: </{tag}> closes <{top.tag}> opened at line {top.line}"
+        )
+        # Recover: pop up to the matching tag if it is open.
+        for i in range(len(self.stack) - 1, 0, -1):
+            if self.stack[i].tag == tag:
+                del self.stack[i:]
+                return
+
+    def handle_data(self, data):
+        self.stack[-1].text += data
+
+
+def parse_index():
+    html = INDEX_HTML.read_text(encoding="utf-8")
+    # Script/style bodies are raw text for HTMLParser already; nothing to strip.
+    builder = _TreeBuilder()
+    builder.feed(html)
+    builder.close()
+    for node in builder.stack[1:]:
+        builder.errors.append(f"<{node.tag}> opened at line {node.line} is never closed")
+    return builder.root, builder.errors
+
+
+def walk(node):
+    for child in node.children:
+        yield child
+        yield from walk(child)
+
+
+class I18nMarkupTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.root, cls.errors = parse_index()
+        cls.nodes = list(walk(cls.root))
+
+    def test_markup_is_balanced(self):
+        self.assertEqual(self.errors, [], "unbalanced tags in index.html")
+
+    def test_data_i18n_elements_have_no_element_children(self):
+        bad = [
+            f"line {n.line}: <{n.tag} data-i18n={n.attrs['data-i18n']}> wraps "
+            + ", ".join(f"<{c.tag}{' id=' + c.attrs['id'] if 'id' in c.attrs else ''}>"
+                        for c in n.children)
+            for n in self.nodes
+            if "data-i18n" in n.attrs and n.children
+        ]
+        self.assertEqual(bad, [], "applyStaticI18n would delete these children")
+
+    def test_no_id_lives_inside_a_data_i18n_element(self):
+        lost = []
+        for n in self.nodes:
+            if "id" not in n.attrs:
+                continue
+            p = n.parent
+            while p is not None:
+                if "data-i18n" in p.attrs:
+                    lost.append(f"#{n.attrs['id']} (line {n.line}) inside line {p.line}")
+                    break
+                p = p.parent
+        self.assertEqual(lost, [])
+
+    def test_engine_chat_sliders_are_not_translated_away(self):
+        ids = {n.attrs.get("id"): n for n in self.nodes}
+        for slider in ("wgTemp", "wgMaxTokens"):
+            self.assertIn(slider, ids, f"#{slider} missing from index.html")
+            label = ids[slider].parent
+            self.assertEqual(label.tag, "label")
+            self.assertNotIn("data-i18n", label.attrs)
+            spans = [c for c in label.children if "data-i18n" in c.attrs]
+            self.assertEqual(len(spans), 1, f"#{slider}: label text must be a data-i18n span")
+
+    def test_icons_are_empty(self):
+        bad = [f"line {n.line}: <i class={n.attrs.get('class')}> contains "
+               + ", ".join(f"<{c.tag}>" for c in n.children)
+               for n in self.nodes if n.tag == "i" and (n.children or n.text.strip())]
+        self.assertEqual(bad, [], "a Font Awesome <i> must be closed before its label")
+
+    def test_options_hold_plain_text(self):
+        bad = [f"line {n.line}: <option value={n.attrs.get('value')!r}>"
+               for n in self.nodes if n.tag == "option" and n.children]
+        self.assertEqual(bad, [], "<option> may only contain text; put data-i18n on the option")
 
 
 if __name__ == "__main__":
