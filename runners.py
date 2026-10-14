@@ -1014,6 +1014,10 @@ class Runner:
         run.label = name
         run.url = url.rstrip("/").replace("0.0.0.0", "127.0.0.1")
         run.meta["_external"] = True
+        # Persisted with the row so the next boot can health-check the
+        # endpoint and re-adopt it instead of marking it exited (an external
+        # run has no pid to prove it is alive).
+        run.meta["_url"] = run.url
         run.status = "running"
         # Already serving when registered — there's no load to time.
         run.ready_at = run.started_at
@@ -1028,6 +1032,7 @@ class Runner:
                 "pid": None,
                 "port": None,
                 "cmd": f"[external] {name} {url}",
+                "meta_json": json.dumps(run.persisted_meta()),
             }
         )
         return run
@@ -1198,7 +1203,13 @@ class Runner:
         """Stop every running workload on app shutdown (Ctrl+C) so models
         don't linger on the GPU after the dashboard is gone. Synchronous —
         called from the FastAPI shutdown hook via a thread."""
-        running = [r for r in self.runs.values() if r.status == "running"]
+        # External endpoints are not ours to stop: leave their rows "running"
+        # so the next boot health-checks and re-adopts them (or retires them
+        # if they stopped answering meanwhile).
+        running = [
+            r for r in self.runs.values()
+            if r.status == "running" and not r.meta.get("_external")
+        ]
         for run in running:
             label = run.label or run.meta.get("ref") or run.engine
             print(f"[shutdown] stopping {label} ({run.id}) …", flush=True)
