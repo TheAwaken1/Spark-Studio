@@ -850,6 +850,11 @@ async def register_external(req: ExternalReq):
                 raise HTTPException(400, f"{url}/v1/models returned {r.status_code}")
     except httpx.HTTPError as e:
         raise HTTPException(400, f"cannot reach {url}/v1/models: {e}") from e
+    # Checked after the await above: boot adoption may have registered the
+    # same endpoint meanwhile. One endpoint, one run.
+    existing = _endpoint_owner(url)
+    if existing is not None:
+        return existing.summary()
     run = runner.register_external(req.engine, req.name, url)
     return run.summary()
 
@@ -4065,6 +4070,7 @@ async def _reconcile_on_boot() -> None:
     by_jobid = {j["jobid"]: j for j in jobs}
     by_ref = {j["ref"]: j for j in jobs}
     claimed: set[str] = set()
+    external_rows: list[tuple[dict, dict]] = []
 
     for row in rows:
         rid = row["id"]
@@ -4087,23 +4093,10 @@ async def _reconcile_on_boot() -> None:
                 await asyncio.to_thread(_adopt_sparkrun_job, job, row)
                 continue
         elif meta.get("_external") and meta.get("_url"):
-            # External endpoints have no pid to check: they are alive iff
-            # they still answer the OpenAI-compatible /v1/models probe.
-            if await _probe_served_models(meta["_url"]) is not None:
-                run = runner.adopt(
-                    rid,
-                    engine=row.get("engine") or "vllm",
-                    recipe_id=row.get("recipe_id"),
-                    url=meta["_url"],
-                    port=row.get("port"),
-                    started_at=row.get("started_at"),
-                    cmd_desc=row.get("cmd"),
-                    meta=meta,
-                    label=meta.get("_label"),
-                )
-                if run:
-                    run.publish(f"[adopted] external endpoint {meta['_url']} is still answering")
-                    continue
+            # Decided below, once managed runs and sparkrun jobs are known:
+            # those own their endpoint, an external row never duplicates them.
+            external_rows.append((row, meta))
+            continue
         elif _cmd_fragment_alive(row.get("pid"), row.get("cmd")):
             run = runner.adopt(
                 rid,
@@ -4130,6 +4123,30 @@ async def _reconcile_on_boot() -> None:
         if any((r.meta or {}).get("jobid") == job["jobid"] for r in runner.runs.values()):
             continue
         await asyncio.to_thread(_adopt_sparkrun_job, job, None)
+
+    for row, meta in external_rows:
+        # External endpoints have no pid to check: they are alive iff they
+        # still answer the OpenAI-compatible /v1/models probe.
+        rid, url = row["id"], meta["_url"]
+        alive = await _probe_served_models(url) is not None
+        # Re-checked after the probe's await, with none until adopt().
+        if alive and rid not in runner.runs and _endpoint_owner(url) is None:
+            run = runner.adopt(
+                rid,
+                engine=row.get("engine") or "vllm",
+                recipe_id=row.get("recipe_id"),
+                url=url,
+                port=row.get("port"),
+                started_at=row.get("started_at"),
+                cmd_desc=row.get("cmd"),
+                meta=meta,
+                label=meta.get("_label"),
+            )
+            if run:
+                run.publish(f"[adopted] external endpoint {url} is still answering")
+                continue
+        if rid not in runner.runs:
+            db.runs_update(rid, status="exited", ended_at=db.now())
 
     await asyncio.gather(
         *(_mark_adopted_ready(run) for run in list(runner.runs.values()))
@@ -4185,6 +4202,38 @@ async def _probe_served_models(url: str, timeout: float = 5) -> list[dict] | Non
     return [m for m in data if isinstance(m, dict) and m.get("id")]
 
 
+_LOCAL_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1", "::"}
+
+
+def _endpoint_key(url: str) -> tuple[str, int] | None:
+    """(host, port) of an engine URL, with every loopback/wildcard spelling
+    folded into "local". None when the URL can't be parsed."""
+    try:
+        parts = urllib.parse.urlsplit(url if "://" in url else f"http://{url}")
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    return ("local" if host in _LOCAL_HOSTS else host, port)
+
+
+def _endpoint_owner(url: str):
+    """The running run already serving ``url``, if any: same host and port,
+    or, for a local URL, a run bound to that port (a sparkrun job's URL can
+    name the LAN address of this very box)."""
+    key = _endpoint_key(url)
+    if key is None:
+        return None
+    for run in list(runner.runs.values()):
+        if run.status != "running":
+            continue
+        if run.url and _endpoint_key(run.url) == key:
+            return run
+        if key[0] == "local" and run.port == key[1]:
+            return run
+    return None
+
+
 async def _adopt_listening_ports(ports: list[int]) -> list:
     """One detection pass: when no run is active, register every local port
     in ``ports`` that serves a model as an external run labelled with the
@@ -4196,6 +4245,14 @@ async def _adopt_listening_ports(ports: list[int]) -> list:
         url = f"http://127.0.0.1:{port}"
         served = await _probe_served_models(url, timeout=3)
         if not served:
+            continue
+        # The probe awaited network I/O: a managed run or a manual
+        # /api/external registration may have appeared meanwhile. Re-check
+        # now, with no await between this check and the registration.
+        ours = {r.id for r in adopted}
+        if any(r.status == "running" and r.id not in ours for r in runner.runs.values()):
+            break
+        if _endpoint_owner(url) is not None:
             continue
         model_id = str(served[0]["id"])
         engine = str(served[0].get("owned_by") or "").lower()

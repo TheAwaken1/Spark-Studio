@@ -504,7 +504,8 @@ exited otherwise. To have an unattended box pick such an engine up on its own,
 set `SPARK_STUDIO_ADOPT_PORTS=8000` (comma-separated list): if nothing is
 running after boot, any local port in the list that serves an OpenAI-compatible
 `/v1/models` is registered as an external run, labelled with the served model
-id. Off by default.
+id. Off by default. An endpoint is never registered twice: connecting one that
+a run already serves returns that run.
 
 If `ufw` is enabled, allow the port for your LAN:
 
