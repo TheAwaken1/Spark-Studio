@@ -8,6 +8,7 @@ send SIGTERM/SIGKILL via the /runs/{id}/stop endpoint.
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
 import os
 import re
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import uuid
 from collections import deque
 from dataclasses import dataclass, field
@@ -429,12 +431,59 @@ class Run:
         }
 
 
+def _is_local_address(host: str) -> bool:
+    """True when ``host`` names this machine: a loopback or wildcard spelling,
+    its own hostname, or an IP assigned to one of its interfaces. An IP
+    literal is tested by binding a throwaway UDP socket to it, which only
+    succeeds for a local address (no packet is sent). Other names are not
+    resolved, so a lookup can never block the caller."""
+    host = host.lower().strip("[]")
+    if not host:
+        return False
+    if host == "localhost" or host == socket.gethostname().lower():
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if ip.is_loopback or ip.is_unspecified:
+        return True
+    family = socket.AF_INET6 if ip.version == 6 else socket.AF_INET
+    try:
+        with socket.socket(family, socket.SOCK_DGRAM) as probe:
+            probe.bind((str(ip), 0))
+    except OSError:
+        return False
+    return True
+
+
+def endpoint_key(url: str) -> tuple[str, int] | None:
+    """(host, port) identifying the engine behind ``url``. Every spelling of
+    this machine (loopback, wildcard, its LAN address) is folded into
+    "local", so a sparkrun job reported by this box's LAN IP and a
+    127.0.0.1 registration are the same endpoint, while a remote host using
+    the same port number is not. None when the URL can't be parsed."""
+    try:
+        parts = urllib.parse.urlsplit(url if "://" in url else f"http://{url}")
+        port = parts.port or (443 if parts.scheme == "https" else 80)
+    except ValueError:
+        return None
+    host = (parts.hostname or "").lower()
+    return ("local" if _is_local_address(host) else host, port)
+
+
 class Runner:
     """Manages all engine subprocesses."""
 
     def __init__(self) -> None:
         self.runs: dict[str, Run] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
+        # Guards endpoint ownership: the "is this endpoint already served?"
+        # check and the insertion into self.runs happen under it, whether the
+        # caller is the event loop, a sync route's worker thread or an
+        # asyncio.to_thread helper. Never held across I/O other than the
+        # SQLite write of the row being registered.
+        self._lock = threading.RLock()
 
     def bind_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         self._loop = loop
@@ -633,7 +682,8 @@ class Runner:
         if not raw_cmd:
             oomguard.deprioritize(proc.pid)
         run.status = "running"
-        self.runs[run_id] = run
+        with self._lock:
+            self.runs[run_id] = run
         db.runs_insert(
             {
                 "id": run_id,
@@ -1005,9 +1055,64 @@ class Runner:
             return None
         return max(live, key=lambda r: r.started_at)
 
+    def _serves(self, run: Run, key: tuple[str, int]) -> bool:
+        """Whether ``run`` serves the endpoint ``key`` (see endpoint_key)."""
+        run_key = endpoint_key(run.url) if run.url else None
+        if run_key == key:
+            return True
+        # A run bound to a local port owns that port whatever URL it reports,
+        # but only when its binding is known to be local: its URL names this
+        # machine, or it is a local process with no URL yet. A remote sparkrun
+        # job announcing the same port number does not own a local endpoint.
+        if key[0] != "local" or run.port != key[1]:
+            return False
+        if run_key is not None:
+            return run_key[0] == "local"
+        return not run.detached
+
+    def endpoint_owner(self, url: str, exclude: str | None = None) -> Run | None:
+        """The running run already serving ``url``, if any."""
+        key = endpoint_key(url)
+        if key is None:
+            return None
+        with self._lock:
+            for run in list(self.runs.values()):
+                if run.status == "running" and run.id != exclude and self._serves(run, key):
+                    return run
+        return None
+
     def register_external(self, engine: str, name: str, url: str) -> Run:
         """Register a managed-by-someone-else endpoint (e.g. spark-vllm-docker)
-        as a Run so chat/bench/agent-fix flows can target it uniformly."""
+        as a Run so chat/bench/agent-fix flows can target it uniformly. An
+        endpoint that a running run already serves is not registered twice:
+        that run is returned instead."""
+        return self.claim_external(engine, name, url)[0]
+
+    def claim_external(self, engine: str, name: str, url: str) -> tuple[Run, bool]:
+        """register_external(), atomically with respect to every other way a
+        run enters self.runs. Returns (run, created): created is False when
+        the endpoint already had a running run, which is returned as is."""
+        with self._lock:
+            owner = self.endpoint_owner(url)
+            if owner is not None:
+                return owner, False
+            return self._register_external_locked(engine, name, url), True
+
+    def _retire_superseded_externals(self, run: Run) -> list[Run]:
+        """Mark exited every external registration of the endpoint ``run``
+        now serves: the managed run (stop, logs, watchdog) takes over. Call
+        with the lock held."""
+        retired = []
+        for other in list(self.runs.values()):
+            if other is run or other.status != "running" or not other.meta.get("_external"):
+                continue
+            key = endpoint_key(other.url) if other.url else None
+            if key is not None and self._serves(run, key):
+                self.unregister_external(other.id)
+                retired.append(other)
+        return retired
+
+    def _register_external_locked(self, engine: str, name: str, url: str) -> Run:
         run_id = uuid.uuid4().hex[:12]
         cmd = [f"[external] {name}", url]
         run = Run(id=run_id, engine=engine, recipe_id=None, cmd=cmd, env={}, port=None)
@@ -1037,7 +1142,29 @@ class Runner:
         )
         return run
 
-    def adopt(
+    def adopt(self, run_id: str, **kwargs: Any) -> Run | None:
+        """Re-attach to a workload that survived a server restart (see
+        _adopt for the arguments), keeping one run per endpoint: an external
+        row (meta ``_external``) is not adopted when another running run
+        already serves its URL (returns None), and a managed workload adopted
+        on the endpoint of an external registration replaces it, so stop,
+        logs and the watchdog stay with the run the app can manage. Checked
+        and inserted under the ownership lock."""
+        external = bool((kwargs.get("meta") or {}).get("_external"))
+        url = kwargs.get("url")
+        with self._lock:
+            if run_id in self.runs:
+                return self.runs[run_id]
+            if external and url and self.endpoint_owner(url) is not None:
+                return None  # this endpoint is already served by another run
+            run = self._adopt(run_id, **kwargs)
+            superseded = [] if run is None or external else self._retire_superseded_externals(run)
+        for other in superseded:
+            other.publish(f"[external] now served by run {run_id}: registration retired")
+            run.publish(f"[adopted] took over endpoint {other.url} from external registration {other.id}")
+        return run
+
+    def _adopt(
         self,
         run_id: str,
         *,

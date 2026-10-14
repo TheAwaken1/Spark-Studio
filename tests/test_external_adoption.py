@@ -11,10 +11,12 @@ OpenAI-style stub on 127.0.0.1 — the real `data/spark_studio.db`, sparkrun,
 Docker and the network are never touched.
 """
 import asyncio
+import contextlib
 import json
 import os
 import socket
 import sqlite3
+import sys
 import tempfile
 import threading
 import unittest
@@ -73,6 +75,20 @@ def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+# Documentation addresses (RFC 5737): never assigned to a real interface,
+# never contacted by these tests.
+LAN_IP = "198.51.100.7"     # stands for "this box, by its LAN address"
+REMOTE_IP = "192.0.2.10"    # another machine (e.g. a sparkrun head node)
+
+
+@contextlib.contextmanager
+def _this_box_is(ip):
+    """Make ``ip`` count as one of this machine's interface addresses."""
+    real = runners._is_local_address
+    with mock.patch.object(runners, "_is_local_address", side_effect=lambda h: h == ip or real(h)):
+        yield
 
 
 class _AdoptionTestCase(unittest.TestCase):
@@ -385,11 +401,12 @@ class ConcurrencyTests(_AdoptionTestCase):
     def test_local_port_held_by_a_run_with_a_lan_url_is_taken(self):
         # sparkrun can report this box by its LAN address, not 127.0.0.1.
         engine = self.stub()
-        server.runner.adopt("spark1", engine="sparkrun", jobid="job1",
-                            url=f"http://192.0.2.10:{engine.port}", port=engine.port)
+        with _this_box_is(LAN_IP):
+            server.runner.adopt("spark1", engine="sparkrun", jobid="job1",
+                                url=f"http://{LAN_IP}:{engine.port}", port=engine.port)
 
-        summary = asyncio.run(server.register_external(
-            server.ExternalReq(engine="vllm", name="again", url=engine.url)))
+            summary = asyncio.run(server.register_external(
+                server.ExternalReq(engine="vllm", name="again", url=engine.url)))
 
         self.assertEqual(summary["id"], "spark1")
         self.assertEqual(self.running_rows(), [])
@@ -437,11 +454,23 @@ class ConcurrencyTests(_AdoptionTestCase):
         self.assertEqual(list(server.runner.runs), ["managed1"])
         self.assertEqual(db.runs_get(external.id)["status"], "exited")
 
+    def test_registering_the_same_endpoint_twice_returns_the_first_run(self):
+        first = server.runner.register_external("vllm", "one", "http://127.0.0.1:8000")
+        again, created = server.runner.claim_external("vllm", "two", "http://localhost:8000/")
+
+        self.assertIs(again, first)
+        self.assertFalse(created)
+        self.assertEqual(len(self.running_rows()), 1)
+
     def test_reconcile_readopts_one_of_two_rows_for_the_same_endpoint(self):
+        # Two rows for one endpoint, as an older version could leave behind.
         engine = self.stub()
-        server.runner.register_external("vllm", "one", engine.url)
-        server.runner.register_external("vllm", "two", engine.url)
-        self.restart()
+        for rid, started in (("one", 1.0), ("two", 2.0)):
+            db.runs_insert({
+                "id": rid, "engine": "vllm", "status": "running", "pid": None, "port": None,
+                "cmd": f"[external] {rid} {engine.url}", "started_at": started,
+                "meta_json": json.dumps({"_external": True, "_url": engine.url, "_label": rid}),
+            })
 
         asyncio.run(server._reconcile_on_boot())
 
@@ -451,14 +480,297 @@ class ConcurrencyTests(_AdoptionTestCase):
 
 class EndpointKeyTests(unittest.TestCase):
     def test_loopback_spellings_are_the_same_endpoint(self):
-        keys = {server._endpoint_key(u) for u in (
-            "http://127.0.0.1:8000", "http://localhost:8000/", "http://0.0.0.0:8000/v1", "127.0.0.1:8000")}
+        keys = {runners.endpoint_key(u) for u in (
+            "http://127.0.0.1:8000", "http://localhost:8000/", "http://0.0.0.0:8000/v1", "127.0.0.1:8000",
+            "http://[::1]:8000")}
         self.assertEqual(keys, {("local", 8000)})
 
     def test_other_host_or_port_is_another_endpoint(self):
-        self.assertNotEqual(server._endpoint_key("http://10.0.0.5:8000"), ("local", 8000))
-        self.assertNotEqual(server._endpoint_key("http://127.0.0.1:8001"), ("local", 8000))
-        self.assertIsNone(server._endpoint_key("http://127.0.0.1:notaport"))
+        self.assertEqual(runners.endpoint_key(f"http://{REMOTE_IP}:8000"), (REMOTE_IP, 8000))
+        self.assertNotEqual(runners.endpoint_key("http://127.0.0.1:8001"), ("local", 8000))
+        self.assertIsNone(runners.endpoint_key("http://127.0.0.1:notaport"))
+
+    def test_an_address_of_this_box_is_local(self):
+        # Real check, no mock: the address this box would use to reach the
+        # outside (UDP connect sends no packet). Skipped on a host with no
+        # route at all.
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect((REMOTE_IP, 9))
+                own_ip = s.getsockname()[0]
+        except OSError:
+            self.skipTest("no IPv4 route on this host")
+        self.assertEqual(runners.endpoint_key(f"http://{own_ip}:8000"), ("local", 8000))
+        self.assertEqual(runners.endpoint_key(f"http://{socket.gethostname()}:8000"), ("local", 8000))
+
+    def test_documentation_addresses_are_not_local(self):
+        self.assertFalse(runners._is_local_address(REMOTE_IP))
+        self.assertFalse(runners._is_local_address(LAN_IP))
+        self.assertFalse(runners._is_local_address("spark-head.example"))
+
+
+def _line_in(func, text):
+    """(code object, line number) of the first line of ``func`` containing
+    ``text``, for a tracer that pauses a thread exactly there."""
+    import inspect
+
+    lines, start = inspect.getsourcelines(func)
+    for offset, line in enumerate(lines):
+        if text in line:
+            return func.__code__, start + offset
+    raise AssertionError(f"{text!r} not found in {func.__qualname__}")
+
+
+@contextlib.contextmanager
+def _pause_at(func, text, while_paused):
+    """Run the body with a tracer that, the first time the current thread
+    reaches ``text`` in ``func``, calls ``while_paused()`` before going on."""
+    code, lineno = _line_in(func, text)
+    fired = []
+
+    def local(frame, event, arg):
+        if event == "line" and frame.f_lineno == lineno and not fired:
+            fired.append(True)
+            while_paused()
+        return local
+
+    def tracer(frame, event, arg):
+        return local if frame.f_code is code else None
+
+    previous = sys.gettrace()
+    sys.settrace(tracer)
+    try:
+        yield fired
+    finally:
+        sys.settrace(previous)
+
+
+class _SparkrunJobMixin:
+    """Adopt a sparkrun job through the real _adopt_sparkrun_job(), with every
+    sparkrun/docker call stubbed out."""
+
+    def job_helpers(self, url):
+        port = server.urllib.parse.urlsplit(url).port
+        stack = contextlib.ExitStack()
+        for target, attr, kwargs in (
+            (server, "_ensure_sparkrun_recipe", {"return_value": None}),
+            (server.sparkrun_service, "export_running_recipe", {"return_value": {"defaults": {"port": port}}}),
+            (server.sparkrun_service, "guess_url", {"return_value": url}),
+            (server.sparkrun_service, "sparkrun_bin", {"return_value": None}),
+            (server.sparkrun_service, "tail_pump_cmd", {"return_value": None}),
+            (server.sparkrun_service, "serve_alive", {"return_value": True}),
+            (server, "_sync_hermes_engine_models", {"new": mock.AsyncMock()}),
+        ):
+            stack.enter_context(mock.patch.object(target, attr, **kwargs))
+        self.addCleanup(stack.close)
+        return stack
+
+    def running(self):
+        return [r for r in server.runner.runs.values() if r.status == "running"]
+
+
+class OwnershipTests(_SparkrunJobMixin, _AdoptionTestCase):
+    """One endpoint, one run, whichever thread registers or adopts it."""
+
+    JOB = {"ref": "test-model", "jobid": "job-1", "containers": [], "hosts": []}
+
+    def test_job_adopted_by_another_thread_while_detection_holds_the_lock(self):
+        # The worker adopts the sparkrun job while the detection pass is
+        # inside claim_external(), between its check and its insertion. It
+        # must wait for the lock, then take the endpoint over.
+        engine = self.stub()
+        self.job_helpers(engine.url)
+        started, done = threading.Event(), threading.Event()
+        blocked = []
+        worker = threading.Thread(target=lambda: (started.set(), server._adopt_sparkrun_job(self.JOB, None), done.set()))
+
+        def while_paused():
+            worker.start()
+            started.wait(5)
+            blocked.append(not done.wait(0.3))
+
+        with _pause_at(runners.Runner.claim_external, "_register_external_locked", while_paused) as fired:
+            adopted = asyncio.run(server._adopt_listening_ports([engine.port]))
+        worker.join(5)
+
+        self.assertEqual(fired, [True])
+        self.assertEqual(blocked, [True], "the worker must wait for the registration to finish")
+        self.assertTrue(done.is_set())
+        self.assertEqual(len(adopted), 1)
+        [managed] = self.running()
+        self.assertEqual(managed.meta.get("jobid"), "job-1")
+        self.assertIs(server.runner.active(), managed)
+        self.assertEqual(adopted[0].status, "exited")
+        self.assertEqual(db.runs_get(adopted[0].id)["status"], "exited")
+        self.assertEqual([r["id"] for r in self.running_rows()], [managed.id])
+
+    def test_job_adopted_by_another_thread_just_before_the_claim(self):
+        engine = self.stub()
+        self.job_helpers(engine.url)
+
+        def adopt_in_thread():
+            worker = threading.Thread(target=server._adopt_sparkrun_job, args=(self.JOB, None))
+            worker.start()
+            worker.join(5)
+
+        with _pause_at(server._adopt_listening_ports, "runner.claim_external", adopt_in_thread) as fired:
+            adopted = asyncio.run(server._adopt_listening_ports([engine.port]))
+
+        self.assertEqual(fired, [True])
+        self.assertEqual(adopted, [])
+        [managed] = self.running()
+        self.assertEqual(managed.meta.get("jobid"), "job-1")
+        self.assertEqual([r["id"] for r in self.running_rows()], [managed.id])
+
+    def test_manual_registration_from_another_thread_while_a_job_is_adopted(self):
+        # Reverse interleaving: the job adoption holds the lock, a manual
+        # registration of the same endpoint arrives from another thread.
+        engine = self.stub()
+        self.job_helpers(engine.url)
+        result, started = [], threading.Event()
+        worker = threading.Thread(target=lambda: (
+            started.set(), result.append(server.runner.register_external("vllm", "manual", engine.url))))
+
+        def while_paused():
+            worker.start()
+            started.wait(5)
+            result.append(worker.is_alive())  # still waiting for the lock
+
+        with _pause_at(runners.Runner._adopt, "self.runs[run_id] = run", while_paused) as fired:
+            server._adopt_sparkrun_job(self.JOB, None)
+        worker.join(5)
+
+        self.assertEqual(fired, [True])
+        [managed] = self.running()
+        self.assertEqual(result, [True, managed])
+        self.assertEqual([r["id"] for r in self.running_rows()], [managed.id])
+
+    def test_watchdog_discovering_the_job_after_detection_takes_the_endpoint_over(self):
+        # sparkrun status can come back empty at boot: detection registers the
+        # engine as external, then the watchdog finds the job serving it.
+        engine = self.stub()
+        [external] = asyncio.run(server._adopt_listening_ports([engine.port]))
+        self.job_helpers(engine.url)
+        job = {**self.JOB, "jobid": "job-later"}
+        with mock.patch.object(server, "engine_available", return_value=True), \
+                mock.patch.object(server.sparkrun_service, "parse_status", return_value=[job]):
+            asyncio.run(server._watchdog_tick(3))
+
+        [managed] = self.running()
+        self.assertEqual(managed.meta.get("jobid"), "job-later")
+        self.assertEqual(external.status, "exited")
+        self.assertEqual(db.runs_get(external.id)["status"], "exited")
+        self.assertEqual([r["id"] for r in self.running_rows()], [managed.id])
+        self.assertTrue(any("took over endpoint" in line for line in managed.ring))
+
+    def test_manual_registration_is_taken_over_by_a_job_adopted_later(self):
+        engine = self.stub()
+        manual = server.runner.register_external("vllm", "manual", engine.url)
+        self.job_helpers(engine.url)
+
+        server._adopt_sparkrun_job(self.JOB, None)
+
+        [managed] = self.running()
+        self.assertNotEqual(managed.id, manual.id)
+        self.assertEqual(db.runs_get(manual.id)["status"], "exited")
+
+    def test_a_job_on_another_endpoint_leaves_the_registration_alone(self):
+        engine = self.stub()
+        manual = server.runner.register_external("vllm", "manual", engine.url)
+        self.job_helpers(f"http://127.0.0.1:{_free_port()}")
+
+        server._adopt_sparkrun_job(self.JOB, None)
+
+        self.assertEqual(len(self.running()), 2)
+        self.assertEqual(manual.status, "running")
+
+    def test_external_row_is_not_adopted_on_an_endpoint_a_job_serves(self):
+        engine = self.stub()
+        server.runner.adopt("spark1", engine="sparkrun", jobid="job1", url=engine.url, port=engine.port)
+
+        run = server.runner.adopt("ext1", engine="vllm", url=engine.url, meta={"_external": True, "_url": engine.url})
+
+        self.assertIsNone(run)
+        self.assertEqual(list(server.runner.runs), ["spark1"])
+
+    def test_adopting_an_external_run_again_returns_it(self):
+        engine = self.stub()
+        meta = {"_external": True, "_url": engine.url}
+        first = server.runner.adopt("ext1", engine="vllm", url=engine.url, meta=meta)
+
+        self.assertIs(server.runner.adopt("ext1", engine="vllm", url=engine.url, meta=meta), first)
+
+    def test_only_external_registrations_are_taken_over(self):
+        # Another managed run on the endpoint is not the adopter's to retire.
+        engine = self.stub()
+        server.runner.adopt("proc1", engine="vllm", url=engine.url, port=engine.port, adopted_pid=4242)
+        self.job_helpers(engine.url)
+
+        server._adopt_sparkrun_job(self.JOB, None)
+
+        self.assertEqual(server.runner.get("proc1").status, "running")
+
+
+class RemoteHostTests(_AdoptionTestCase):
+    """A remote job using the same port number is another endpoint. The
+    remote address is a documentation IP and is never contacted."""
+
+    def test_remote_job_does_not_capture_a_local_registration(self):
+        engine = self.stub()
+        server.runner.adopt("remote-job", engine="sparkrun", jobid="remote",
+                            url=f"http://{REMOTE_IP}:{engine.port}", port=engine.port)
+
+        summary = asyncio.run(server.register_external(
+            server.ExternalReq(engine="vllm", name="local-model", url=engine.url)))
+
+        self.assertNotEqual(summary["id"], "remote-job")
+        self.assertEqual(summary["url"], engine.url)
+        self.assertEqual(server.runner.get("remote-job").status, "running")
+
+    def test_remote_job_does_not_retire_a_live_local_row_on_boot(self):
+        engine = self.stub()
+        local = server.runner.register_external("vllm", "local-model", engine.url)
+        self.restart()
+        server.runner.adopt("remote-job", engine="sparkrun", jobid="remote",
+                            url=f"http://{REMOTE_IP}:{engine.port}", port=engine.port)
+
+        with mock.patch.object(server, "_mark_adopted_ready", new=mock.AsyncMock()):
+            asyncio.run(server._reconcile_on_boot())
+
+        self.assertEqual(db.runs_get(local.id)["status"], "running")
+        self.assertEqual(server.runner.get(local.id).status, "running")
+
+    def test_remote_job_adopted_later_does_not_retire_a_local_registration(self):
+        engine = self.stub()
+        local = server.runner.register_external("vllm", "local-model", engine.url)
+
+        server.runner.adopt("remote-job", engine="sparkrun", jobid="remote",
+                            url=f"http://{REMOTE_IP}:{engine.port}", port=engine.port)
+
+        self.assertEqual(local.status, "running")
+
+    def test_a_local_process_without_url_holds_its_port(self):
+        # A managed engine process on this box owns its port before its URL
+        # is known; a detached (possibly remote) sparkrun run does not.
+        managed = runners.Run(id="proc1", engine="vllm", recipe_id=None, cmd=["x"], env={}, port=8000)
+        managed.status = "running"
+        server.runner.runs[managed.id] = managed
+        remote = runners.Run(id="spark1", engine="sparkrun", recipe_id=None, cmd=["x"], env={},
+                             port=8001, detached=True)
+        remote.status = "running"
+        server.runner.runs[remote.id] = remote
+
+        self.assertIs(server.runner.endpoint_owner("http://127.0.0.1:8000"), managed)
+        self.assertIsNone(server.runner.endpoint_owner("http://127.0.0.1:8001"))
+
+    def test_detection_ignores_a_remote_job_only_through_the_active_guard(self):
+        # Detection still only runs while nothing is active, remote or not.
+        engine = self.stub()
+        server.runner.adopt("remote-job", engine="sparkrun", jobid="remote",
+                            url=f"http://{REMOTE_IP}:{engine.port}", port=engine.port)
+
+        self.assertEqual(asyncio.run(server._adopt_listening_ports([engine.port])), [])
+        self.assertEqual(engine.hits, 0)
 
 
 if __name__ == "__main__":

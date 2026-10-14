@@ -850,11 +850,9 @@ async def register_external(req: ExternalReq):
                 raise HTTPException(400, f"{url}/v1/models returned {r.status_code}")
     except httpx.HTTPError as e:
         raise HTTPException(400, f"cannot reach {url}/v1/models: {e}") from e
-    # Checked after the await above: boot adoption may have registered the
-    # same endpoint meanwhile. One endpoint, one run.
-    existing = _endpoint_owner(url)
-    if existing is not None:
-        return existing.summary()
+    # One endpoint, one run: if a run already serves this endpoint (a recipe,
+    # a sparkrun job, an earlier or boot-detected registration), that run is
+    # returned. The check and the registration are atomic in the runner.
     run = runner.register_external(req.engine, req.name, url)
     return run.summary()
 
@@ -4129,8 +4127,10 @@ async def _reconcile_on_boot() -> None:
         # still answer the OpenAI-compatible /v1/models probe.
         rid, url = row["id"], meta["_url"]
         alive = await _probe_served_models(url) is not None
-        # Re-checked after the probe's await, with none until adopt().
-        if alive and rid not in runner.runs and _endpoint_owner(url) is None:
+        # adopt() declines (None) when another run already serves this
+        # endpoint: a surviving managed run, a sparkrun job, or an earlier
+        # external row for the same endpoint. The row is then retired.
+        if alive and rid not in runner.runs:
             run = runner.adopt(
                 rid,
                 engine=row.get("engine") or "vllm",
@@ -4202,38 +4202,6 @@ async def _probe_served_models(url: str, timeout: float = 5) -> list[dict] | Non
     return [m for m in data if isinstance(m, dict) and m.get("id")]
 
 
-_LOCAL_HOSTS = {"127.0.0.1", "localhost", "0.0.0.0", "::1", "::"}
-
-
-def _endpoint_key(url: str) -> tuple[str, int] | None:
-    """(host, port) of an engine URL, with every loopback/wildcard spelling
-    folded into "local". None when the URL can't be parsed."""
-    try:
-        parts = urllib.parse.urlsplit(url if "://" in url else f"http://{url}")
-        port = parts.port or (443 if parts.scheme == "https" else 80)
-    except ValueError:
-        return None
-    host = (parts.hostname or "").lower()
-    return ("local" if host in _LOCAL_HOSTS else host, port)
-
-
-def _endpoint_owner(url: str):
-    """The running run already serving ``url``, if any: same host and port,
-    or, for a local URL, a run bound to that port (a sparkrun job's URL can
-    name the LAN address of this very box)."""
-    key = _endpoint_key(url)
-    if key is None:
-        return None
-    for run in list(runner.runs.values()):
-        if run.status != "running":
-            continue
-        if run.url and _endpoint_key(run.url) == key:
-            return run
-        if key[0] == "local" and run.port == key[1]:
-            return run
-    return None
-
-
 async def _adopt_listening_ports(ports: list[int]) -> list:
     """One detection pass: when no run is active, register every local port
     in ``ports`` that serves a model as an external run labelled with the
@@ -4247,18 +4215,20 @@ async def _adopt_listening_ports(ports: list[int]) -> list:
         if not served:
             continue
         # The probe awaited network I/O: a managed run or a manual
-        # /api/external registration may have appeared meanwhile. Re-check
-        # now, with no await between this check and the registration.
+        # /api/external registration may have appeared meanwhile. Any run
+        # other than ours ends the pass; claim_external() then re-checks the
+        # endpoint and registers atomically, so a run adopted from another
+        # thread at the same moment is returned instead of doubled.
         ours = {r.id for r in adopted}
         if any(r.status == "running" and r.id not in ours for r in runner.runs.values()):
             break
-        if _endpoint_owner(url) is not None:
-            continue
         model_id = str(served[0]["id"])
         engine = str(served[0].get("owned_by") or "").lower()
         if engine not in _ADOPT_ENGINES:
             engine = "vllm"
-        run = runner.register_external(engine, model_id, url)
+        run, created = runner.claim_external(engine, model_id, url)
+        if not created:
+            continue
         run.publish(f"[adopted] found {model_id} already serving on :{port} (SPARK_STUDIO_ADOPT_PORTS)")
         adopted.append(run)
     return adopted
