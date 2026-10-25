@@ -912,6 +912,9 @@ async def register_external(req: ExternalReq):
                 raise HTTPException(400, f"{url}/v1/models returned {r.status_code}")
     except httpx.HTTPError as e:
         raise HTTPException(400, f"cannot reach {url}/v1/models: {e}") from e
+    # One endpoint, one run: if a run already serves this endpoint (a recipe,
+    # a sparkrun job, an earlier or boot-detected registration), that run is
+    # returned. The check and the registration are atomic in the runner.
     run = runner.register_external(req.engine, req.name, url)
     return run.summary()
 
@@ -4298,8 +4301,10 @@ async def _bind_loop():
     # available; we just won't get upstream fixes until next online start.
     asyncio.create_task(_background_registry_sync())
     # Re-attach to workloads that survived the previous session (sparkrun
-    # containers, detached engine processes) and mark dead DB rows exited.
-    asyncio.create_task(_reconcile_on_boot())
+    # containers, detached engine processes, still-answering external
+    # endpoints) and mark dead DB rows exited; then, if opted in via
+    # SPARK_STUDIO_ADOPT_PORTS, pick up an engine started outside the app.
+    asyncio.create_task(_boot_adoption())
     # Engine health watchdog: readiness probing, server-side working/failed
     # recipe tagging, and "container Up but engine dead" detection.
     asyncio.create_task(_watchdog_loop())
@@ -4485,6 +4490,7 @@ async def _reconcile_on_boot() -> None:
     by_jobid = {j["jobid"]: j for j in jobs}
     by_ref = {j["ref"]: j for j in jobs}
     claimed: set[str] = set()
+    external_rows: list[tuple[dict, dict]] = []
 
     for row in rows:
         rid = row["id"]
@@ -4506,6 +4512,11 @@ async def _reconcile_on_boot() -> None:
                 claimed.add(job["jobid"])
                 await asyncio.to_thread(_adopt_sparkrun_job, job, row)
                 continue
+        elif meta.get("_external") and meta.get("_url"):
+            # Decided below, once managed runs and sparkrun jobs are known:
+            # those own their endpoint, an external row never duplicates them.
+            external_rows.append((row, meta))
+            continue
         elif _cmd_fragment_alive(row.get("pid"), row.get("cmd")):
             run = runner.adopt(
                 rid,
@@ -4533,9 +4544,143 @@ async def _reconcile_on_boot() -> None:
             continue
         await asyncio.to_thread(_adopt_sparkrun_job, job, None)
 
+    for row, meta in external_rows:
+        # External endpoints have no pid to check: they are alive iff they
+        # still answer the OpenAI-compatible /v1/models probe.
+        rid, url = row["id"], meta["_url"]
+        alive = await _probe_served_models(url) is not None
+        # adopt() declines (None) when another run already serves this
+        # endpoint: a surviving managed run, a sparkrun job, or an earlier
+        # external row for the same endpoint. The row is then retired.
+        if alive and rid not in runner.runs:
+            run = runner.adopt(
+                rid,
+                engine=row.get("engine") or "vllm",
+                recipe_id=row.get("recipe_id"),
+                url=url,
+                port=row.get("port"),
+                started_at=row.get("started_at"),
+                cmd_desc=row.get("cmd"),
+                meta=meta,
+                label=meta.get("_label"),
+            )
+            if run:
+                run.publish(f"[adopted] external endpoint {url} is still answering")
+                continue
+        if rid not in runner.runs:
+            db.runs_update(rid, status="exited", ended_at=db.now())
+
     await asyncio.gather(
         *(_mark_adopted_ready(run) for run in list(runner.runs.values()))
     )
+
+
+# ----- external endpoint adoption --------------------------------------------
+# An engine started outside the app (a `docker run vllm/...` container, a
+# systemd unit, another tool) is invisible to the dashboard until someone
+# registers it via POST /api/external. Registrations persist their URL and
+# are re-adopted on boot while they answer (see _reconcile_on_boot). With
+# SPARK_STUDIO_ADOPT_PORTS set, a box that boots with nothing running also
+# discovers such an engine by itself — useful on unattended Sparks.
+
+# How long after boot to keep looking: an engine container restarting with the
+# machine can take several minutes to load its weights before it answers.
+_ADOPT_WINDOW = int(os.environ.get("SPARK_STUDIO_ADOPT_WINDOW", "900"))
+_ADOPT_ENGINES = {"vllm", "sglang", "llamacpp"}
+
+
+def _adopt_ports_from_env() -> list[int]:
+    """Ports listed in SPARK_STUDIO_ADOPT_PORTS (comma/space separated).
+    Unset or empty means the detection is off (the default)."""
+    ports: list[int] = []
+    for tok in re.split(r"[\s,]+", os.environ.get("SPARK_STUDIO_ADOPT_PORTS", "").strip()):
+        if not tok:
+            continue
+        try:
+            port = int(tok)
+        except ValueError:
+            print(f"[adopt] ignoring invalid port {tok!r} in SPARK_STUDIO_ADOPT_PORTS", flush=True)
+            continue
+        if 0 < port < 65536 and port not in ports:
+            ports.append(port)
+    return ports
+
+
+async def _probe_served_models(url: str, timeout: float = 5) -> list[dict] | None:
+    """GET <url>/v1/models. The served model entries when the endpoint answers
+    like an OpenAI-compatible server, None when it doesn't answer."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(f"{url.rstrip('/')}/v1/models")
+        if response.status_code != 200:
+            return None
+        data = response.json().get("data")
+    except Exception:  # noqa: BLE001
+        return None
+    if not isinstance(data, list):
+        return None
+    return [m for m in data if isinstance(m, dict) and m.get("id")]
+
+
+async def _adopt_listening_ports(ports: list[int]) -> list:
+    """One detection pass: when no run is active, register every local port
+    in ``ports`` that serves a model as an external run labelled with the
+    served model id. Returns the runs it registered."""
+    if any(r.status == "running" for r in runner.runs.values()):
+        return []  # something is already active (incl. a sparkrun job on that port)
+    adopted = []
+    for port in ports:
+        url = f"http://127.0.0.1:{port}"
+        served = await _probe_served_models(url, timeout=3)
+        if not served:
+            continue
+        # The probe awaited network I/O: a managed run or a manual
+        # /api/external registration may have appeared meanwhile. Any run
+        # other than ours ends the pass; claim_external() then re-checks the
+        # endpoint and registers atomically, so a run adopted from another
+        # thread at the same moment is returned instead of doubled.
+        ours = {r.id for r in adopted}
+        if any(r.status == "running" and r.id not in ours for r in runner.runs.values()):
+            break
+        model_id = str(served[0]["id"])
+        engine = str(served[0].get("owned_by") or "").lower()
+        if engine not in _ADOPT_ENGINES:
+            engine = "vllm"
+        run, created = runner.claim_external(engine, model_id, url)
+        if not created:
+            continue
+        run.publish(f"[adopted] found {model_id} already serving on :{port} (SPARK_STUDIO_ADOPT_PORTS)")
+        adopted.append(run)
+    return adopted
+
+
+async def _adopt_ports_on_boot() -> None:
+    """Retry the detection for up to _ADOPT_WINDOW seconds after boot, until
+    something is adopted or another run becomes active."""
+    ports = _adopt_ports_from_env()
+    if not ports:
+        return
+    deadline = time.monotonic() + _ADOPT_WINDOW
+    while True:
+        if any(r.status == "running" for r in runner.runs.values()):
+            return
+        if await _adopt_listening_ports(ports):
+            return
+        if time.monotonic() >= deadline:
+            return
+        await asyncio.sleep(_WATCHDOG_INTERVAL)
+
+
+async def _boot_adoption() -> None:
+    """Reconcile first, so a re-adopted run (managed or external) wins over
+    detection and the same endpoint is never registered twice."""
+    try:
+        await _reconcile_on_boot()
+    except Exception as e:  # noqa: BLE001
+        print(f"[startup] run reconciliation failed: {e}", flush=True)
+    await _adopt_ports_on_boot()
 
 
 async def _watchdog_loop() -> None:

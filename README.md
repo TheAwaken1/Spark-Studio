@@ -516,6 +516,20 @@ on the GPU after the dashboard is gone. If you *want* a model to keep serving
 across app restarts, start with `SPARK_STUDIO_KEEP_RUNS_ON_EXIT=1 ./start.sh`;
 the next boot re-adopts it automatically.
 
+Engines you started outside the app (a `docker run` vLLM container, a systemd
+unit, another tool) can be registered from the engine tab's **Connect existing
+endpoint** card (`POST /api/external`). The registration survives app
+restarts: on boot it is kept if its `/v1/models` still answers and marked
+exited otherwise. To have an unattended box pick such an engine up on its own,
+set `SPARK_STUDIO_ADOPT_PORTS=8000` (comma-separated list): if nothing is
+running after boot, any local port in the list that serves an OpenAI-compatible
+`/v1/models` is registered as an external run, labelled with the served model
+id. Off by default. One endpoint, one run: connecting or detecting an endpoint
+that a run already serves returns that run, and if the app later adopts a
+sparkrun job serving a registered endpoint, the job's run replaces the
+registration (stop and logs then work). Endpoints are compared by host and
+port, any address of this machine counting as the same host.
+
 If `ufw` is enabled, allow the port for your LAN:
 
 ```bash
@@ -533,6 +547,8 @@ sudo ufw allow from 192.168.0.0/24 to any port 7860 proto tcp
 | `SPARK_STUDIO_NO_SPARKRUN_UPDATE` | Set to `1` to skip the automatic `sparkrun update` that `start.sh` runs on launch (same as `./start.sh --no-sparkrun-update`) | unset (auto-update) |
 | `SPARK_STUDIO_SPARKRUN_GRACE` | Seconds a sparkrun run may stay not-ready before the watchdog fails it (only applies when no local container signal is available, e.g. remote multi-node heads) | `1200` |
 | `SPARK_STUDIO_KEEP_RUNS_ON_EXIT` | Set to `1` to give engine output a durable log, leave models serving when the app exits, and re-adopt healthy endpoints as Ready on next boot | unset (models unload) |
+| `SPARK_STUDIO_ADOPT_PORTS` | Comma-separated local ports (e.g. `8000`) to check on boot for an engine started outside the app; when nothing is running, an answering OpenAI-compatible endpoint is registered as an external run | unset (off) |
+| `SPARK_STUDIO_ADOPT_WINDOW` | Seconds after boot during which `SPARK_STUDIO_ADOPT_PORTS` keeps looking (an engine restarting with the machine may still be loading) | `900` |
 | `SPARK_STUDIO_NO_MEMORY_GUARD` | Set to `1` to disable the pre-launch unified-memory guard (stop-and-wait + fit check before launching a model) | unset (guard on) |
 | `SPARK_STUDIO_MEM_GUARD_TIMEOUT` | Max seconds the guard waits for a stopped model's memory to be reclaimed before proceeding | `120` |
 | `SPARK_STUDIO_AGENT_TIMEOUT` | Seconds to wait for a Claude/Codex answer before giving up | `420` |
