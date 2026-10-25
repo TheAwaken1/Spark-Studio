@@ -1241,6 +1241,9 @@ class RestartRecoveryTests(unittest.TestCase):
         target = server.sparkrun_service.resolve_recipe_target(
             "@studio/qwen3.8-flash-next-tensorfold"
         )
+        if not Path(target).is_file():
+            # Gitignored local-only recipe; resolve_recipe_target returns the ref.
+            self.skipTest("local-only tensorfold recipe not present")
 
         self.assertEqual(
             server._sparkrun_launch_port(target, {"port": 8000}),
