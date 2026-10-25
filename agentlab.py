@@ -480,6 +480,21 @@ def hermes_interactive_toolsets(
     """Toolsets shared by dashboard Chat and ``sparkstudio hermes``."""
     selected = settings or hermes_learning_settings()
     toolsets = ["file", "terminal", "mcp-sparkstudio"]
+    try:
+        config = yaml.safe_load(
+            (HERMES_HOME / "config.yaml").read_text(encoding="utf-8")
+        ) or {}
+    except (OSError, yaml.YAMLError):
+        config = {}
+    servers = config.get("mcp_servers") if isinstance(config, dict) else None
+    if isinstance(servers, dict):
+        for name, server in servers.items():
+            if (
+                name != "sparkstudio"
+                and isinstance(server, dict)
+                and server.get("enabled", True)
+            ):
+                toolsets.append(f"mcp-{name}")
     if selected["memory_enabled"] or selected["user_profile_enabled"]:
         toolsets.append("memory")
     if selected["skills_enabled"]:
@@ -902,7 +917,9 @@ def resolve_hermes_pending(
 # provider was written by the user's in-TUI ``/model`` switch, so it survives a
 # config rewrite the same way ``display.skin`` does — otherwise every relaunch
 # would drag Chat back onto the local engine.
-_STUDIO_OWNED_PROVIDERS = {"", "custom", "local", "openai-compatible"}
+_STUDIO_OWNED_PROVIDERS = {
+    "", "custom", "custom:spark-studio", "local", "openai-compatible"
+}
 
 
 # Display name of the provider row Spark Studio registers inside Hermes. Hermes
@@ -1015,22 +1032,28 @@ def _resolve_model_block(
     base_url: str | None,
     model: str | None,
     *,
+    studio_url: str = "http://127.0.0.1:7860",
     respect_user_provider: bool = False,
 ) -> dict[str, Any] | None:
     """Pick the ``model:`` block for a config rewrite.
 
-    Headless and CLI runs always bind to the live endpoint — they pass
-    ``--provider custom`` on argv, so a foreign provider in the config would
-    just contradict them. Only Chat sets ``respect_user_provider``, because it
-    is the one surface where the user picks a provider with ``/model`` and
-    expects it to survive both a relaunch and a recipe swap.
+    Local engines are always reached through Spark Studio's stable passthrough,
+    not their concrete serving port. Besides surviving recipe swaps, the proxy
+    applies model-specific OpenAI compatibility defaults (for example,
+    TensorFold's output budget) that direct engine traffic would bypass.
+
+    Headless and CLI runs still pass ``--provider custom`` on argv, so a foreign
+    provider in the config would contradict them. Only Chat sets
+    ``respect_user_provider``, because it is the one surface where the user picks
+    a provider with ``/model`` and expects it to survive both a relaunch and a
+    recipe swap.
     """
     studio_block = (
         {
-            "provider": "custom",
+            "provider": "custom:spark-studio",
             "default": model,
-            "base_url": api_base(base_url),
-            "api_key": "",
+            "base_url": f"{studio_url.rstrip('/')}/api/engine/v1",
+            "api_key": _STUDIO_PROVIDER_TOKEN,
         }
         if base_url and model
         else None
@@ -1065,6 +1088,7 @@ def _write_hermes_config(
         preserved_display = None
         existing_model = None
         existing_providers: list[Any] = []
+        existing_mcp_servers: dict[str, Any] = {}
         try:
             existing = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
             if isinstance(existing, dict):
@@ -1073,6 +1097,12 @@ def _write_hermes_config(
                 existing_model = existing.get("model")
                 if isinstance(existing.get("custom_providers"), list):
                     existing_providers = existing["custom_providers"]
+                if isinstance(existing.get("mcp_servers"), dict):
+                    existing_mcp_servers = {
+                        name: server
+                        for name, server in existing["mcp_servers"].items()
+                        if name != "sparkstudio"
+                    }
         except (OSError, yaml.YAMLError):
             pass
 
@@ -1080,6 +1110,7 @@ def _write_hermes_config(
             existing_model,
             base_url,
             model,
+            studio_url=studio_url,
             respect_user_provider=respect_user_provider,
         )
         config: dict[str, Any] = {}
@@ -1100,9 +1131,9 @@ def _write_hermes_config(
         _apply_learning_config(config, learning)
         if preserved_display:
             config["display"] = preserved_display
+        mcp_servers = dict(existing_mcp_servers)
         if enable_search:
-            config["mcp_servers"] = {
-                "sparkstudio": {
+            mcp_servers["sparkstudio"] = {
                     "command": sys.executable,
                     "args": [
                         str(APP_DIR / "sparkstudio_mcp.py"),
@@ -1119,7 +1150,8 @@ def _write_hermes_config(
                         "prompts": False,
                     },
                 }
-            }
+        if mcp_servers:
+            config["mcp_servers"] = mcp_servers
         payload = yaml.safe_dump(config, sort_keys=False)
         temporary = HERMES_HOME / f"config-{threading.get_ident()}.tmp"
         temporary.write_text(payload, encoding="utf-8")
@@ -1176,6 +1208,7 @@ def build_hermes_command(
     *,
     max_turns: int = 90,
     unsafe_yolo: bool = False,
+    toolsets: str = "file,terminal",
 ) -> list[str]:
     command = [
         binary,
@@ -1188,7 +1221,7 @@ def build_hermes_command(
         "--provider",
         "custom",
         "--toolsets",
-        "file,terminal",
+        toolsets,
         "--checkpoints",
         "--source",
         "tool",
@@ -1295,14 +1328,34 @@ class _TelemetrySampler:
         return summary
 
 
-def _agent_prompt(task: str, evaluation: bool = False) -> str:
-    preface = (
-        "You are running inside Spark Studio Agent Lab. Work only inside the "
-        "current repository. Do not use the network, sudo, Docker, Git remotes, "
-        "or modify files outside this repository. Inspect the existing code, "
-        "make the smallest correct changes, and run the repository's tests. "
-        "Do not commit or push. "
-    )
+def _agent_prompt(
+    task: str,
+    evaluation: bool = False,
+    *,
+    mode: str = "repository",
+    allow_web_search: bool = False,
+) -> str:
+    if mode == "task-bench":
+        network_rule = (
+            "Use only the provided read-only web_search tool for internet research. "
+            if allow_web_search
+            else "Do not use the network. "
+        )
+        preface = (
+            "You are running inside Spark Studio Task Bench. Work only inside the "
+            "current workspace and write every requested artifact there. "
+            f"{network_rule}Do not use sudo, Docker, Git remotes, or modify files "
+            "outside the current workspace. Use terminal commands only for local "
+            "inspection and calculations. Do not commit or push. "
+        )
+    else:
+        preface = (
+            "You are running inside Spark Studio Agent Lab. Work only inside the "
+            "current repository. Do not use the network, sudo, Docker, Git remotes, "
+            "or modify files outside this repository. Inspect the existing code, "
+            "make the smallest correct changes, and run the repository's tests. "
+            "Do not commit or push. "
+        )
     if evaluation:
         preface += (
             "This is an unattended deterministic evaluation. Do not ask questions; "
@@ -1320,11 +1373,20 @@ def _invoke_hermes(
     timeout: float,
     unsafe_yolo: bool,
     evaluation: bool,
+    mode: str = "repository",
+    allow_web_search: bool = False,
+    toolsets: str = "file,terminal",
 ) -> dict[str, Any]:
     binary = find_hermes()
     if not binary:
         raise RuntimeError(f"Hermes Agent is not installed. Run: {HERMES_INSTALL}")
-    _write_hermes_config(endpoint["base_url"], endpoint["model"], max_turns)
+    _write_hermes_config(
+        endpoint["base_url"],
+        endpoint["model"],
+        max_turns,
+        studio_url=endpoint.get("studio_url") or "http://127.0.0.1:7860",
+        enable_search=allow_web_search,
+    )
     env = os.environ.copy()
     env.update(
         {
@@ -1335,10 +1397,16 @@ def _invoke_hermes(
     )
     command = build_hermes_command(
         binary,
-        _agent_prompt(task, evaluation=evaluation),
+        _agent_prompt(
+            task,
+            evaluation=evaluation,
+            mode=mode,
+            allow_web_search=allow_web_search,
+        ),
         endpoint["model"],
         max_turns=max_turns,
         unsafe_yolo=unsafe_yolo,
+        toolsets=toolsets,
     )
     sampler = _TelemetrySampler()
     started = time.time()
