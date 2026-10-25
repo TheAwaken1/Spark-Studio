@@ -10,10 +10,16 @@ metadata:
     Orca-abliterated variant of azampatti's healed top-k-5 INT4 AutoRound
     Qwen3.8 Flash Next for one DGX Spark. Uses the b12x stack, FP8 disk-backed
     n-gram table, MTP-5 speculative decoding, 262144-token configured context,
-    tool calling, and Qwen reasoning. Safety alignment is substantially removed;
-    use only for controlled research and add external safeguards before any
-    untrusted or production exposure.
-  maintainer: azampatti upstream; Spark Studio wrapper
+    tool calling, and Qwen reasoning.
+    ⚠️ WARNING: the abliteration comes from OrcaRouter's
+    orcarouter/Qwen3.8-Flash-Next-Uncensored, which has its safety alignment
+    substantially removed by a weight edit. This model will comply with harmful,
+    unethical, offensive, or illegal requests and has no meaningful built-in
+    guardrails. Released for legitimate research and red-teaming in controlled
+    environments only. Do not deploy to end users or in production without your
+    own safety, moderation, and abuse-prevention layers. You are responsible for
+    how you use it and for what it generates. Upstream license: Apache-2.0.
+  maintainer: azampatti upstream; OrcaRouter abliteration; Spark Studio wrapper
   model_params: 125B
   model_dtype: int4
   model_vram: 70
