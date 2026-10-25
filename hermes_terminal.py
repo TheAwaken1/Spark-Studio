@@ -10,16 +10,20 @@ from __future__ import annotations
 
 import errno
 import fcntl
+import hashlib
+import json
 import os
 import pty
 import select
 import signal
+import sqlite3
 import struct
 import sys
 import termios
 import threading
 import time
 from collections.abc import Sequence
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -170,6 +174,7 @@ def browser_tui_command(
     binary: str,
     model: str | None,
     provider: str = "custom",
+    resume_session: str | None = None,
 ) -> list[str]:
     """Build the real Hermes Ink TUI command used by the browser terminal.
 
@@ -180,6 +185,8 @@ def browser_tui_command(
     if model:
         command += ["--model", model, "--provider", provider or "custom"]
     command += ["--toolsets", agentlab.hermes_interactive_toolsets()]
+    if resume_session:
+        command += ["--resume", resume_session]
     return command
 
 
@@ -188,6 +195,7 @@ def prepare_browser_tui(
     workspace: Path,
     *,
     max_turns: int = 90,
+    resume_session: str | None = None,
 ) -> tuple[list[str], dict[str, str]]:
     """Refresh the isolated Hermes profile and return command + env.
 
@@ -230,4 +238,113 @@ def prepare_browser_tui(
             "HERMES_TUI_INLINE": "1",
         }
     )
-    return browser_tui_command(binary, binding["model"], binding["provider"]), env
+    command = browser_tui_command(
+        binary, binding["model"], binding["provider"], resume_session=resume_session
+    )
+    return command, env
+
+
+# ---------------------------------------------------------------------------
+# Conversation continuity across lost leases.
+#
+# A lease lives in the dashboard's memory, so a dashboard restart (or a lease
+# reaped after a long sleep) takes its Hermes with it. The conversation itself
+# is safe in Hermes' own state.db, though — the ledger below remembers when and
+# where each lease's Hermes started, which is enough to find the conversation it
+# was having and hand it to ``--resume`` when the browser comes back asking for
+# that lease. The Ink TUI doesn't write Hermes' per-terminal breadcrumbs, and a
+# bare ``--continue`` would pick up whichever tab spoke last, hence the ledger.
+
+LEASE_LEDGER = agentlab.DATA_DIR / "terminal-leases.json"
+_LEASE_LEDGER_MAX_AGE = 7 * 24 * 3600
+_LEASE_LEDGER_LOCK = threading.Lock()
+
+
+def _lease_key(lease_id: str) -> str:
+    # The lease id is the reattach credential; only a digest goes to disk.
+    return hashlib.sha256(lease_id.encode()).hexdigest()[:32]
+
+
+def _read_lease_ledger() -> dict[str, dict[str, Any]]:
+    try:
+        data = json.loads(LEASE_LEDGER.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def record_lease(lease_id: str, workspace: Path, resumed: str | None = None) -> None:
+    """Remember a new lease's start so a later lost-lease reconnect can find
+    its conversation. Best-effort: continuity is a nicety, never a blocker."""
+    now = time.time()
+    entry: dict[str, Any] = {"spawned_at": now, "workspace": str(workspace)}
+    if resumed:
+        entry["resumed"] = resumed
+    with _LEASE_LEDGER_LOCK:
+        ledger = {
+            key: value
+            for key, value in _read_lease_ledger().items()
+            if isinstance(value, dict)
+            and now - float(value.get("spawned_at") or 0) < _LEASE_LEDGER_MAX_AGE
+        }
+        ledger[_lease_key(lease_id)] = entry
+        try:
+            LEASE_LEDGER.parent.mkdir(parents=True, exist_ok=True)
+            tmp = LEASE_LEDGER.with_suffix(".tmp")
+            tmp.write_text(json.dumps(ledger), encoding="utf-8")
+            os.replace(tmp, LEASE_LEDGER)
+        except OSError:
+            pass
+
+
+def conversation_for_lease(lease_id: str) -> str | None:
+    """The Hermes session a lost lease was running, or None to start fresh.
+
+    Picks the newest TUI session its Hermes opened — started after the lease
+    and before the next lease in the same workspace — so a ``/new`` mid-lease
+    resumes the newer conversation. A lease that itself resumed one and never
+    opened another carries that id forward.
+    """
+    if not lease_id:
+        return None
+    with _LEASE_LEDGER_LOCK:
+        ledger = _read_lease_ledger()
+    entry = ledger.get(_lease_key(lease_id))
+    if not isinstance(entry, dict):
+        return None
+    try:
+        spawned_at = float(entry.get("spawned_at") or 0)
+    except (TypeError, ValueError):
+        return None
+    workspace = str(entry.get("workspace") or "")
+    later = [
+        float(other.get("spawned_at") or 0)
+        for other in ledger.values()
+        if isinstance(other, dict)
+        and other.get("workspace") == workspace
+        and float(other.get("spawned_at") or 0) > spawned_at
+    ]
+    until = min(later) if later else float("inf")
+    state_db = agentlab.HERMES_HOME / "state.db"
+    if not state_db.is_file():
+        return None
+    try:
+        # closing(), not the connection's own context manager — that one only
+        # commits, it never closes.
+        with closing(sqlite3.connect(f"file:{state_db}?mode=ro", uri=True, timeout=2)) as conn:
+            row = conn.execute(
+                "SELECT id FROM sessions WHERE source = 'tui' AND cwd = ?"
+                " AND started_at >= ? AND started_at < ?"
+                " ORDER BY started_at DESC LIMIT 1",
+                (workspace, spawned_at - 1, until),
+            ).fetchone()
+            if row:
+                return str(row[0])
+            resumed = str(entry.get("resumed") or "")
+            if resumed and conn.execute(
+                "SELECT 1 FROM sessions WHERE id = ?", (resumed,)
+            ).fetchone():
+                return resumed
+    except sqlite3.Error:
+        return None
+    return None

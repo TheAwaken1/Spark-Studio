@@ -934,6 +934,7 @@ async function refreshRecipes() {
       <div class="rc-actions">
         <button class="btn primary" data-run="${r.id}">▶ Run</button>
         <button class="btn" data-edit="${r.id}">Edit</button>
+        <button class="btn" data-history="${r.id}" title="Every edit (yours or an agent's) keeps the previous version — restore any of them">⟲ History</button>
         <button class="btn" data-share="${r.id}" title="Copy recipe in the community spark-arena YAML format (falls back to JSON for pipeline recipes)">⧉ Share</button>
         <button class="btn danger" data-del="${r.id}">Del</button>
       </div>
@@ -953,6 +954,7 @@ async function refreshRecipes() {
           : { engine: r.engine, args: { model: r.model, ...r.args }, env: r.env || {}, recipe_id: r.id };
         const run = await api('/runs', { method: 'POST', body });
         toast(`Started run ${run.id}`);
+        lintToast(run.lint);
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
       }
@@ -960,6 +962,20 @@ async function refreshRecipes() {
   }));
   $$('#recipesList [data-edit]').forEach((b) => b.addEventListener('click', async () => {
     openRecipeModal(await api(`/recipes/${b.dataset.edit}`));
+  }));
+  $$('#recipesList [data-history]').forEach((b) => b.addEventListener('click', async () => {
+    try {
+      const rid = b.dataset.history;
+      const rows = await api(`/recipes/${rid}/history`);
+      showHistoryModal('Recipe history', rows.map((s) => ({
+        ...s, summary: recipeSnapshotSummary(s.recipe),
+      })), async (row) => {
+        const restored = await api(`/recipes/${rid}/restore/${row.id}`, { method: 'POST' });
+        toast(`Restored "${restored.name}" to ${new Date(row.taken_at * 1000).toLocaleString()}`);
+        lintToast(restored.lint);
+        refreshRecipes();
+      });
+    } catch (e) { toast(e.message, 'danger'); }
   }));
   $$('#recipesList [data-share]').forEach((b) => b.addEventListener('click', async () => {
     try {
@@ -1052,6 +1068,7 @@ async function refreshSparkrun() {
         ${r.description ? `<div class="rc-notes">${escapeHtml(r.description)}</div>` : ''}
         <div class="rc-actions">
           <button class="btn primary" data-sparkrun="${escapeHtml(r.ref)}" ${status.installed ? '' : 'disabled title="Install sparkrun first"'}>▶ Run via sparkrun</button>
+          ${r.ref.startsWith('@studio/') ? `<button class="btn" data-file-history="${escapeHtml(r.ref.split('/')[1])}" title="Snapshots of the bundled YAML taken before every launch — restore if an edit broke it">⟲ History</button>` : ''}
         </div>
       </div>`).join('') || `<div class="muted">No recipes fit ${tp} node${tp > 1 ? 's' : ''}${q ? ' matching your search' : ''}. Raise Nodes (TP) to see multi-Spark recipes.</div>`;
     bindFavButtons('#sparkrunList', refreshSparkrun);
@@ -1060,9 +1077,23 @@ async function refreshSparkrun() {
         const tp = Number($('#sparkrunTp').value) || 1;
         const run = await api('/sparkrun/run', { method: 'POST', body: { ref: btn.dataset.sparkrun, tp } });
         toast(`Started ${run.id} — ${btn.dataset.sparkrun}${tp > 1 ? ` on ${tp} nodes` : ''}${run.recipe_id ? ' · saved to My Recipes' : ''}`);
+        lintToast(run.lint);
         refreshRecipes();
         $('.tab[data-tab="logs"]').click();
         setTimeout(() => window.selectRun(run.id), 50);
+      } catch (e) { toast(e.message, 'danger'); }
+    }));
+    $$('#sparkrunList [data-file-history]').forEach((btn) => btn.addEventListener('click', async () => {
+      try {
+        const stem = btn.dataset.fileHistory;
+        const rows = await api(`/recipes/files/${encodeURIComponent(stem)}/history`);
+        showHistoryModal(`Bundled recipe history — ${stem}`, rows.map((s) => ({
+          ...s, id: s.name, summary: `${(s.size / 1024).toFixed(1)} KB`,
+        })), async (row) => {
+          const res = await api(`/recipes/files/${encodeURIComponent(stem)}/restore/${encodeURIComponent(row.name)}`, { method: 'POST' });
+          toast(`Restored ${stem}.yaml to ${new Date(row.taken_at * 1000).toLocaleString()} — next launch uses it`);
+          lintToast(res.lint);
+        });
       } catch (e) { toast(e.message, 'danger'); }
     }));
   } catch (e) {
@@ -1320,6 +1351,7 @@ async function saveRecipeFromModal(thenRun) {
     const validation = validateRecipePayload(recipe);
     if (!validation.ok) throw new Error(validation.error);
     const saved = await api('/recipes', { method: 'POST', body: recipe });
+    lintToast(saved.lint);
     $('#recipeModal').hidden = true;
     refreshRecipes();
     if (thenRun) {
@@ -3836,18 +3868,49 @@ function formatBenchyCell(v) {
 }
 
 $('#benchGo').addEventListener('click', async () => {
+  const sweep = $('#benchSweepOn').checked;
   const body = {
     run_id: $('#benchRun').value || undefined,
     prompt: $('#benchPrompt').value || undefined,
     max_tokens: Number($('#benchTokens').value),
     runs: Number($('#benchRuns').value),
+    concurrency: sweep ? [1, 4, 8] : undefined,
   };
+  const btn = $('#benchGo');
+  btn.disabled = true;
+  if (sweep) toast('Concurrency sweep running — 1, then 4, then 8 parallel streams…');
   try {
     const res = await api('/bench', { method: 'POST', body });
     toast(`tokens/s ${(res.tokens_per_sec || 0).toFixed(1)} · TTFT ${(res.ttft_ms || 0).toFixed(0)}ms`);
+    renderBenchSweep(res.concurrency);
     refreshBenchTab();
   } catch (e) { toast(e.message, 'danger'); }
+  finally { btn.disabled = false; }
 });
+
+// Aggregate vs per-stream table: "59 tok/s serving" claims from forums are
+// aggregate numbers at concurrency — showing both next to each other is what
+// keeps a recipe's single-chat feel from looking like a defect.
+function renderBenchSweep(levels) {
+  const box = $('#benchSweep');
+  if (!levels || !levels.length) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `
+    <table class="bench-sweep-table">
+      <thead><tr><th>Streams</th><th>Aggregate tok/s</th><th>Per-stream tok/s</th><th>TTFT</th><th>Tokens</th></tr></thead>
+      <tbody>
+        ${levels.map((l) => `
+          <tr>
+            <td>${l.streams}${l.completed < l.streams ? ` <span class="badge no" title="${escapeHtml((l.errors || []).join('; '))}">${l.streams - l.completed} failed</span>` : ''}</td>
+            <td><strong>${(l.aggregate_tokens_per_sec || 0).toFixed(1)}</strong></td>
+            <td>${(l.per_stream_tokens_per_sec || 0).toFixed(1)}</td>
+            <td>${l.ttft_ms != null ? l.ttft_ms.toFixed(0) + ' ms' : '—'}</td>
+            <td>${l.completion_tokens ?? '—'}</td>
+          </tr>`).join('')}
+      </tbody>
+    </table>
+    <div class="muted" style="font-size:12px;margin:6px 0 10px">Aggregate = all streams combined (what "multi-agent serving" claims quote) · Per-stream = what each individual chat experiences at that load.</div>`;
+}
 
 // ---------- agents login -------------------------------------------------
 async function refreshAgents() {
@@ -3930,8 +3993,16 @@ const hermesTui = {
   httpStarting: false,
   httpGeneration: 0,
   preferHttp: false,
+  // Set once any WebSocket opens on this page: WSS works here, so a later drop
+  // is a network blip or a dashboard restart to wait out, not a reason to
+  // switch transports.
+  wsProven: false,
+  // Lease to pick the conversation back up from once the HTTPS fallback has
+  // to start a new Hermes (the old lease 404'd).
+  httpResumeFrom: '',
   observer: null,
   retryTimer: null,
+  retryFn: null,
   autoStarted: false,
   installing: false,
   pendingPoller: null,
@@ -3954,8 +4025,8 @@ function rememberHermesHttpSession(sessionId) {
 }
 
 // The WSS lease survives this page, so its id has to outlive it too. Kept
-// separate from the HTTPS one: the two transports lease independently and a
-// reload must not hand a WSS id to the HTTPS fallback.
+// separate from the HTTPS one so a reload knows which transport to reattach
+// with; the HTTPS fallback adopts a WSS lease explicitly when it takes over.
 const HERMES_WS_SESSION_KEY = 'spark-studio-hermes-ws-session';
 
 function storedHermesWsSession() {
@@ -4225,13 +4296,17 @@ async function startHermesHttpFallback(attempt = 0) {
   setHermesTuiState('Starting Hermes over HTTPS…');
   try { hermesTui.fit.fit(); } catch { /* dimensions fall back server-side */ }
   try {
-    const savedSession = attempt === 0 ? storedHermesHttpSession() : '';
+    // A tab whose WebSocket gave up hands its still-running lease over here
+    // instead of starting a second Hermes next to it.
+    const savedSession = storedHermesHttpSession() || storedHermesWsSession();
     if (savedSession) {
       try {
         await hermesHttpApi(`/${encodeURIComponent(savedSession)}`);
         if (generation !== hermesTui.httpGeneration) return;
         hermesTui.httpStarting = false;
         hermesTui.httpSession = savedSession;
+        rememberHermesHttpSession(savedSession);
+        rememberHermesWsSession('');
         setHermesControls(true);
         setHermesTuiState('Hermes reconnected over HTTPS', 'ready');
         sendHermesHttpInput({
@@ -4246,7 +4321,11 @@ async function startHermesHttpFallback(attempt = 0) {
         // A missing/expired lease needs a new PTY. For network and proxy
         // failures, retain the opaque ID so the next retry can reattach.
         if (!String(error.message || '').startsWith('404 ')) throw error;
+        // Gone for good (dashboard restart, TTL) — the new Hermes picks the
+        // conversation back up from it.
+        hermesTui.httpResumeFrom = savedSession;
         rememberHermesHttpSession('');
+        rememberHermesWsSession('');
       }
     }
     const result = await hermesHttpApi('', {
@@ -4256,6 +4335,7 @@ async function startHermesHttpFallback(attempt = 0) {
         max_turns: 90,
         cols: hermesTui.terminal.cols,
         rows: hermesTui.terminal.rows,
+        resume_from: hermesTui.httpResumeFrom || null,
       },
     });
     if (generation !== hermesTui.httpGeneration) {
@@ -4268,7 +4348,11 @@ async function startHermesHttpFallback(attempt = 0) {
     }
     hermesTui.httpStarting = false;
     hermesTui.httpSession = result.session_id;
+    hermesTui.httpResumeFrom = '';
     rememberHermesHttpSession(result.session_id);
+    if (result.continued) {
+      hermesTui.terminal.write('\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n');
+    }
     setHermesControls(true);
     setHermesTuiState('Hermes is running over HTTPS', 'ready');
     hermesTui.terminal.focus();
@@ -4277,8 +4361,9 @@ async function startHermesHttpFallback(attempt = 0) {
     if (generation !== hermesTui.httpGeneration) return;
     hermesTui.httpStarting = false;
     setHermesControls(false);
-    if (attempt < 4 && hermesMod.activeView === 'chat') {
-      const delayMs = Math.min(1500 * (2 ** attempt), 6000);
+    // ~1 minute in all — long enough to ride out a dashboard restart.
+    if (attempt < 7 && hermesMod.activeView === 'chat') {
+      const delayMs = Math.min(1500 * (2 ** attempt), 15000);
       const message = `HTTPS terminal is still starting — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
@@ -4300,6 +4385,7 @@ function stopHermesHttpTui() {
   hermesTui.httpStarting = false;
   hermesTui.httpSession = null;
   hermesTui.httpPolling = false;
+  hermesTui.httpResumeFrom = '';
   rememberHermesHttpSession('');
   if (!sessionId) return Promise.resolve();
   return fetch(`/api/agentlab/terminal/sessions/${encodeURIComponent(sessionId)}`, {
@@ -4315,6 +4401,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
     clearTimeout(hermesTui.retryTimer);
     hermesTui.retryTimer = null;
   }
+  hermesTui.retryFn = null;
   if (!ensureHermesTerminal()) return;
   if (hermesTui.preferHttp || storedHermesHttpSession()) {
     startHermesHttpFallback(0);
@@ -4340,6 +4427,7 @@ function startHermesTui({ retryCount = 0 } = {}) {
   socket.addEventListener('open', () => {
     if (hermesTui.socket !== socket) return;
     opened = true;
+    hermesTui.wsProven = true;
     hermesTui.preferHttp = false;
     setHermesTuiState('Hermes is running', 'ready');
     socket.send(JSON.stringify({
@@ -4364,7 +4452,9 @@ function startHermesTui({ retryCount = 0 } = {}) {
         else if (resuming) {
           // The lease expired or the dashboard restarted — say so rather than
           // leaving "Reattaching…" over what is actually a new agent.
-          hermesTui.terminal.write('\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
+          hermesTui.terminal.write(control.continued
+            ? '\r\n\x1b[33mPrevious terminal ended — picked up your last conversation.\x1b[0m\r\n'
+            : '\r\n\x1b[33mPrevious session ended — started a new Hermes.\x1b[0m\r\n');
           setHermesTuiState('Hermes is running', 'ready');
         }
       } else {
@@ -4376,20 +4466,39 @@ function startHermesTui({ retryCount = 0 } = {}) {
     if (hermesTui.socket !== socket) return;
     hermesTui.socket = null;
     setHermesControls(false);
-    const retryable = event.code === 1006 && retryCount < 1;
+    // 1006 is an abnormal drop (sleep, Wi-Fi, proxy); 1001/1012 are the server
+    // going away or restarting. None of them mean Hermes itself is done — the
+    // lease is still held, or can be continued once the dashboard is back.
+    const dropped = [1001, 1006, 1012].includes(event.code);
+    const proven = opened || hermesTui.wsProven;
+    // Proven WSS: back off for ~1.5 minutes. Unproven: one quick retry, then
+    // assume a proxy that blocks WebSockets and switch to HTTPS.
+    const retryable = dropped && retryCount < (proven ? 8 : 1);
     if (retryable) {
-      const delayMs = Math.min(1500 * (2 ** retryCount), 6000);
-      const phase = opened ? 'connection dropped' : 'dashboard is still starting';
+      const delayMs = Math.min(1500 * (2 ** retryCount), 15000);
+      const phase = opened ? 'connection dropped' : proven ? 'still reconnecting' : 'dashboard is still starting';
       const message = `Hermes ${phase} — retrying in ${(delayMs / 1000).toFixed(1)}s…`;
       hermesTui.terminal.write(`\r\n\x1b[33m${message}\x1b[0m\r\n`);
       setHermesTuiState(message);
       refreshHermesTui(false);
-      hermesTui.retryTimer = setTimeout(() => {
+      const retry = () => {
         hermesTui.retryTimer = null;
+        hermesTui.retryFn = null;
         if (!hermesTui.socket && hermesMod.activeView === 'chat') {
           startHermesTui({ retryCount: retryCount + 1 });
         }
-      }, delayMs);
+      };
+      hermesTui.retryFn = retry;
+      hermesTui.retryTimer = setTimeout(retry, delayMs);
+      return;
+    }
+    if (dropped && proven) {
+      // Out of retries but the lease id is kept: Start reattaches to it, or
+      // continues its conversation if the dashboard lost it meanwhile.
+      const message = 'Lost the connection to Spark Studio — press Start to reconnect';
+      hermesTui.terminal.write(`\r\n\x1b[31m${message}\x1b[0m\r\n`);
+      setHermesTuiState(message, 'error');
+      refreshHermesTui(false);
       return;
     }
     if (event.code === 1006) {
@@ -4442,7 +4551,8 @@ function endHermesWsLease() {
 
 function restartHermesTui() {
   if (hermesTui.httpSession) {
-    stopHermesHttpTui().finally(() => setTimeout(startHermesTui, 120));
+    Promise.all([stopHermesHttpTui(), endHermesWsLease()])
+      .finally(() => setTimeout(startHermesTui, 120));
     return;
   }
   const socket = hermesTui.socket;
@@ -4461,6 +4571,17 @@ function restartHermesTui() {
 }
 
 $('#hermesInstall').addEventListener('click', installHermes);
+// A pending backoff shouldn't make a user who just opened the lid wait out
+// the rest of it.
+function retryHermesNow() {
+  if (!hermesTui.retryTimer || !hermesTui.retryFn) return;
+  if (document.visibilityState === 'hidden' || !navigator.onLine) return;
+  clearTimeout(hermesTui.retryTimer);
+  hermesTui.retryFn();
+}
+document.addEventListener('visibilitychange', retryHermesNow);
+window.addEventListener('online', retryHermesNow);
+
 $('#hermesTuiStart').addEventListener('click', startHermesTui);
 $('#hermesTuiRestart').addEventListener('click', restartHermesTui);
 $('#hermesTuiStop').addEventListener('click', stopHermesTui);
@@ -5206,9 +5327,9 @@ function toast(msg, kind = 'ok') {
   const t = h('div', { class: `toast ${kind}` }, msg);
   Object.assign(t.style, {
     position: 'fixed', bottom: '24px', right: '24px', padding: '10px 14px',
-    background: kind === 'danger' ? 'var(--danger)' : 'var(--bg-elev)',
-    color: kind === 'danger' ? '#fff' : 'var(--text)',
-    border: '1px solid var(--border)', borderRadius: '10px',
+    background: kind === 'danger' ? 'var(--danger)' : kind === 'warn' ? '#3a2f14' : 'var(--bg-elev)',
+    color: kind === 'danger' ? '#fff' : kind === 'warn' ? '#f0d47a' : 'var(--text)',
+    border: kind === 'warn' ? '1px solid #c9a227' : '1px solid var(--border)', borderRadius: '10px',
     boxShadow: '0 10px 40px rgba(0,0,0,0.4)', zIndex: 200, fontSize: '13px',
   });
   document.body.appendChild(t);
@@ -5216,6 +5337,56 @@ function toast(msg, kind = 'ok') {
 }
 
 function escapeHtml(s) { return String(s ?? '').replace(/[&<>"']/g, (m) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+// ---------- recipe guard rails --------------------------------------------
+// Lint findings ride along on save/launch responses; surface each as a toast
+// so a change that will break something downstream is visible immediately.
+function lintToast(lint) {
+  (lint || []).forEach((f, i) => setTimeout(
+    () => toast(`Recipe check: ${f.message}`, f.level === 'error' ? 'danger' : 'warn'),
+    350 * (i + 1),
+  ));
+}
+
+// Generic snapshot-history modal shared by DB recipes and bundled YAML files.
+// rows: [{id/name, taken_at, source, summary}], restore(row) does the work.
+function showHistoryModal(title, rows, restore) {
+  const close = () => overlay.remove();
+  const overlay = h('div', { class: 'snap-overlay', onclick: (e) => { if (e.target === overlay) close(); } },
+    h('div', { class: 'snap-modal' },
+      h('div', { class: 'snap-head' },
+        h('strong', {}, title),
+        h('button', { class: 'btn', onclick: close }, '✕'),
+      ),
+      rows.length ? h('div', { class: 'snap-list' },
+        rows.map((row) => h('div', { class: 'snap-row' },
+          h('div', {},
+            h('div', { class: 'snap-when' }, new Date(row.taken_at * 1000).toLocaleString()),
+            h('div', { class: 'snap-meta' }, `${row.source || 'edit'}${row.summary ? ' · ' + row.summary : ''}`),
+          ),
+          h('button', {
+            class: 'btn',
+            onclick: async (e) => {
+              e.target.disabled = true;
+              try { await restore(row); close(); }
+              catch (err) { toast(err.message, 'danger'); e.target.disabled = false; }
+            },
+          }, '⟲ Restore'),
+        )),
+      ) : h('div', { class: 'muted', style: 'padding:18px' },
+        'No snapshots yet — one is taken automatically before every edit and launch.'),
+    ),
+  );
+  document.body.appendChild(overlay);
+}
+
+function recipeSnapshotSummary(rec) {
+  const parts = [];
+  if (rec?.model) parts.push(rec.model);
+  const ctx = rec?.args?.max_model_len ?? rec?.args?.['max-model-len'] ?? rec?.args?._sparkrun?.max_model_len;
+  if (ctx) parts.push(`ctx ${Number(ctx).toLocaleString()}`);
+  return parts.join(' · ');
+}
 
 // Copy text to the clipboard. navigator.clipboard only exists in secure
 // contexts (https / localhost); when the app is served over plain http on the
