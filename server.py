@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+import yaml
 
 import agents
 import agentlab
@@ -60,6 +61,8 @@ import registry
 import searxng_service
 import oomguard
 import sparkrun_service
+import recipe_guard
+import taskbench
 import tooleval
 from runners import runner, engine_available, MemoryTooTight
 
@@ -208,6 +211,9 @@ class BenchReq(BaseModel):
     prompt: str | None = None
     max_tokens: int = 256
     runs: int = 3
+    # e.g. [1, 4, 8]: also measure aggregate vs per-stream throughput at these
+    # concurrency levels — the honest counterpart to "N tok/s serving" claims.
+    concurrency: list[int] | None = None
 
 
 def _normalize_raw_cmd(raw_cmd: str | None) -> str | None:
@@ -630,7 +636,11 @@ async def save_recipe(recipe: Recipe):
     if (data.get("engine") or "").lower() == "vllm" and not data.get("raw_cmd"):
         native = await _native_context_for(data.get("model") or (data.get("args") or {}).get("model"))
         recipe_brain.apply_perf_defaults(data, native_context=native, add_capabilities=False)
-    return db.recipes_upsert(data)
+    saved = db.recipes_upsert(data)
+    # Lint rides along on the saved recipe so the editor can surface warnings
+    # (e.g. a context window Hermes Agent will refuse) without a second call.
+    saved["lint"] = recipe_guard.lint(saved)
+    return saved
 
 
 @app.get("/api/recipes/capabilities")
@@ -646,6 +656,57 @@ async def recipe_capabilities(model: str):
     )
     caps["max_num_batched_tokens"] = recipe_brain.TARGET_MAX_NUM_BATCHED_TOKENS
     return caps
+
+
+class LintReq(BaseModel):
+    yaml_text: str | None = None
+    recipe: dict[str, Any] | None = None
+
+
+@app.post("/api/recipes/lint")
+def lint_recipe(req: LintReq):
+    """Standalone lint for editors: pass raw YAML or a recipe dict."""
+    if req.yaml_text is not None:
+        return {"findings": recipe_guard.lint_yaml(req.yaml_text)}
+    return {"findings": recipe_guard.lint(req.recipe)}
+
+
+@app.get("/api/recipes/files/{stem}/history")
+def recipe_file_history(stem: str):
+    """Pre-launch snapshots of a bundled recipes/<stem>.yaml file."""
+    return recipe_guard.file_snapshots(stem)
+
+
+@app.get("/api/recipes/files/{stem}/history/{name}")
+def recipe_file_snapshot(stem: str, name: str):
+    content = recipe_guard.file_snapshot_read(stem, name)
+    if content is None:
+        raise HTTPException(404, "snapshot not found")
+    return {"name": name, "content": content}
+
+
+@app.post("/api/recipes/files/{stem}/restore/{name}")
+def recipe_file_restore(stem: str, name: str):
+    restored = recipe_guard.file_snapshot_restore(stem, name)
+    if restored is None:
+        raise HTTPException(404, "snapshot not found")
+    return {"ok": True, "path": str(restored), "lint": recipe_guard.lint_yaml(restored.read_text(encoding="utf-8"))}
+
+
+@app.get("/api/recipes/{rid}/history")
+def recipe_history(rid: int):
+    if not db.recipes_get(rid):
+        raise HTTPException(404, "recipe not found")
+    return db.recipe_snapshots_list(rid)
+
+
+@app.post("/api/recipes/{rid}/restore/{snap_id}")
+def recipe_restore(rid: int, snap_id: int):
+    restored = db.recipe_snapshot_restore(rid, snap_id)
+    if restored is None:
+        raise HTTPException(404, "snapshot not found")
+    restored["lint"] = recipe_guard.lint(restored)
+    return restored
 
 
 @app.get("/api/recipes/{rid}")
@@ -729,7 +790,8 @@ def start_run(req: StartReq):
         if not ref:
             raise HTTPException(400, "sparkrun recipe is missing its ref (args._sparkrun.ref)")
         try:
-            return _start_sparkrun(ref, spark_args.get("tp"), recipe_id=req.recipe_id, force=req.force).summary()
+            spark_run = _start_sparkrun(ref, spark_args.get("tp"), recipe_id=req.recipe_id, force=req.force)
+            return {**spark_run.summary(), "lint": getattr(spark_run, "lint_findings", [])}
         except MemoryTooTight as e:
             raise HTTPException(507, str(e)) from e
     try:
@@ -961,6 +1023,7 @@ def _sparkrun_ref_index() -> dict[str, dict]:
 def _ensure_sparkrun_recipe(ref: str) -> int | None:
     """Find-or-create the auto-saved My Recipes entry for a sparkrun ref.
     Dedupe key is args._sparkrun.ref, so user renames don't cause duplicates."""
+    ref = sparkrun_service.canonical_recipe_ref(ref)
     existing = db.recipes_find_sparkrun(ref)
     if existing:
         return existing["id"]
@@ -977,6 +1040,24 @@ def _ensure_sparkrun_recipe(ref: str) -> int | None:
     return rec["id"] if rec else None
 
 
+def _sparkrun_launch_port(launch_target: str, spark_opts: dict[str, Any]) -> int:
+    """Resolve a single-node port, preferring the launch YAML over stale DB metadata."""
+    target_path = Path(launch_target)
+    if target_path.suffix.lower() in {".yaml", ".yml"} and target_path.is_file():
+        try:
+            payload = yaml.safe_load(target_path.read_text(encoding="utf-8")) or {}
+            port = int((payload.get("defaults") or {}).get("port") or 0)
+            if 1 <= port <= 65535:
+                return port
+        except (OSError, TypeError, ValueError, yaml.YAMLError):
+            pass
+    try:
+        port = int(spark_opts.get("port") or 8000)
+    except (TypeError, ValueError):
+        port = 8000
+    return port if 1 <= port <= 65535 else 8000
+
+
 def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, force: bool = False):
     if not engine_available("sparkrun"):
         raise HTTPException(
@@ -991,6 +1072,18 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
     launch_target = sparkrun_service.resolve_recipe_target(ref)
     if ref.startswith("@studio/") and launch_target == ref:
         raise HTTPException(404, f"bundled sparkrun recipe not found: {ref}")
+    # Bundled YAMLs are editable by agents through the shell with no other
+    # undo path: keep a "last launched" snapshot and lint what's about to run
+    # so a broken edit (e.g. a context window Hermes will refuse) is visible
+    # at launch time instead of minutes later.
+    lint_findings: list[dict[str, str]] = []
+    target_path = Path(launch_target)
+    if target_path.suffix.lower() in {".yaml", ".yml"} and target_path.is_file():
+        recipe_guard.snapshot_file(target_path, source="launch")
+        try:
+            lint_findings = recipe_guard.lint_yaml(target_path.read_text(encoding="utf-8"))
+        except OSError:
+            lint_findings = []
     # Always pass --tp: recipes carry their own tensor_parallel default (often
     # 2+), which would silently override a single-node launch otherwise.
     tp = max(1, int(tp or 1))
@@ -1027,22 +1120,25 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
         stop_cmd=["bash", "-lc", stop_sh],
         recipe_id=recipe_id,
         detached=True,
-        meta={"ref": ref, "tp": tp},
+        meta={"ref": ref, "launch_target": launch_target, "tp": tp},
         skip_memory_guard=force,
     )
+    # Keep the saved port for TP>1, but let the watchdog resolve the head
+    # node's address from sparkrun status rather than assuming localhost.
+    # Prefer the resolved recipe's declared port. Saved recipe metadata may
+    # still carry the generic 8000 default from its first registry import.
+    run.port = run.port or _sparkrun_launch_port(launch_target, spark_opts)
     if tp == 1:
-        # Single-node sparkrun containers use host networking and community
-        # recipes default to port 8000 — set the URL proactively so chat and
-        # the watchdog don't depend on spotting a URL in the log stream.
-        run.port = run.port or int(spark_opts.get("port") or 8000)
         run.url = run.url or f"http://127.0.0.1:{run.port}"
+    run.lint_findings = lint_findings
     return run
 
 
 @app.post("/api/sparkrun/run")
 def sparkrun_run(req: SparkrunReq):
     try:
-        return _start_sparkrun(req.ref, req.tp, force=req.force).summary()
+        run = _start_sparkrun(req.ref, req.tp, force=req.force)
+        return {**run.summary(), "lint": getattr(run, "lint_findings", [])}
     except MemoryTooTight as e:
         raise HTTPException(507, str(e)) from e
 
@@ -1597,6 +1693,7 @@ async def agents_autofix(rid: str, request: Request, agent: str = "claude", atte
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": new_raw,
+                "_snapshot_source": "agent",
             })
             yield _ev({"type": "status", "attempt": attempt, "of": tries,
                        "text": "Launching the patched recipe…"})
@@ -1789,6 +1886,7 @@ async def agents_optimize(rid: str, request: Request, agent: str = "claude", att
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": new_raw,
+                "_snapshot_source": "agent",
             })
             yield _ev({"type": "status", "attempt": attempt, "of": tries,
                        "text": "Relaunching with the tuned settings… (model reload can take minutes)"})
@@ -1882,6 +1980,7 @@ async def agents_optimize(rid: str, request: Request, agent: str = "claude", att
                 "notes": recipe.get("notes", ""),
                 "tags": recipe.get("tags", ""),
                 "raw_cmd": best_recipe.get("raw_cmd"),
+                "_snapshot_source": "agent",
             })
             try:
                 body = StartReq(
@@ -1935,12 +2034,176 @@ _ENGINE_PROXY_PATHS = {
 }
 
 
-async def _retarget_engine_model(base: str, body: bytes) -> bytes:
-    """Repoint a stale model id at whatever the active engine actually serves.
+def _public_engine_model_ids(run: Any, upstream_ids: list[str]) -> list[str]:
+    """Expose a stable recipe name instead of an opaque backend model id.
+
+    Some runtimes serve the cache snapshot directory as their model id (for
+    example, TabbyAPI can report a Hugging Face revision hash).  Spark Studio's
+    stable proxy already retargets requests to the real upstream id, so callers
+    should see the active bundled recipe stem when exactly one model is served.
+    Multi-model and non-bundled endpoints retain their native ids.
+    """
+    meta = getattr(run, "meta", None)
+    ref = str(meta.get("ref") or "") if isinstance(meta, dict) else ""
+    prefix = f"@{sparkrun_service.BUNDLED_RECIPE_NAMESPACE}/"
+    alias = ref.removeprefix(prefix) if ref.startswith(prefix) else ""
+    if len(upstream_ids) == 1 and re.fullmatch(r"[\w][\w.-]*", alias):
+        return [alias]
+    return upstream_ids
+
+
+def _public_engine_models(run: Any, payload: Any) -> Any:
+    """Return a copy of an OpenAI model list with its public recipe alias."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return payload
+    models = payload["data"]
+    upstream_ids = [str(item.get("id")) for item in models if isinstance(item, dict) and item.get("id")]
+    public_ids = _public_engine_model_ids(run, upstream_ids)
+    if public_ids == upstream_ids or len(models) != len(public_ids):
+        return payload
+    rewritten = dict(payload)
+    rewritten["data"] = [
+        {**item, "id": public_id} if isinstance(item, dict) else item
+        for item, public_id in zip(models, public_ids)
+    ]
+    return rewritten
+
+
+def _apply_thinking_default(payload: dict, path: str, served: list) -> bool:
+    """Translate model-specific reasoning controls without overriding explicit choices.
+
+    Qwen3.8 Flash Next exposes a boolean
+    ``chat_template_kwargs.enable_thinking`` switch, while Hermes' generic
+    custom-provider transport emits medium reasoning even when the user did not
+    explicitly choose it. Treat that generic default as thinking-off for Flash
+    Next: otherwise it overrides the recipe's ``--no-thinking`` setting and can
+    consume the entire completion budget before producing visible text. Explicit
+    ``chat_template_kwargs`` and inline ``/think`` remain authoritative. General
+    Qwen3 models keep medium thinking by default.
+
+    GLM-5.3 Flash uses the same template switch and native low/high/max effort
+    levels. A bare API request defaults to thinking-off, but Hermes Desktop's
+    ``reasoning: {enabled, effort}`` is an actual user choice: map its
+    low/medium/high levels to low/high/max instead of discarding that choice.
+    Explicit native template kwargs take precedence.
+
+    Explicit caller choices always win:
+
+    - only ``chat/completions`` (thinking is a chat-template concept);
+    - only Qwen3-family and GLM-5.3 Flash served models (other models use
+      different template kwargs);
+    - never override an explicit ``chat_template_kwargs.enable_thinking`` the
+      caller already set, nor a request that carries an inline ``/think`` or
+      ``/no_think`` directive in its last message.
+
+    Returns True when the payload was modified.
+    """
+    if path != "chat/completions" or not isinstance(payload, dict):
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    is_glm53 = "glm-5.3-flash" in fleet
+    if "qwen3" not in fleet and not is_glm53:
+        return False
+    ctk = payload.get("chat_template_kwargs")
+    if isinstance(ctk, dict) and ("enable_thinking" in ctk or (is_glm53 and "thinking" in ctk)):
+        return False  # explicit caller choice — respect it
+    is_flash_next = "qwen3.8-flash-next" in fleet
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for msg in reversed(messages):
+            if isinstance(msg, dict) and msg.get("role") == "user":
+                content = msg.get("content")
+                text = content if isinstance(content, str) else json.dumps(content)
+                if "/think" in text and "/no_think" not in text:
+                    return False  # explicit thinking request — preserve wire controls
+                if "/no_think" in text:
+                    if not is_flash_next:
+                        return False  # general Qwen templates consume the directive
+                break
+    if not isinstance(ctk, dict):
+        ctk = {}
+    if is_glm53:
+        reasoning = payload.get("reasoning")
+        effort = payload.get("reasoning_effort")
+        if effort is None and isinstance(reasoning, dict):
+            effort = reasoning.get("effort", "medium")
+        explicitly_off = isinstance(reasoning, dict) and reasoning.get("enabled") is False
+        wants_thinking = not explicitly_off and (
+            effort is not None or "reasoning_effort" in ctk or
+            (isinstance(reasoning, dict) and reasoning.get("enabled") is True)
+        )
+        ctk["enable_thinking"] = wants_thinking
+        if wants_thinking:
+            native_effort = {"low": "low", "medium": "high", "high": "max"}.get(
+                str(effort or "medium").lower()
+            )
+            if native_effort:
+                ctk.setdefault("reasoning_effort", native_effort)
+        payload["chat_template_kwargs"] = ctk
+        return True
+    if is_flash_next:
+        # Hermes' generic custom route emits these even when reasoning was not
+        # explicitly selected. TensorFold honors them over its --no-thinking
+        # launch default, so remove both carriers and send its native switch.
+        payload.pop("reasoning_effort", None)
+        payload.pop("reasoning", None)
+        ctk["enable_thinking"] = False
+        payload["chat_template_kwargs"] = ctk
+        return True
+    ctk["enable_thinking"] = True
+    payload["chat_template_kwargs"] = ctk
+    payload.setdefault("reasoning_effort", "medium")
+    return True
+
+
+def _apply_output_token_default(payload: dict, path: str, served: list) -> bool:
+    """Give Flash Next enough room for long agent turns when callers omit a cap.
+
+    TensorFold defaults an omitted output budget to 4,096 tokens. Hermes often
+    omits the field and then mistakes the resulting ``finish_reason=length`` for
+    a failed continuation. Use a 32K agent budget only for Flash Next while
+    preserving both OpenAI output-limit spellings when callers set either one.
+    """
+    if path not in {"chat/completions", "completions"} or not isinstance(payload, dict):
+        return False
+    if "max_tokens" in payload or "max_completion_tokens" in payload:
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    if "qwen3.8-flash-next" not in fleet:
+        return False
+    payload["max_tokens"] = 32768
+    return True
+
+
+def _apply_prompt_cache_safety(payload: dict, path: str, served: list) -> bool:
+    """Disable llama.cpp prompt reuse for the experimental Flash-Next port.
+
+    Its hybrid-index/graph-reuse path can retain stale task state even when the
+    next request has a matching prefix.  That presents as unrelated tool work
+    appearing mid-session, so correctness wins over incremental-prefill speed
+    until the upstream cache path is fixed.
+    """
+    if path not in {"chat/completions", "completions"} or not isinstance(payload, dict):
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    if "qwen3.8-flash-next" not in fleet or payload.get("cache_prompt") is False:
+        return False
+    payload["cache_prompt"] = False
+    return True
+
+
+async def _retarget_engine_model(base: str, path: str, body: bytes) -> bytes:
+    """Repoint a stale model id at whatever the active engine actually serves,
+    and apply the Qwen3 thinking-default policy.
 
     A model selected before a recipe swap no longer exists upstream, and vLLM
     rejects the request outright. This base URL means "the active engine", so
-    retargeting is the honest reading of the request rather than a 404.
+    retargeting is the honest reading of the request rather than a 404. While
+    we already have the parsed body and the served-model list in hand, we also
+    default Qwen3 reasoning models to thinking-off (see _apply_thinking_default).
     """
     import httpx
 
@@ -1948,18 +2211,25 @@ async def _retarget_engine_model(base: str, body: bytes) -> bytes:
         payload = json.loads(body)
     except (json.JSONDecodeError, UnicodeDecodeError):
         return body
-    if not isinstance(payload, dict) or not payload.get("model"):
+    if not isinstance(payload, dict):
         return body
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             response = await client.get(f"{base}/v1/models")
         served = [m.get("id") for m in (response.json().get("data") or []) if m.get("id")]
     except Exception:  # noqa: BLE001 - upstream decides; don't rewrite blind
-        return body
-    if not served or payload["model"] in served:
-        return body
-    payload["model"] = served[0]
-    return json.dumps(payload).encode()
+        served = []
+    changed = False
+    if served and payload.get("model") and payload["model"] not in served:
+        payload["model"] = served[0]
+        changed = True
+    if _apply_thinking_default(payload, path, served):
+        changed = True
+    if _apply_output_token_default(payload, path, served):
+        changed = True
+    if _apply_prompt_cache_safety(payload, path, served):
+        changed = True
+    return json.dumps(payload).encode() if changed else body
 
 
 @app.api_route("/api/engine/v1/{path:path}", methods=["GET", "POST"])
@@ -1983,7 +2253,7 @@ async def engine_openai_proxy(path: str, request: Request):
 
     body = await request.body()
     if body and path in {"chat/completions", "completions"}:
-        body = await _retarget_engine_model(base, body)
+        body = await _retarget_engine_model(base, path, body)
 
     # read=None: generation streams for as long as the engine needs.
     client = httpx.AsyncClient(
@@ -2005,6 +2275,21 @@ async def engine_openai_proxy(path: str, request: Request):
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         raise HTTPException(502, f"engine at {base} is unreachable: {exc}") from exc
+
+    if path == "models" and upstream.status_code < 400:
+        raw = await upstream.aread()
+        await upstream.aclose()
+        await client.aclose()
+        try:
+            payload = _public_engine_models(run, json.loads(raw))
+            raw = json.dumps(payload).encode()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        return Response(
+            content=raw,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type"),
+        )
 
     async def relay():
         try:
@@ -2115,6 +2400,14 @@ async def chat_proxy(request: Request):
         body["model"] = served_models[0].get("id") or "local"
     else:
         body["model"] = requested
+
+    # Default Qwen3 reasoning models to medium thinking. Same policy as
+    # the /api/engine/v1 proxy so the dashboard chat box and Hermes' /model
+    # picker behave identically. Explicit caller choices are left untouched.
+    _served_ids = [m.get("id") for m in served_models if m.get("id")]
+    _apply_thinking_default(body, "chat/completions", _served_ids)
+    _apply_output_token_default(body, "chat/completions", _served_ids)
+    _apply_prompt_cache_safety(body, "chat/completions", _served_ids)
 
     # Compute how many tokens the engine can actually allocate for generation.
     # The real constraint is: prompt_tokens + max_tokens ≤ max_model_len.
@@ -2321,6 +2614,15 @@ async def run_bench(req: BenchReq):
         runs=req.runs,
     )
     result["resolved_model"] = model
+    if req.concurrency:
+        levels = [max(1, min(int(n), 32)) for n in req.concurrency][:6]
+        result["concurrency"] = await bench.concurrency_sweep(
+            url=base,
+            model=model,
+            prompt=req.prompt or bench.DEFAULT_PROMPT,
+            max_tokens=req.max_tokens,
+            streams=levels,
+        )
     result["engine_version"] = await _detect_engine_version(base)
     if run:
         db.bench_insert(run.id, run.recipe_id, result, engine_version=result["engine_version"])
@@ -2489,6 +2791,67 @@ def tooleval_history(limit: int = 50):
             r["results"] = json.loads(r.pop("results_json") or "{}")
         except Exception:  # noqa: BLE001
             r["results"] = {}
+    return rows
+
+
+# ----- Task Bench ------------------------------------------------------------
+
+class TaskBenchReq(BaseModel):
+    run_id: str | None = None
+    base_url: str | None = None
+    model: str | None = None
+    cases: list[str] | None = None
+    max_turns: int = 90
+    timeout: float = 1800
+    unsafe_yolo: bool = False
+
+
+@app.post("/api/taskbench/run")
+async def taskbench_run(req: TaskBenchReq):
+    """Start the Task Bench against the active engine. Poll
+    /api/taskbench/status for progress and scores."""
+    base_url = req.base_url
+    if req.run_id:
+        selected_run = runner.get(req.run_id)
+        if not selected_run or not selected_run.url:
+            raise HTTPException(404, "Task Bench run target not found or has no endpoint")
+        base_url = selected_run.url
+    if not base_url:
+        active = runner.active()
+        if not active or not active.url:
+            raise HTTPException(400, "no run_id, base_url, or active engine to evaluate")
+        base_url = active.url
+    studio_url = os.environ.get(
+        "SPARK_STUDIO_INTERNAL_URL", "http://127.0.0.1:7860"
+    ).rstrip("/")
+    try:
+        endpoint = agentlab.discover_endpoint(studio_url, base_url, req.model)
+        return taskbench.start_eval(
+            endpoint,
+            case_ids=req.cases,
+            max_turns=req.max_turns,
+            timeout=req.timeout,
+            unsafe_yolo=req.unsafe_yolo,
+        )
+    except ValueError as e:
+        raise HTTPException(409, str(e)) from e
+    except RuntimeError as e:
+        raise HTTPException(400, str(e)) from e
+
+
+@app.get("/api/taskbench/status")
+def taskbench_status():
+    return taskbench.eval_status()
+
+
+@app.get("/api/taskbench/history")
+def taskbench_history(limit: int = 50):
+    rows = db.taskbench_list(limit)
+    for r in rows:
+        try:
+            r["cases"] = json.loads(r.pop("cases_json") or "{}")
+        except Exception:  # noqa: BLE001
+            r["cases"] = {}
     return rows
 
 
@@ -2836,6 +3199,9 @@ class HttpTerminalSessionReq(BaseModel):
     max_turns: int = 90
     cols: int = 120
     rows: int = 36
+    # The lease this browser held before it went missing (dashboard restart,
+    # TTL). Its Hermes is gone, but its conversation can be picked back up.
+    resume_from: str | None = None
 
 
 class HttpTerminalInputReq(BaseModel):
@@ -2850,7 +3216,9 @@ _HTTP_TERMINAL_HEADER = "X-Spark-Studio-Terminal"
 # created it so a page reload reattaches to the running Hermes instead of
 # killing it and spawning a new one.
 _TERMINAL_SESSIONS: dict[str, dict[str, Any]] = {}
-_HTTP_TERMINAL_TTL_SECONDS = 600.0
+# Long enough to outlast a laptop lid or a coffee break; a lease reaped anyway
+# still gets its conversation back through the lease ledger.
+_HTTP_TERMINAL_TTL_SECONDS = 1800.0
 # Output retained while no client is attached. The tail is what a reattaching
 # terminal renders, so an overflow drops from the front.
 _TERMINAL_BUFFER_LIMIT = 262144
@@ -2993,10 +3361,34 @@ async def _resolve_terminal_endpoint() -> dict[str, Any]:
     return agentlab.detached_endpoint()
 
 
+async def _lost_lease_conversation(lease_id: str | None) -> str | None:
+    """The conversation behind a lease the browser still names but this
+    process no longer holds. Live leases reattach instead, so they never
+    get here."""
+    if not lease_id or lease_id in _TERMINAL_SESSIONS:
+        return None
+    try:
+        return await asyncio.to_thread(hermes_terminal.conversation_for_lease, lease_id)
+    except Exception:  # noqa: BLE001 - continuity is best-effort
+        return None
+
+
+def _register_terminal_lease(
+    bridge: hermes_terminal.PtyBridge, workspace: Path, resumed: str | None
+) -> str:
+    session_id = _new_terminal_session(bridge)
+    try:
+        hermes_terminal.record_lease(session_id, workspace, resumed)
+    except Exception:  # noqa: BLE001 - never fail a spawn over the ledger
+        pass
+    return session_id
+
+
 async def _spawn_http_terminal(
     request: Request,
     req: HttpTerminalSessionReq,
-) -> hermes_terminal.PtyBridge:
+    resume_session: str | None = None,
+) -> tuple[hermes_terminal.PtyBridge, Path]:
     workspace = Path(req.workspace or str(APP_DIR)).expanduser().resolve()
     endpoint = await _resolve_terminal_endpoint()
     internal_url = os.environ.get("SPARK_STUDIO_INTERNAL_URL", "").strip()
@@ -3009,10 +3401,11 @@ async def _spawn_http_terminal(
             endpoint,
             workspace,
             max_turns=max(1, min(int(req.max_turns), 1000)),
+            resume_session=resume_session,
         )
     except RuntimeError as exc:
         raise HTTPException(409, str(exc)) from exc
-    return await asyncio.to_thread(
+    bridge = await asyncio.to_thread(
         hermes_terminal.PtyBridge.spawn,
         command,
         cwd=workspace,
@@ -3020,6 +3413,7 @@ async def _spawn_http_terminal(
         cols=req.cols,
         rows=req.rows,
     )
+    return bridge, workspace
 
 
 @app.post("/api/agentlab/terminal/sessions")
@@ -3027,15 +3421,27 @@ async def create_http_terminal_session(req: HttpTerminalSessionReq, request: Req
     """Create a PTY transported over same-origin HTTPS when WSS is unavailable."""
     _require_http_terminal_access(request)
     _prune_http_terminal_sessions()
-    bridge = await _spawn_http_terminal(request, req)
-    return {"session_id": _new_terminal_session(bridge), "transport": "https"}
+    resume = await _lost_lease_conversation(req.resume_from)
+    bridge, workspace = await _spawn_http_terminal(request, req, resume)
+    return {
+        "session_id": _register_terminal_lease(bridge, workspace, resume),
+        "transport": "https",
+        "continued": bool(resume),
+    }
 
 
 @app.get("/api/agentlab/terminal/sessions/{session_id}")
 async def inspect_http_terminal_session(session_id: str, request: Request):
-    """Refresh a live HTTPS PTY lease so a reloaded dashboard can reattach."""
+    """Refresh a live PTY lease so a reloaded dashboard can reattach.
+
+    Either transport's lease works: a tab whose WebSocket gave up hands its
+    lease to the HTTPS fallback rather than starting a second Hermes.
+    """
     _require_http_terminal_access(request)
-    _http_terminal_session(session_id)
+    session = _http_terminal_session(session_id)
+    # Retire any socket forwarder the server hasn't noticed is dead yet, so it
+    # can't drain output the HTTPS poller is now responsible for.
+    session["generation"] += 1
     return {"session_id": session_id, "transport": "https", "active": True}
 
 
@@ -3120,9 +3526,14 @@ async def agentlab_terminal(ws: WebSocket):
         requested = ws.query_params.get("session") or ""
         session_id = requested if requested in _TERMINAL_SESSIONS else ""
         resumed = bool(session_id)
+        continued = False
         if session_id:
             session = _TERMINAL_SESSIONS[session_id]
         else:
+            # The lease is gone (dashboard restart, TTL) but the browser
+            # still wants it: start a new Hermes on the same conversation.
+            resume = await _lost_lease_conversation(requested)
+            continued = bool(resume)
             endpoint = await _resolve_terminal_endpoint()
             endpoint["studio_url"] = _studio_url_for_websocket(ws)
             command, env = await asyncio.to_thread(
@@ -3130,6 +3541,7 @@ async def agentlab_terminal(ws: WebSocket):
                 endpoint,
                 workspace,
                 max_turns=max_turns,
+                resume_session=resume,
             )
             bridge = await asyncio.to_thread(
                 hermes_terminal.PtyBridge.spawn,
@@ -3137,7 +3549,7 @@ async def agentlab_terminal(ws: WebSocket):
                 cwd=workspace,
                 env=env,
             )
-            session_id = _new_terminal_session(bridge)
+            session_id = _register_terminal_lease(bridge, workspace, resume)
             session = _TERMINAL_SESSIONS[session_id]
 
         session["attached"] = True
@@ -3147,7 +3559,14 @@ async def agentlab_terminal(ws: WebSocket):
         # Text frames are the control channel; the pty stream is always binary,
         # so the client can tell them apart without framing of its own.
         await ws.send_text(
-            json.dumps({"type": "session", "id": session_id, "resumed": resumed})
+            json.dumps(
+                {
+                    "type": "session",
+                    "id": session_id,
+                    "resumed": resumed,
+                    "continued": continued,
+                }
+            )
         )
 
         async def pump_output() -> None:
@@ -3935,8 +4354,10 @@ _EXTERNAL_PROBE_FAILURES = 2
 _STALL_AFTER = int(os.environ.get("SPARK_STUDIO_STALL_AFTER", "300"))
 # Never-ready deadline for sparkrun runs where no container liveness signal is
 # available (remote tp>1 heads). Local containers are judged by `docker top`
-# instead, which stays positive during long AWQ loads.
-_SPARKRUN_GRACE = int(os.environ.get("SPARK_STUDIO_SPARKRUN_GRACE", "1200"))
+# instead, which stays positive during long AWQ loads. A cold DeepSeek V4 EXL3
+# boot needs about 20 minutes for weights, draft model, and warmup, so leave
+# enough margin for the API to bind before declaring a no-container load dead.
+_SPARKRUN_GRACE = int(os.environ.get("SPARK_STUDIO_SPARKRUN_GRACE", "1800"))
 
 
 def _cmd_fragment_alive(pid: int | None, cmd: str | None) -> bool:
@@ -3961,7 +4382,8 @@ def _adopt_sparkrun_job(job: dict, row: dict | None) -> None:
     reusing its old run row when we have one."""
     import uuid as _uuid
 
-    ref, jobid = job["ref"], job["jobid"]
+    ref = sparkrun_service.canonical_recipe_ref(job["ref"])
+    jobid = job["jobid"]
     # Carry the original launch's load stats through the restart so the run
     # card keeps showing "loaded in Xs · +Y GB".
     prev_meta: dict[str, Any] = {}
@@ -4079,7 +4501,7 @@ async def _reconcile_on_boot() -> None:
                 if not ref:
                     m = sparkrun_service.REF_RE.search(row.get("cmd") or "")
                     ref = m.group(0) if m else None
-                job = by_ref.get(ref)
+                job = by_ref.get(ref) or by_ref.get(meta.get("launch_target"))
             if job and job["jobid"] not in claimed:
                 claimed.add(job["jobid"])
                 await asyncio.to_thread(_adopt_sparkrun_job, job, row)
@@ -4127,6 +4549,22 @@ async def _watchdog_loop() -> None:
             pass
 
 
+def _running_sparkrun_jobids(runs: dict[str, Any]) -> set[str]:
+    """Job IDs currently represented by a live dashboard run.
+
+    sparkrun can reuse a deterministic job ID when the same recipe is launched
+    again. Historical exited runs must not suppress adoption of that new live
+    workload.
+    """
+    return {
+        run.meta.get("jobid")
+        for run in runs.values()
+        if run.engine == "sparkrun"
+        and run.status == "running"
+        and run.meta.get("jobid")
+    }
+
+
 async def _watchdog_tick(tick: int) -> None:
     import httpx
 
@@ -4139,7 +4577,7 @@ async def _watchdog_tick(tick: int) -> None:
         except Exception:  # noqa: BLE001
             jobs = []
         if jobs:
-            known_jobids = {(r.meta or {}).get("jobid") for r in runner.runs.values()}
+            known_jobids = _running_sparkrun_jobids(runner.runs)
             # An app-launched sparkrun run that hasn't learned its jobid yet
             # could be ANY of these jobs — adopting now would duplicate it.
             starting = any(
@@ -4153,7 +4591,7 @@ async def _watchdog_tick(tick: int) -> None:
                     await asyncio.to_thread(_adopt_sparkrun_job, job, None)
 
     for run in list(runner.runs.values()):
-        if run.status != "running":
+        if run.status != "running" or run.stop_requested or run.meta.get("_snapshot_pending"):
             continue
 
         # sparkrun: resolve jobid/containers/URL from `sparkrun status` until
@@ -4162,7 +4600,18 @@ async def _watchdog_tick(tick: int) -> None:
         if run.engine == "sparkrun" and (not run.url or not run.meta.get("jobid")) and tick % 3 == 0:
             jobs = await asyncio.to_thread(sparkrun_service.parse_status)
             for job in jobs:
-                if job["jobid"] == run.meta.get("jobid") or job["ref"] == run.meta.get("ref"):
+                run_ref = (run.meta or {}).get("ref")
+                launch_target = (run.meta or {}).get("launch_target")
+                job_ref = job.get("ref")
+                # Never claim an unrelated CLI job solely because it is the
+                # only one. Match its job id, saved ref, or resolved target.
+                if any(
+                    other is not run and other.status == "running"
+                    and other.meta.get("jobid") == job["jobid"]
+                    for other in runner.runs.values()
+                ):
+                    continue
+                if job["jobid"] == run.meta.get("jobid") or (job_ref is not None and job_ref in {run_ref, launch_target}):
                     run.meta.setdefault("jobid", job["jobid"])
                     for c in job.get("containers") or []:
                         if c not in run.managed_containers:
@@ -4171,7 +4620,13 @@ async def _watchdog_tick(tick: int) -> None:
                     if exe:
                         run.stop_cmd = [exe, "stop", run.meta["jobid"]]
                     run.port = run.port or 8000
-                    run.url = run.url or sparkrun_service.guess_url(job, run.port)
+                    head_url = sparkrun_service.guess_url(job, run.port)
+                    if int(run.meta.get("tp") or 1) > 1:
+                        # Replace any launcher-derived localhost URL; if the
+                        # head is unknown, don't probe the wrong host.
+                        run.url = head_url
+                    else:
+                        run.url = run.url or head_url or f"http://127.0.0.1:{run.port}"
                     try:
                         db.runs_update(run.id, meta_json=json.dumps(run.persisted_meta()))
                     except Exception:  # noqa: BLE001
@@ -4197,11 +4652,11 @@ async def _watchdog_tick(tick: int) -> None:
                             run.publish(f"[serve log] last {len(lines)} lines from {container}:/tmp/sparkrun_serve.log —")
                             for ln in lines:
                                 run.publish(ln)
-                        runner.finalize(run, exit_code=1, reason="serve process died inside the container — tearing the zombie container down", teardown=True)
+                        await asyncio.to_thread(runner.finalize, run, exit_code=1, reason="serve process died inside the container — tearing the zombie container down", teardown=True)
                         continue
             # Remote-only fallback: no local container signal ever seen.
             if not run.ready and age > _SPARKRUN_GRACE and not run.meta.get("serve_seen"):
-                runner.finalize(run, exit_code=1, reason=f"engine never became ready within {_SPARKRUN_GRACE}s (set SPARK_STUDIO_SPARKRUN_GRACE to extend)", teardown=True)
+                await asyncio.to_thread(runner.finalize, run, exit_code=1, reason=f"engine never became ready within {_SPARKRUN_GRACE}s (set SPARK_STUDIO_SPARKRUN_GRACE to extend)", teardown=True)
                 continue
 
         # Stall detection for LOADING engines (any engine, not just sparkrun):
@@ -4262,7 +4717,7 @@ async def _watchdog_tick(tick: int) -> None:
                     lines = await asyncio.to_thread(sparkrun_service.serve_log_tail, container, 200)
                     for ln in lines:
                         run.publish(ln)
-                runner.finalize(run, exit_code=1, reason="engine stopped answering after being ready", teardown=True)
+                await asyncio.to_thread(runner.finalize, run, exit_code=1, reason="engine stopped answering after being ready", teardown=True)
                 continue
             # External / plain-process runs: don't own the lifecycle — just
             # stop advertising readiness so chat won't target a dead URL.
@@ -4300,7 +4755,12 @@ async def _sync_hermes_engine_models() -> None:
                 r = await client.get(f"{base}/v1/models")
             if r.status_code != 200:
                 return  # transient — keep the last written list
-            ids = [str(m.get("id")) for m in (r.json().get("data") or []) if m.get("id")]
+            upstream_ids = [
+                str(m.get("id"))
+                for m in (r.json().get("data") or [])
+                if m.get("id")
+            ]
+            ids = _public_engine_model_ids(active, upstream_ids)
         except Exception:  # noqa: BLE001
             return  # transient — keep the last written list
     try:

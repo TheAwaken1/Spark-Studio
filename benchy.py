@@ -29,6 +29,19 @@ def available() -> bool:
     return _resolve_binary() is not None
 
 
+def _has_extra_body_key(args: list[str], key: str) -> bool:
+    """Return whether caller-supplied llama-benchy args set an extra-body key."""
+    for i, arg in enumerate(args):
+        if arg != "--extra-body" or i + 1 >= len(args):
+            continue
+        value = args[i + 1]
+        for entry in value.split(","):
+            name = entry.split("=", 1)[0].split(":", 1)[0].strip()
+            if name == key:
+                return True
+    return False
+
+
 async def run(
     *,
     base_url: str,
@@ -78,8 +91,16 @@ async def run(
         cmd.append("--skip-coherence")
     if no_cache:
         cmd.append("--no-cache")
-    if extra_args:
-        cmd += extra_args
+    # llama-benchy 0.4.0 requests token IDs in every streamed completion.
+    # SGLang rejects that combination (return_token_ids + stream), while its
+    # streamed usage event provides the authoritative completion token count.
+    # Disable token IDs unless a caller explicitly overrides this compatibility
+    # default; the client already has a usage-count fallback.
+    supplied_args = extra_args or []
+    if not _has_extra_body_key(supplied_args, "return_token_ids"):
+        cmd += ["--extra-body", "return_token_ids=false"]
+    if supplied_args:
+        cmd += supplied_args
 
     if on_log:
         await on_log(f"$ {' '.join(cmd)}")
