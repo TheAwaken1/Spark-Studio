@@ -163,8 +163,11 @@ class AgentLabConfigurationTests(unittest.TestCase):
             config = yaml.safe_load(path.read_text(encoding="utf-8"))
 
         self.assertEqual(path, hermes_home / "config.yaml")
-        self.assertEqual(config["model"]["provider"], "custom")
-        self.assertEqual(config["model"]["base_url"], "http://127.0.0.1:8000/v1")
+        self.assertEqual(config["model"]["provider"], "custom:spark-studio")
+        self.assertEqual(
+            config["model"]["base_url"],
+            "http://127.0.0.1:7860/api/engine/v1",
+        )
         self.assertEqual(config["model"]["default"], "fixture-model")
         self.assertEqual(config["approvals"]["mode"], "smart")
         self.assertTrue(config["approvals"]["deny"])

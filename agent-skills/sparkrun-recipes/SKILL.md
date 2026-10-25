@@ -186,10 +186,72 @@ Then:
   make the request-side default `chat_template_kwargs.enable_thinking=false`
   specifically for the `qwen3.8-flash-next` served alias while preserving
   explicit `/think` or caller settings; this is separate from serving speed.
+- TensorFold defaults an omitted `max_tokens` to 4,096 and returns
+  `finish_reason=length`; Hermes then retries continuations and appears stuck at
+  its output limit. Fix this at the stable OpenAI proxy, not globally in the
+  recipe: inject `max_tokens=32768` only for the Flash-Next served alias when
+  neither `max_tokens` nor `max_completion_tokens` is present. Preserve explicit
+  caller limits and leave other models untouched. Hermes MUST route through that
+  proxy (`custom:spark-studio` at `/api/engine/v1`), not the concrete `:8888/v1`
+  endpoint; otherwise the fix is bypassed. Also remove generic custom-provider
+  `reasoning` / `reasoning_effort` defaults and set
+  `chat_template_kwargs.enable_thinking=false` for ordinary Flash-Next turns:
+  those request fields override TensorFold's launch-time `--no-thinking` and can
+  consume even the raised budget. Preserve explicit native chat-template choices
+  and inline `/think`. Verify differentially: direct omitted-budget requests must
+  reproduce 4,096/`length`, while a >4K deterministic-copy request through the
+  actual Hermes route must reach the last row and end `stop`; then verify ordinary
+  Hermes turns show no hidden reasoning and a two-step typed tool round returns
+  `tool_calls` → `stop`.
 - That MiaAI launcher defaults `REQUIRE_IDLE_GPU=true` and rejects even Sunshine's
   ~195 MiB desktop-encoder allocation. On a verified otherwise-idle Spark, set
   `REQUIRE_IDLE_GPU=false` only after its own live memory-budget check fits; keep
   the cgroup cap, host reserve, and memwatch safeguards enabled.
+- A custom TensorFold recipe can pass sparkrun's validated `{model}` snapshot to
+  an adapter while the upstream launcher also needs a separate drafter checkpoint.
+  Sparkrun materializes only the recipe's primary `model` in its managed HF cache;
+  an offline launcher then fails when it tries to fetch the drafter. Put both target
+  and drafter in one shared cache during preparation and pass that cache explicitly
+  through the recipe command (for example `HF_CACHE={hf_cache}`). Keep the validated
+  `{model}` path check as a separate guard. Verify the rendered serve command and
+  first boot; seeing the target in sparkrun's cache does not prove the drafter exists.
+- A custom TensorFold recipe can pass sparkrun's validated `{model}` snapshot to
+  an adapter while the upstream launcher also needs a separate drafter checkpoint.
+  Sparkrun materializes only the recipe's primary `model` in its managed HF cache;
+  an offline launcher then fails when it tries to fetch the drafter. Put both target
+  and drafter in one shared cache during preparation and pass that cache explicitly
+  through the recipe command (for example `HF_CACHE={hf_cache}`). Keep the validated
+  `{model}` path check as a separate guard. Verify the rendered serve command and
+  first boot; seeing the target in sparkrun's cache does not prove the drafter exists.
+- A custom TensorFold recipe can pass sparkrun's validated `{model}` snapshot to
+  an adapter while the upstream launcher also needs a separate drafter checkpoint.
+  Sparkrun materializes only the recipe's primary `model` in its managed HF cache;
+  an offline launcher then fails when it tries to fetch the drafter. Put both target
+  and drafter in one shared cache during preparation and pass that cache explicitly
+  through the recipe command (for example `HF_CACHE={hf_cache}`). Keep the validated
+  `{model}` path check as a separate guard. Verify the rendered serve command and
+  first boot; seeing the target in sparkrun's cache does not prove the drafter exists.
+- For an unattended custom-engine recipe, supervise the desired workload through
+  Spark Studio rather than restarting Docker directly: a persistent user-systemd
+  watchdog should probe a real short generation, relaunch the exact `@studio/...`
+  ref through `POST /api/sparkrun/run` only when no other model is active, and
+  stand down when another recipe is selected. Resolve a bundled single-node
+  launch's port from the YAML `defaults.port`, not a saved recipe row's generic
+  `8000`; otherwise recovery can succeed at the engine while the stable proxy
+  remains pointed at the wrong port. Prove recovery by deliberately stopping the
+  run, observing watchdog relaunch, and completing through `/api/engine/v1`.
+- Blackfrost-AI's pinned `NVIDIA-Nemotron-3.5-Bolt-74B-DERISKED-NVFP4`
+  revision `b4ceb982...` is incomplete: its own config imports the omitted
+  `configuration_nemotron_h.py`, and its tokenizer has no chat template. The
+  matching files from NVIDIA's pinned 24GB Bolt revision are source-compatible
+  (the three adjacent configuration files are byte-identical). Stage
+  `configuration_nemotron_h.py` and `chat_template.jinja` into the Blackfrost
+  snapshot and pass the latter explicitly with `--chat-template`; otherwise
+  startup fails first with `FileNotFoundError`, then chat requests fail HTTP 400.
+  Preserve the staged files while using that immutable broken revision, and
+  re-check whether a newer publisher revision fixes the package before carrying
+  the workaround forward.
+- DSV4.1-Flash-1017 SAGE EXL3 1.62bpw TP1 on the gx10-b860 desktop did not fit the 229376-token measured profile despite 16 GiB active swap and zeroed host memory sysctls. After 106.86 GiB weights (including draft), host MemAvailable was 1.37 GiB; b12x weight preparation/TileLang compile drove it below 0.5 GiB before readiness. The Spark Studio YAML's background guard emitted `memory guard: stopping server` at 466968 KiB but the container and EngineCore kept running; killing only the parent `serve_inner.sh` process is not a reliable whole-tree stop. Stop via the SparkRun run API/job ID (which removes the container), verify memory recovery, then redesign the guard to terminate the entire container/process tree and establish several GiB of real pre-compile headroom before any retry. An open swapfile with `vm.swappiness=0` did not prevent this low-memory state. The upstream host wrapper's out-of-container guard differs from this embedded YAML guard; do not claim equivalence.
 - Never put `#` comments INSIDE a `command: |` block — sparkrun renders them into
   the actual `bash -c` string, and a `\`-continued line before a comment mangles
   the command. Put rationale in YAML comments above `command:`.
@@ -217,6 +279,7 @@ verify with `curl -s localhost:7860/api/sparkrun/recipes | grep @studio/<stem>`.
 
 ## Custom-engine pitfalls
 
+- SparkRun 0.4.0 can emit an unquoted `docker cp` for a local `mods:` source, so a recipe rooted under a path containing spaces fails with `docker cp requires 2 arguments`. Install or copy the mod to a durable no-space path and reference that absolute path. In SparkRun-managed containers the host Hugging Face cache is mounted at `/cache/huggingface`, not the `/root/.cache/huggingface` path many direct-Docker mods assume; point variant guards there. If the serve command intentionally uses a generated `/workspace/...` model view, prefix it with `SPARKRUN_VALIDATED_MODEL={model}` so launch safety still recognizes the checkpoint SparkRun validated.
 - A custom command under `runtime: llama-cpp` is rendered correctly, including
   the pre-synced GGUF path, but setting `served_model_name` makes sparkrun append
   llama.cpp's `--alias`. Omit that default when the custom binary does not

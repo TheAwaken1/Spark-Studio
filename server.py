@@ -36,6 +36,7 @@ from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sse_starlette.sse import EventSourceResponse
+import yaml
 
 import agents
 import agentlab
@@ -1039,6 +1040,24 @@ def _ensure_sparkrun_recipe(ref: str) -> int | None:
     return rec["id"] if rec else None
 
 
+def _sparkrun_launch_port(launch_target: str, spark_opts: dict[str, Any]) -> int:
+    """Resolve a single-node port, preferring the launch YAML over stale DB metadata."""
+    target_path = Path(launch_target)
+    if target_path.suffix.lower() in {".yaml", ".yml"} and target_path.is_file():
+        try:
+            payload = yaml.safe_load(target_path.read_text(encoding="utf-8")) or {}
+            port = int((payload.get("defaults") or {}).get("port") or 0)
+            if 1 <= port <= 65535:
+                return port
+        except (OSError, TypeError, ValueError, yaml.YAMLError):
+            pass
+    try:
+        port = int(spark_opts.get("port") or 8000)
+    except (TypeError, ValueError):
+        port = 8000
+    return port if 1 <= port <= 65535 else 8000
+
+
 def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, force: bool = False):
     if not engine_available("sparkrun"):
         raise HTTPException(
@@ -1106,7 +1125,9 @@ def _start_sparkrun(ref: str, tp: int | None, recipe_id: int | None = None, forc
     )
     # Keep the saved port for TP>1, but let the watchdog resolve the head
     # node's address from sparkrun status rather than assuming localhost.
-    run.port = run.port or int(spark_opts.get("port") or 8000)
+    # Prefer the resolved recipe's declared port. Saved recipe metadata may
+    # still carry the generic 8000 default from its first registry import.
+    run.port = run.port or _sparkrun_launch_port(launch_target, spark_opts)
     if tp == 1:
         run.url = run.url or f"http://127.0.0.1:{run.port}"
     run.lint_findings = lint_findings
@@ -2013,22 +2034,64 @@ _ENGINE_PROXY_PATHS = {
 }
 
 
+def _public_engine_model_ids(run: Any, upstream_ids: list[str]) -> list[str]:
+    """Expose a stable recipe name instead of an opaque backend model id.
+
+    Some runtimes serve the cache snapshot directory as their model id (for
+    example, TabbyAPI can report a Hugging Face revision hash).  Spark Studio's
+    stable proxy already retargets requests to the real upstream id, so callers
+    should see the active bundled recipe stem when exactly one model is served.
+    Multi-model and non-bundled endpoints retain their native ids.
+    """
+    meta = getattr(run, "meta", None)
+    ref = str(meta.get("ref") or "") if isinstance(meta, dict) else ""
+    prefix = f"@{sparkrun_service.BUNDLED_RECIPE_NAMESPACE}/"
+    alias = ref.removeprefix(prefix) if ref.startswith(prefix) else ""
+    if len(upstream_ids) == 1 and re.fullmatch(r"[\w][\w.-]*", alias):
+        return [alias]
+    return upstream_ids
+
+
+def _public_engine_models(run: Any, payload: Any) -> Any:
+    """Return a copy of an OpenAI model list with its public recipe alias."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return payload
+    models = payload["data"]
+    upstream_ids = [str(item.get("id")) for item in models if isinstance(item, dict) and item.get("id")]
+    public_ids = _public_engine_model_ids(run, upstream_ids)
+    if public_ids == upstream_ids or len(models) != len(public_ids):
+        return payload
+    rewritten = dict(payload)
+    rewritten["data"] = [
+        {**item, "id": public_id} if isinstance(item, dict) else item
+        for item, public_id in zip(models, public_ids)
+    ]
+    return rewritten
+
+
 def _apply_thinking_default(payload: dict, path: str, served: list) -> bool:
-    """Translate Qwen3 reasoning controls without overriding explicit choices.
+    """Translate model-specific reasoning controls without overriding explicit choices.
 
     Qwen3.8 Flash Next exposes a boolean
-    ``chat_template_kwargs.enable_thinking`` switch, while Hermes Desktop sends
-    graduated ``reasoning_effort`` values. Map medium-or-higher effort to
-    thinking-on and low-or-lower effort to thinking-off, then remove the
-    unsupported graduated field. When Hermes sends no preference, Flash Next
-    remains thinking-off so routine agent/tool loops do not reason on every
-    iteration. General Qwen3 models keep medium thinking by default.
+    ``chat_template_kwargs.enable_thinking`` switch, while Hermes' generic
+    custom-provider transport emits medium reasoning even when the user did not
+    explicitly choose it. Treat that generic default as thinking-off for Flash
+    Next: otherwise it overrides the recipe's ``--no-thinking`` setting and can
+    consume the entire completion budget before producing visible text. Explicit
+    ``chat_template_kwargs`` and inline ``/think`` remain authoritative. General
+    Qwen3 models keep medium thinking by default.
+
+    GLM-5.3 Flash uses the same template switch and native low/high/max effort
+    levels. A bare API request defaults to thinking-off, but Hermes Desktop's
+    ``reasoning: {enabled, effort}`` is an actual user choice: map its
+    low/medium/high levels to low/high/max instead of discarding that choice.
+    Explicit native template kwargs take precedence.
 
     Explicit caller choices always win:
 
     - only ``chat/completions`` (thinking is a chat-template concept);
-    - only Qwen3-family served models (other models use different template
-      kwargs; don't force this on GLM/Nemotron/etc.);
+    - only Qwen3-family and GLM-5.3 Flash served models (other models use
+      different template kwargs);
     - never override an explicit ``chat_template_kwargs.enable_thinking`` the
       caller already set, nor a request that carries an inline ``/think`` or
       ``/no_think`` directive in its last message.
@@ -2039,30 +2102,78 @@ def _apply_thinking_default(payload: dict, path: str, served: list) -> bool:
         return False
     model = str(payload.get("model") or "")
     fleet = " ".join([model, *served]).lower()
-    if "qwen3" not in fleet:
+    is_glm53 = "glm-5.3-flash" in fleet
+    if "qwen3" not in fleet and not is_glm53:
         return False
     ctk = payload.get("chat_template_kwargs")
-    if isinstance(ctk, dict) and "enable_thinking" in ctk:
+    if isinstance(ctk, dict) and ("enable_thinking" in ctk or (is_glm53 and "thinking" in ctk)):
         return False  # explicit caller choice — respect it
+    is_flash_next = "qwen3.8-flash-next" in fleet
     messages = payload.get("messages")
     if isinstance(messages, list):
         for msg in reversed(messages):
             if isinstance(msg, dict) and msg.get("role") == "user":
                 content = msg.get("content")
                 text = content if isinstance(content, str) else json.dumps(content)
-                if "/think" in text or "/no_think" in text:
-                    return False  # inline directive — respect it
+                if "/think" in text and "/no_think" not in text:
+                    return False  # explicit thinking request — preserve wire controls
+                if "/no_think" in text:
+                    if not is_flash_next:
+                        return False  # general Qwen templates consume the directive
                 break
     if not isinstance(ctk, dict):
         ctk = {}
-    if "qwen3.8-flash-next" in fleet:
-        effort = str(payload.pop("reasoning_effort", "") or "").strip().lower()
-        ctk["enable_thinking"] = effort in {"medium", "high", "xhigh", "ultra"}
+    if is_glm53:
+        reasoning = payload.get("reasoning")
+        effort = payload.get("reasoning_effort")
+        if effort is None and isinstance(reasoning, dict):
+            effort = reasoning.get("effort", "medium")
+        explicitly_off = isinstance(reasoning, dict) and reasoning.get("enabled") is False
+        wants_thinking = not explicitly_off and (
+            effort is not None or "reasoning_effort" in ctk or
+            (isinstance(reasoning, dict) and reasoning.get("enabled") is True)
+        )
+        ctk["enable_thinking"] = wants_thinking
+        if wants_thinking:
+            native_effort = {"low": "low", "medium": "high", "high": "max"}.get(
+                str(effort or "medium").lower()
+            )
+            if native_effort:
+                ctk.setdefault("reasoning_effort", native_effort)
+        payload["chat_template_kwargs"] = ctk
+        return True
+    if is_flash_next:
+        # Hermes' generic custom route emits these even when reasoning was not
+        # explicitly selected. TensorFold honors them over its --no-thinking
+        # launch default, so remove both carriers and send its native switch.
+        payload.pop("reasoning_effort", None)
+        payload.pop("reasoning", None)
+        ctk["enable_thinking"] = False
         payload["chat_template_kwargs"] = ctk
         return True
     ctk["enable_thinking"] = True
     payload["chat_template_kwargs"] = ctk
     payload.setdefault("reasoning_effort", "medium")
+    return True
+
+
+def _apply_output_token_default(payload: dict, path: str, served: list) -> bool:
+    """Give Flash Next enough room for long agent turns when callers omit a cap.
+
+    TensorFold defaults an omitted output budget to 4,096 tokens. Hermes often
+    omits the field and then mistakes the resulting ``finish_reason=length`` for
+    a failed continuation. Use a 32K agent budget only for Flash Next while
+    preserving both OpenAI output-limit spellings when callers set either one.
+    """
+    if path not in {"chat/completions", "completions"} or not isinstance(payload, dict):
+        return False
+    if "max_tokens" in payload or "max_completion_tokens" in payload:
+        return False
+    model = str(payload.get("model") or "")
+    fleet = " ".join([model, *served]).lower()
+    if "qwen3.8-flash-next" not in fleet:
+        return False
+    payload["max_tokens"] = 32768
     return True
 
 
@@ -2114,6 +2225,8 @@ async def _retarget_engine_model(base: str, path: str, body: bytes) -> bytes:
         changed = True
     if _apply_thinking_default(payload, path, served):
         changed = True
+    if _apply_output_token_default(payload, path, served):
+        changed = True
     if _apply_prompt_cache_safety(payload, path, served):
         changed = True
     return json.dumps(payload).encode() if changed else body
@@ -2162,6 +2275,21 @@ async def engine_openai_proxy(path: str, request: Request):
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
         raise HTTPException(502, f"engine at {base} is unreachable: {exc}") from exc
+
+    if path == "models" and upstream.status_code < 400:
+        raw = await upstream.aread()
+        await upstream.aclose()
+        await client.aclose()
+        try:
+            payload = _public_engine_models(run, json.loads(raw))
+            raw = json.dumps(payload).encode()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            pass
+        return Response(
+            content=raw,
+            status_code=upstream.status_code,
+            media_type=upstream.headers.get("content-type"),
+        )
 
     async def relay():
         try:
@@ -2278,6 +2406,7 @@ async def chat_proxy(request: Request):
     # picker behave identically. Explicit caller choices are left untouched.
     _served_ids = [m.get("id") for m in served_models if m.get("id")]
     _apply_thinking_default(body, "chat/completions", _served_ids)
+    _apply_output_token_default(body, "chat/completions", _served_ids)
     _apply_prompt_cache_safety(body, "chat/completions", _served_ids)
 
     # Compute how many tokens the engine can actually allocate for generation.
@@ -4626,7 +4755,12 @@ async def _sync_hermes_engine_models() -> None:
                 r = await client.get(f"{base}/v1/models")
             if r.status_code != 200:
                 return  # transient — keep the last written list
-            ids = [str(m.get("id")) for m in (r.json().get("data") or []) if m.get("id")]
+            upstream_ids = [
+                str(m.get("id"))
+                for m in (r.json().get("data") or [])
+                if m.get("id")
+            ]
+            ids = _public_engine_model_ids(active, upstream_ids)
         except Exception:  # noqa: BLE001
             return  # transient — keep the last written list
     try:
