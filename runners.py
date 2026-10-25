@@ -1187,6 +1187,20 @@ class Runner:
         if pump_cmd:
             self._spawn_tail(run, pump_cmd)
 
+    def _prune_snapshot_artifacts(self) -> None:
+        """Remove only expired, inactive run artifacts (30-day retention)."""
+        cutoff = time.time() - 30 * 24 * 60 * 60
+        active_ids = {r.id for r in self.runs.values() if r.status == "running"}
+        try:
+            for path in RUN_LOG_DIR.iterdir():
+                match = re.fullmatch(r"([0-9a-f]{12})-artifacts", path.name)
+                if (not match or match.group(1) in active_ids or path.is_symlink()
+                        or not path.is_dir() or path.stat().st_mtime >= cutoff):
+                    continue
+                shutil.rmtree(path)
+        except OSError:
+            pass  # Retention must not prevent collecting this run's evidence.
+
     def _snapshot_before_teardown(self, run: Run) -> None:
         """Persist bounded sparkrun diagnostics before teardown removes them."""
         if run.engine != "sparkrun":
@@ -1195,6 +1209,8 @@ class Runner:
         max_bytes = 256 * 1024
         remaining_bytes = 4 * 1024 * 1024  # bound the entire artifact set
         try:
+            RUN_LOG_DIR.mkdir(parents=True, exist_ok=True)
+            self._prune_snapshot_artifacts()
             out = RUN_LOG_DIR / f"{run.id}-artifacts"
             out.mkdir(parents=True, exist_ok=True)
         except Exception as e:  # noqa: BLE001
@@ -1259,7 +1275,7 @@ class Runner:
         if exe:
             _write_cmd("sparkrun-status.txt", [exe, "status"], timeout=25)
             if jobid:
-                _write_cmd("sparkrun-logs.txt", [exe, "logs", str(jobid)], timeout=60)
+                _write_cmd("sparkrun-logs.txt", [exe, "logs", "-a", str(jobid)], timeout=60)
                 _write_cmd("sparkrun-export-running-recipe.json", [exe, "export", "running-recipe", str(jobid), "--json"], timeout=30)
 
         docker = shutil.which("docker")
@@ -1268,7 +1284,6 @@ class Runner:
                 safe = re.sub(r"[^A-Za-z0-9_.-]+", "_", container)
                 _write_cmd(f"{safe}-serve-log.txt", [docker, "exec", container, "tail", "-c", str(max_bytes), "/tmp/sparkrun_serve.log"], timeout=20)
                 _write_cmd(f"{safe}-docker-logs.txt", [docker, "logs", "--tail", "200", container], timeout=20)
-                _write_cmd(f"{safe}-docker-inspect.json", [docker, "inspect", container], timeout=20)
                 _write_cmd(f"{safe}-docker-top.txt", [docker, "top", container], timeout=12)
 
         run.publish(f"[diagnostics] preserved teardown logs in {out}")

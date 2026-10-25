@@ -1592,9 +1592,36 @@ class RestartRecoveryTests(unittest.TestCase):
             manager._snapshot_before_teardown(run)
             out = Path(tmp) / "spark-artifacts"
             self.assertTrue((out / "sparkrun-status.txt").exists())
-            self.assertTrue((out / "sparkrun-logs.txt").exists())
+            self.assertIn("logs -a job", (out / "sparkrun-logs.txt").read_text())
             self.assertTrue((out / "sparkrun_job_node_0-serve-log.txt").exists())
+            self.assertFalse((out / "sparkrun_job_node_0-docker-inspect.json").exists())
             self.assertIn("preserved teardown logs", "\n".join(run.ring))
+
+    def test_snapshot_prunes_only_old_inactive_artifacts(self):
+        manager = runners.Runner()
+        run = runners.Run(id="cccccccccccc", engine="sparkrun", recipe_id=None,
+                          cmd=["sparkrun"], env={})
+        active = runners.Run(id="bbbbbbbbbbbb", engine="sparkrun", recipe_id=None,
+                             cmd=["sparkrun"], env={}, status="running")
+        manager.runs[active.id] = active
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(runners, "RUN_LOG_DIR", Path(tmp)), \
+             mock.patch.object(runners.sparkrun_service, "sparkrun_bin", return_value=None), \
+             mock.patch.object(runners.shutil, "which", return_value=None):
+            root = Path(tmp)
+            for name in ("aaaaaaaaaaaa-artifacts", "dddddddddddd-artifacts", "bbbbbbbbbbbb-artifacts"):
+                (root / name).mkdir()
+                (root / name / "log.txt").write_text("evidence")
+            (root / "old.log").write_text("old run log")
+            old = time.time() - 32 * 24 * 60 * 60
+            for name in ("aaaaaaaaaaaa-artifacts", "bbbbbbbbbbbb-artifacts"):
+                os.utime(root / name, (old, old))
+            manager._snapshot_before_teardown(run)
+            self.assertFalse((root / "aaaaaaaaaaaa-artifacts").exists())
+            self.assertTrue((root / "dddddddddddd-artifacts").exists())
+            self.assertTrue((root / "bbbbbbbbbbbb-artifacts").exists())
+            self.assertTrue((root / "old.log").exists())
+            self.assertTrue((root / "cccccccccccc-artifacts").exists())
 
     def test_snapshot_truncates_large_logs_and_limits_total_time(self):
         manager = runners.Runner()
