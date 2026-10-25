@@ -23,6 +23,22 @@ class BundledRecipeTests(unittest.TestCase):
         self.assertEqual(recipe["min_nodes"], 1)
         self.assertEqual(recipe["max_nodes"], 1)
 
+    def test_glm_one_spark_recipe_is_bundled_and_pinned(self):
+        recipes = sparkrun_service._bundled_recipes()
+        recipe = next(
+            r for r in recipes
+            if r["ref"] == "@studio/glm-5.3-flash-exl3-2.05bpw-dflash2-vllm-gitcommit90"
+        )
+        self.assertEqual(recipe["model"], "turboderp/GLM-5.3-Flash-exl3")
+        self.assertEqual(recipe["max_nodes"], 1)
+        path = Path(sparkrun_service.resolve_recipe_target(recipe["ref"]))
+        payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+        self.assertIn("--revision {model_revision}", payload["command"])
+        self.assertEqual(payload["runtime"], "vllm")
+        self.assertEqual(payload["model_revision"], "51058cd551c7e570d87bd32a4adee720edce2349")
+        self.assertEqual(payload["distribution_config"]["models"]["entries"][1]["revision"], "bf582e4eacc1810f76656d1811693ff6c6737d2a")
+        self.assertIn("ghcr.io/gitcommit90/glm-5.3-one-spark@sha256:", payload["container"])
+
     def test_bundled_recipe_ref_resolves_only_to_bundled_directory(self):
         target = sparkrun_service.resolve_recipe_target(
             "@studio/qwen3.5-122b-a10b-int4-fp8-hybrid"

@@ -241,10 +241,13 @@ class HermesBrowserTerminalTests(unittest.TestCase):
                 headless = yaml.safe_load(path.read_text())["model"]
 
         self.assertEqual(rebound["default"], "local-b")
-        self.assertEqual(rebound["base_url"], "http://127.0.0.1:9000/v1")
+        self.assertEqual(
+            rebound["base_url"], "http://127.0.0.1:7860/api/engine/v1"
+        )
+        self.assertEqual(rebound["provider"], "custom:spark-studio")
         self.assertEqual(preserved["provider"], "anthropic")
         self.assertEqual(preserved["default"], "claude-opus-5")
-        self.assertEqual(headless["provider"], "custom")
+        self.assertEqual(headless["provider"], "custom:spark-studio")
         self.assertEqual(headless["default"], "local-b")
 
     def test_http_terminal_creation_requires_browser_header(self):
@@ -1027,8 +1030,14 @@ class _FakeEngine:
         self.thread = threading.Thread(target=self.httpd.serve_forever, daemon=True)
         self.thread.start()
 
-    def as_run(self):
-        return SimpleNamespace(id="run", label=self.model, url=self.url, ready=True)
+    def as_run(self, ref: str | None = None):
+        return SimpleNamespace(
+            id="run",
+            label=self.model,
+            url=self.url,
+            ready=True,
+            meta={"ref": ref} if ref else {},
+        )
 
     def close(self):
         self.httpd.shutdown()
@@ -1066,6 +1075,27 @@ class EnginePassthroughTests(unittest.TestCase):
         self.assertEqual([m["id"] for m in relisted["data"]], ["recipe-two/model-B"])
         self.assertEqual(stale.status_code, 200)
         self.assertEqual(stale.json()["served"], "recipe-two/model-B")
+
+    def test_passthrough_advertises_bundled_recipe_instead_of_snapshot_hash(self):
+        revision = "9c5c913b3de1eef901520d6fedaf450044ea0423"
+        alias = "ornith-1.5-122b-exl3-vision-tabbyapi"
+        engine = _FakeEngine(revision)
+        client = TestClient(server.app)
+        self.addCleanup(engine.close)
+        run = engine.as_run(f"@studio/{alias}")
+
+        with mock.patch.object(server.runner, "active", return_value=run):
+            listed = client.get("/api/engine/v1/models")
+            completion = client.post(
+                "/api/engine/v1/chat/completions",
+                json={"model": alias, "messages": []},
+            )
+
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual([m["id"] for m in listed.json()["data"]], [alias])
+        self.assertEqual(completion.status_code, 200)
+        self.assertEqual(completion.json()["served"], revision)
+        self.assertEqual(server._public_engine_model_ids(run, [revision]), [alias])
 
     def test_passthrough_reports_no_engine_and_refuses_unlisted_paths(self):
         engine = _FakeEngine("recipe/model")
@@ -1207,6 +1237,16 @@ class EngineResolutionTests(unittest.TestCase):
 
 
 class RestartRecoveryTests(unittest.TestCase):
+    def test_bundled_launch_port_comes_from_recipe_defaults(self):
+        target = server.sparkrun_service.resolve_recipe_target(
+            "@studio/qwen3.8-flash-next-tensorfold"
+        )
+
+        self.assertEqual(
+            server._sparkrun_launch_port(target, {"port": 8000}),
+            8888,
+        )
+
     def test_only_running_sparkrun_runs_block_mid_session_adoption(self):
         exited = runners.Run(
             id="exited", engine="sparkrun", recipe_id=None, cmd=["adopted"], env={},

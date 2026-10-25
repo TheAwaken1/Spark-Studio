@@ -917,7 +917,9 @@ def resolve_hermes_pending(
 # provider was written by the user's in-TUI ``/model`` switch, so it survives a
 # config rewrite the same way ``display.skin`` does — otherwise every relaunch
 # would drag Chat back onto the local engine.
-_STUDIO_OWNED_PROVIDERS = {"", "custom", "local", "openai-compatible"}
+_STUDIO_OWNED_PROVIDERS = {
+    "", "custom", "custom:spark-studio", "local", "openai-compatible"
+}
 
 
 # Display name of the provider row Spark Studio registers inside Hermes. Hermes
@@ -1030,22 +1032,28 @@ def _resolve_model_block(
     base_url: str | None,
     model: str | None,
     *,
+    studio_url: str = "http://127.0.0.1:7860",
     respect_user_provider: bool = False,
 ) -> dict[str, Any] | None:
     """Pick the ``model:`` block for a config rewrite.
 
-    Headless and CLI runs always bind to the live endpoint — they pass
-    ``--provider custom`` on argv, so a foreign provider in the config would
-    just contradict them. Only Chat sets ``respect_user_provider``, because it
-    is the one surface where the user picks a provider with ``/model`` and
-    expects it to survive both a relaunch and a recipe swap.
+    Local engines are always reached through Spark Studio's stable passthrough,
+    not their concrete serving port. Besides surviving recipe swaps, the proxy
+    applies model-specific OpenAI compatibility defaults (for example,
+    TensorFold's output budget) that direct engine traffic would bypass.
+
+    Headless and CLI runs still pass ``--provider custom`` on argv, so a foreign
+    provider in the config would contradict them. Only Chat sets
+    ``respect_user_provider``, because it is the one surface where the user picks
+    a provider with ``/model`` and expects it to survive both a relaunch and a
+    recipe swap.
     """
     studio_block = (
         {
-            "provider": "custom",
+            "provider": "custom:spark-studio",
             "default": model,
-            "base_url": api_base(base_url),
-            "api_key": "",
+            "base_url": f"{studio_url.rstrip('/')}/api/engine/v1",
+            "api_key": _STUDIO_PROVIDER_TOKEN,
         }
         if base_url and model
         else None
@@ -1102,6 +1110,7 @@ def _write_hermes_config(
             existing_model,
             base_url,
             model,
+            studio_url=studio_url,
             respect_user_provider=respect_user_provider,
         )
         config: dict[str, Any] = {}
