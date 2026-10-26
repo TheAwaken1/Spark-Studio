@@ -244,9 +244,9 @@ class AgentIdentityProbeTests(unittest.TestCase):
 
 class UrlsTests(unittest.TestCase):
     def test_lan_ips_skip_ipv6_and_loopback(self):
-        out = subprocess.CompletedProcess([], 0, stdout="127.0.0.1 fe80::1 192.168.1.10\n")
+        out = subprocess.CompletedProcess([], 0, stdout="127.0.0.1 fe80::1 203.0.113.10\n")
         with mock.patch("doctor.subprocess.run", return_value=out):
-            self.assertEqual(doctor._lan_ips(), ["192.168.1.10"])
+            self.assertEqual(doctor._lan_ips(), ["203.0.113.10"])
 
     def test_lan_ips_survive_failing_hostname(self):
         with mock.patch("doctor.subprocess.run", side_effect=OSError("no hostname")):
@@ -291,7 +291,7 @@ class RunChecksTests(unittest.TestCase):
         # One probe crashes on purpose: the rest of the report must survive it.
         def boom():
             raise RuntimeError("probe exploded")
-        with mock.patch("doctor._lan_ips", return_value=["192.168.1.5"]), \
+        with mock.patch("doctor._lan_ips", return_value=["203.0.113.5"]), \
              mock.patch("doctor._probe_gpu", boom), \
              mock.patch("doctor._probe_driver", return_value={"status": "ok"}), \
              mock.patch("doctor._probe_memory", return_value={"status": "ok"}), \
@@ -314,7 +314,7 @@ class RunChecksTests(unittest.TestCase):
         self.assertEqual(gpu["status"], "error")  # crash contained, report survives
         self.assertEqual(sum(report["summary"].values()), len(report["checks"]))
         self.assertEqual(report["urls"]["local"], "http://127.0.0.1:7860")
-        self.assertEqual(report["urls"]["lan"], ["http://192.168.1.5:7860"])
+        self.assertEqual(report["urls"]["lan"], ["http://203.0.113.5:7860"])
         self.assertIsInstance(doctor.app_version(), str)
 
 

@@ -105,7 +105,7 @@ Installing dependencies...
 Starting Spark Studio...
 
 Local:   http://127.0.0.1:7860
-LAN:     http://192.168.1.50:7860
+LAN:     http://203.0.113.50:7860
 ```
 
 ## Why this matters
@@ -651,7 +651,7 @@ Spark Studio Doctor
 ⚠️ sparkrun not found — Community Recipes disabled
 ✅ vLLM installed
 ❌ SGLang missing — click Install in UI
-✅ LAN URL: http://192.168.1.50:7860
+✅ LAN URL: http://203.0.113.50:7860
 ```
 
 ## Doctor should check
@@ -752,7 +752,7 @@ Every launch should clearly print all access URLs.
 Spark Studio is running:
 
 Local:     http://127.0.0.1:7860
-LAN:       http://192.168.1.50:7860
+LAN:       http://203.0.113.50:7860
 Hostname:  http://dgx-spark.local:7860
 ```
 
@@ -762,7 +762,7 @@ Show the same URLs inside the app:
 
 ```text
 Access Spark Studio from another computer:
-http://192.168.1.50:7860
+http://203.0.113.50:7860
 ```
 
 ## Optional QR code

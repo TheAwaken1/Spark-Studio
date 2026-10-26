@@ -170,7 +170,7 @@ def create_server(endpoint: str, model: str) -> FastMCP:
     mcp = FastMCP(
         "vision-sidecar",
         instructions=(
-            "Read-only image description through the 3060pc vision sidecar. "
+            "Read-only image description through the vision sidecar. "
             "Use for attached images and computer-use screenshots, then reason over "
             "the returned JSON with the primary model. Never delegate clicks or purchases."
         ),
@@ -180,7 +180,7 @@ def create_server(endpoint: str, model: str) -> FastMCP:
     @mcp.tool(
         name="describe_screen",
         description=(
-            "Describe a screenshot or product image with the isolated 3060pc VLM. "
+            "Describe a screenshot or product image with the isolated vision VLM. "
             "Accepts a local path, base64 data URI, or HTTP URL; resizes to 1024px. "
             "Returns read-only OCR/UI JSON and never authorizes purchases."
         ),
@@ -197,7 +197,7 @@ def create_server(endpoint: str, model: str) -> FastMCP:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Hermes 3060pc vision-sidecar MCP bridge")
+    parser = argparse.ArgumentParser(description="Hermes vision-sidecar MCP bridge")
     parser.add_argument("--endpoint", default=DEFAULT_ENDPOINT)
     parser.add_argument("--model", default=DEFAULT_MODEL)
     args = parser.parse_args(argv)

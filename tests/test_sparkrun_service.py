@@ -121,9 +121,8 @@ class BundledRecipeTests(unittest.TestCase):
 
         self.assertEqual(recipe["runtime"], "vllm")
         self.assertEqual(recipe["executor"], "local")
-        self.assertEqual(
-            recipe["executor_config"]["working_dir"],
-            "/mnt/ai-spaces/Github_Projects/Spark-Studio/data/qwen38-flash-next-miaai",
+        self.assertTrue(
+            recipe["executor_config"]["working_dir"].endswith("/data/qwen38-flash-next-miaai")
         )
         self.assertEqual(recipe["defaults"]["port"], 8888)
         self.assertEqual(recipe["defaults"]["max_model_len"], 262144)
@@ -158,7 +157,7 @@ class DockerFallbackTests(unittest.TestCase):
     def test_orphaned_container_is_recovered_with_ref_from_its_model(self):
         empty_status = mock.Mock(
             returncode=0,
-            stdout='{"groups": {}, "solo_entries": [], "idle_hosts": ["192.168.0.132"]}',
+            stdout='{"groups": {}, "solo_entries": [], "idle_hosts": ["203.0.113.132"]}',
         )
         docker_ps = mock.Mock(
             returncode=0,

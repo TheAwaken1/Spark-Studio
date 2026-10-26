@@ -533,7 +533,7 @@ port, any address of this machine counting as the same host.
 If `ufw` is enabled, allow the port for your LAN:
 
 ```bash
-sudo ufw allow from 192.168.0.0/24 to any port 7860 proto tcp
+sudo ufw allow from 203.0.113.0/24 to any port 7860 proto tcp
 ```
 
 ### Optional environment variables
@@ -562,7 +562,7 @@ only the recipes know where they live.
 
 Example:
 ```bash
-HF_HOME=/mnt/models/.cache/huggingface \
+HF_HOME=/srv/models/.cache/huggingface \
 HF_HUB_ENABLE_HF_TRANSFER=1 \
 env/bin/python -m uvicorn server:app --host 0.0.0.0 --port 7860
 ```
@@ -683,7 +683,7 @@ scrape job per Spark and point Grafana at Prometheus:
 scrape_configs:
   - job_name: spark-studio
     static_configs:
-      - targets: ["192.168.0.132:7860", "192.168.0.133:7860"]
+      - targets: ["203.0.113.132:7860", "203.0.113.133:7860"]
 ```
 
 Token-level engine metrics (throughput, KV-cache usage, queue depth) come from

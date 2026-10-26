@@ -68,11 +68,11 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
             self.assertEqual(
-                server._terminal_access_policy("192.168.0.158", "wss")[:2],
+                server._terminal_access_policy("203.0.113.158", "wss")[:2],
                 (True, "private_https"),
             )
             self.assertEqual(
-                server._terminal_access_policy("192.168.0.158", "https")[:2],
+                server._terminal_access_policy("203.0.113.158", "https")[:2],
                 (True, "private_https"),
             )
 
@@ -80,7 +80,7 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
             self.assertEqual(
-                server._terminal_access_policy("192.168.0.158", "ws")[:2],
+                server._terminal_access_policy("203.0.113.158", "ws")[:2],
                 (False, "private_http_denied"),
             )
             self.assertEqual(
@@ -94,7 +94,7 @@ class HermesBrowserTerminalTests(unittest.TestCase):
         # terminal policy that gates Hermes Chat itself.
         with mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("SPARK_STUDIO_HERMES_TUI_ALLOW_REMOTE", None)
-            self.assertTrue(server._lan_peer_allowed("192.168.0.158"))
+            self.assertTrue(server._lan_peer_allowed("203.0.113.158"))
             self.assertTrue(server._lan_peer_allowed("127.0.0.1"))
             self.assertFalse(server._lan_peer_allowed("8.8.8.8"))
             self.assertFalse(server._lan_peer_allowed(""))
@@ -1483,14 +1483,14 @@ class RestartRecoveryTests(unittest.TestCase):
             mock.patch.object(server.runner, "runs", {run.id: run}),
             mock.patch.object(server, "engine_available", return_value=True),
             mock.patch.object(server.sparkrun_service, "parse_status", return_value=[job]),
-            mock.patch.object(server.sparkrun_service, "guess_url", return_value="http://192.168.100.11:8888"),
+            mock.patch.object(server.sparkrun_service, "guess_url", return_value="http://203.0.113.111:8888"),
             mock.patch.object(server, "_sync_hermes_engine_models", new_callable=mock.AsyncMock),
             mock.patch.object(server.db, "runs_update"),
         ):
             asyncio.run(server._watchdog_tick(3))
         self.assertEqual(run.meta["jobid"], "our-job")
         self.assertEqual(run.managed_containers, ["our-container"])
-        self.assertEqual(run.url, "http://192.168.100.11:8888")
+        self.assertEqual(run.url, "http://203.0.113.111:8888")
 
     def test_remote_sparkrun_ignores_local_bind_url(self):
         run = runners.Run(id="remote", engine="sparkrun", recipe_id=None,
@@ -1498,9 +1498,9 @@ class RestartRecoveryTests(unittest.TestCase):
         run.publish("Uvicorn running on http://0.0.0.0:8888")
         self.assertIsNone(run.url)
         self.assertEqual(run.port, 8888)
-        run.url = "http://192.168.100.11:8888"
+        run.url = "http://203.0.113.111:8888"
         run.publish("Uvicorn running on http://0.0.0.0:8888")
-        self.assertEqual(run.url, "http://192.168.100.11:8888")
+        self.assertEqual(run.url, "http://203.0.113.111:8888")
 
     def test_boot_reconciles_saved_launch_target(self):
         row = {"id": "old", "engine": "sparkrun",
