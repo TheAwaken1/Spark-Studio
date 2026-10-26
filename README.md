@@ -584,6 +584,94 @@ answers from real content with inline source citations — not from homepage
 snippets. Reasoning models' chain-of-thought renders as a collapsible
 "Thinking" section instead of polluting the answer.
 
+## Spark Usage
+
+The **Spark Usage** tab records every request that goes through Spark Studio's
+engine proxy (`/api/engine/v1`, which Hermes and API clients use) and the
+dashboard chat. Each request keeps:
+
+- who sent it (machine name, from `SPARK_STUDIO_NODE_NAMES`, else its address),
+- model, endpoint, streamed or single response,
+- prompt and completion tokens, cached prompt tokens and cache hit %,
+- whether the model was thinking (reasoning output or `<think>` tags),
+- time to first token, decode time, average and peak tokens per second,
+- how many streams were running on the engine at the time.
+
+Live tok/s is exact: every two seconds the engine counts the text each streaming
+request has produced so far, with its own tokenizer, and the rate is that count
+over the time since the first token. Streams whose count hasn't arrived yet show
+*counting…*. Completed requests keep the final figure from the engine's usage report.
+
+**Actual compute.** The top band of the tab separates raw prompt tokens from real
+work. Uncached prompt tokens (prompt minus cached) are the prefill the GPU did;
+completion tokens are the decode. Total compute is their sum, and cache savings
+are the cached prompt tokens. These are derived from the totals shown, not
+collected separately.
+
+**Tool calls.** Tools a model calls through Spark Studio are recorded with the
+request: name and argument size. The tab shows calls by tool name, the most
+recent calls, and which tools are running right now.
+
+The tab shows what is running right now (streams, live tok/s, thinking or
+answering), totals for this session, today, this year or all time, breakdowns
+by machine and model, and a request log. Click a request for its per-second
+tokens-per-second chart.
+
+Two more sources feed the tab:
+
+- **Engine metrics.** Once a second the active engine's `/metrics` page is read.
+  This records running and waiting requests and prefix-cache hit rate, including
+  calls that bypass the proxy. Engines without a metrics page are skipped. Token
+  counts are not taken from the engine's counter for speed: some engines add a
+  request's tokens to that counter only when the request finishes, so it can't
+  show a live rate.
+- **History import.** On startup Spark Studio imports what is already on this
+  machine, reading only local files: Hermes per-session totals from
+  `~/.hermes/state.db` (or `$HERMES_HOME`), and the 10-second throughput lines in
+  `data/run-logs/*.log`. Each import is idempotent, so it runs safely every time.
+  Hermes history is imported only up to the first request the live recorder saw,
+  so nothing is counted twice. Imported rows are marked *imported*. Use
+  **Import history from this machine** on the tab, or `POST /api/usage/backfill`,
+  to run it again.
+
+Requests that the client stops reading early are recorded as *aborted*. A
+request counts as complete once the engine's `[DONE]` marker arrives, so a client
+that hangs up right after the answer is not marked aborted. Aborted and failed
+requests are removed after 30 days (`SPARK_STUDIO_USAGE_FAILED_KEEP_DAYS`).
+Completed requests are kept.
+
+**Thinking per client.** A client's thinking setting is a per-request choice, so
+Spark Studio treats each client separately:
+
+- `http://<studio>:7860/api/engine/v1` is the default route. Studio's
+  thinking default applies (for Qwen3.8 Flash Next, thinking is off unless the
+  request turns it on).
+- `http://<studio>:7860/api/engine/think/v1` is for a client that should always
+  think. Every chat request on this route turns thinking on. Hermes is pointed
+  here in its `config.yaml` (`model.base_url`).
+
+Machine names come from `SPARK_STUDIO_NODE_NAMES` when set, otherwise from the
+machine's Tailscale hostname (`tailscale status`), otherwise the address.
+
+Limits:
+
+- Only traffic through Spark Studio is seen. Calls straight to an engine port,
+  and frontier APIs, are not recorded.
+- Streamed requests have token counts only if the engine reports usage. Spark
+  Studio asks for it with `stream_options.include_usage` unless the caller set
+  its own. Clients then see one extra final chunk that carries `usage` and an
+  empty `choices` list.
+- Cache % counts only requests where the engine reports prompt tokens.
+- Tok/s for a request is its exact completion tokens divided by the time from
+  its first token to the end of the response. It is only shown for completed
+  requests whose response took at least one second. Peak tok/s is the fastest
+  such request. Streamed chunks aren't used for rates, because an engine can
+  send several tokens in one chunk.
+
+| Variable | Purpose | Default |
+|---|---|---|
+| `SPARK_STUDIO_NODE_NAMES` | Name client addresses, e.g. `198.51.100.3=node-a,198.51.100.4=node-b`. Overrides Tailscale names | unset (Tailscale hostnames, then addresses) |
+
 ## Prometheus / Grafana
 
 Every Spark Studio instance exposes standard [Prometheus](https://prometheus.io)
@@ -898,6 +986,13 @@ curl -X POST http://127.0.0.1:7860/api/export/docx \
 | `GET` | `/api/agentlab/history` | Saved free-form and deterministic Agent Lab runs |
 | `GET` | `/api/agentlab/{run-id}` | One Agent Lab result, including report and workspace metadata |
 | `GET` | `/api/spark/vitals` | Live GPU / unified-memory telemetry (SSE) |
+| `GET` | `/api/usage/tools?period=` | Tool calls by name and the most recent calls |
+| `GET` | `/api/usage/live` | Requests in flight now: streams, live tok/s, thinking or answering |
+| `GET` | `/api/usage/summary?period=session\|today\|year\|all` | Totals, plus breakdowns by machine and model |
+| `GET` | `/api/usage/events?period=&limit=&before=` | Request log, newest first (cursor is `started_at`) |
+| `GET` | `/api/usage/events/{id}` | One request, with per-second token samples |
+| `POST` (and `GET`) | `/api/engine/think/v1/{path}` | Same as `/api/engine/v1`, with thinking turned on for chat requests |
+| `POST` | `/api/usage/backfill` | Re-run the history import (Hermes sessions, engine run logs) |
 | `GET` | `/metrics` | Prometheus exposition: GPU/CPU/memory + run gauges (scrape each Spark for Grafana history) |
 | `GET` | `/api/images` `/api/images/probe?ref=` | Spark-vLLM runner images / vLLM+FlashInfer versions inside one |
 | `GET` | `/api/images/build?mode=` | SSE: run build-and-copy.sh (nightly / wheels / allowlisted advanced flags) |

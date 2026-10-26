@@ -1,5 +1,7 @@
 // Spark Studio dashboard
 
+import { startUsageTab, stopUsageTab } from './usage.js';
+
 // ---------- utilities -----------------------------------------------------
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
@@ -74,6 +76,7 @@ $$('.tab').forEach((t) =>
     if (t.dataset.tab === 'models') refreshLocalModels();
     if (t.dataset.tab === 'logs') refreshRuns();
     if (t.dataset.tab === 'bench') refreshBenchTab();
+    if (t.dataset.tab === 'usage') startUsageTab(); else stopUsageTab();
     if (t.dataset.tab === 'agents') refreshAgents();
     if (t.dataset.tab === 'hermes') refreshHermesPanel();
     if (t.dataset.tab === 'cluster') refreshCluster();
