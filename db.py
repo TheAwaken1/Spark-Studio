@@ -130,6 +130,55 @@ def init():
             FOREIGN KEY (recipe_id) REFERENCES recipes(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_recipe_snapshots ON recipe_snapshots(recipe_id, taken_at);
+        CREATE TABLE IF NOT EXISTS usage_events (
+            id TEXT PRIMARY KEY,
+            started_at REAL NOT NULL,
+            ended_at REAL,
+            node TEXT,
+            client_ip TEXT,
+            engine_run_id TEXT,
+            model TEXT,
+            endpoint TEXT,
+            stream INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL,
+            error TEXT,
+            prompt_tokens INTEGER,
+            completion_tokens INTEGER,
+            cached_tokens INTEGER,
+            cache_hit_pct REAL,
+            thinking INTEGER NOT NULL DEFAULT 0,
+            concurrency INTEGER NOT NULL DEFAULT 1,
+            ttft_ms REAL,
+            decode_secs REAL,
+            tok_s REAL,
+            peak_tok_s REAL,
+            peak_engine_tok_s REAL,
+            samples TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_started ON usage_events(started_at);
+        CREATE TABLE IF NOT EXISTS engine_samples (
+            id TEXT PRIMARY KEY,
+            ts REAL NOT NULL,
+            engine_run_id TEXT,
+            source TEXT NOT NULL,
+            running INTEGER,
+            waiting INTEGER,
+            gen_tps REAL,
+            prompt_tps REAL,
+            cache_hit_pct REAL,
+            peak_gen_tps REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_engine_samples_ts ON engine_samples(ts);
+        CREATE TABLE IF NOT EXISTS usage_tool_calls (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_id TEXT NOT NULL,
+            ts REAL NOT NULL,
+            node TEXT,
+            model TEXT,
+            name TEXT NOT NULL,
+            args_chars INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_usage_tool_ts ON usage_tool_calls(ts);
         """
     )
 
@@ -520,3 +569,160 @@ _add_col_if_missing("recipes", "raw_cmd", "TEXT")
 _add_col_if_missing("benchmarks", "engine_version", "TEXT")
 _add_col_if_missing("benchy_runs", "engine_version", "TEXT")
 _add_col_if_missing("runs", "meta_json", "TEXT")
+_add_col_if_missing("usage_events", "peak_engine_tok_s", "REAL")
+_add_col_if_missing("engine_samples", "peak_gen_tps", "REAL")
+
+
+def usage_insert(row):
+    cols = list(row)
+    marks = ", ".join("?" for _ in cols)
+    with cur() as c:
+        c.execute(
+            f"INSERT OR REPLACE INTO usage_events ({', '.join(cols)}) VALUES ({marks})",
+            [json.dumps(row[k]) if k == "samples" and row[k] is not None else row[k] for k in cols],
+        )
+
+
+def usage_prune_failed(older_than):
+    """Delete aborted and failed requests that started before ``older_than``.
+    Completed requests are never pruned."""
+    with cur() as c:
+        c.execute("DELETE FROM usage_events WHERE status != 'ok' AND started_at < ?", (older_than,))
+        return c.rowcount
+
+
+def usage_get(event_id):
+    with cur() as c:
+        c.execute("SELECT * FROM usage_events WHERE id=?", (event_id,))
+        r = c.fetchone()
+        if not r:
+            return None
+        out = dict(r)
+        out["samples"] = json.loads(out["samples"]) if out.get("samples") else []
+        return out
+
+
+def usage_list(since=0.0, limit=50, before=None):
+    """Newest-first events started at or after ``since``. ``before`` pages
+    back from an earlier event's started_at."""
+    sql = "SELECT id, started_at, ended_at, node, client_ip, engine_run_id, model, endpoint, stream, status, error, prompt_tokens, completion_tokens, cached_tokens, cache_hit_pct, thinking, concurrency, ttft_ms, decode_secs, tok_s, peak_tok_s FROM usage_events WHERE started_at >= ?"
+    args: list = [since]
+    if before is not None:
+        sql += " AND started_at < ?"
+        args.append(before)
+    sql += " ORDER BY started_at DESC LIMIT ?"
+    args.append(int(limit))
+    with cur() as c:
+        c.execute(sql, args)
+        return [dict(r) for r in c.fetchall()]
+
+
+_USAGE_AGG = """
+    COUNT(*) AS requests,
+    COALESCE(SUM(completion_tokens), 0) AS completion_tokens,
+    COALESCE(SUM(prompt_tokens), 0) AS prompt_tokens,
+    COALESCE(SUM(cached_tokens), 0) AS cached_tokens,
+    COALESCE(SUM(CASE WHEN prompt_tokens IS NOT NULL THEN prompt_tokens END), 0) AS prompt_tokens_known,
+    COALESCE(SUM(CASE WHEN thinking THEN 1 ELSE 0 END), 0) AS thinking_requests,
+    COALESCE(SUM(CASE WHEN status != 'ok' THEN 1 ELSE 0 END), 0) AS failed_requests,
+    COALESCE(SUM(CASE WHEN tok_s IS NOT NULL THEN completion_tokens END), 0) AS timed_tokens,
+    COALESCE(SUM(CASE WHEN tok_s IS NOT NULL THEN decode_secs END), 0) AS timed_secs,
+    MAX(peak_tok_s) AS peak_tok_s,
+    MAX(concurrency) AS peak_streams
+"""
+
+
+def _usage_agg_row(r):
+    out = dict(r)
+    known = out.pop("prompt_tokens_known") or 0
+    out["cache_hit_pct"] = round(100.0 * out["cached_tokens"] / known, 1) if known else None
+    timed_secs = out.pop("timed_secs") or 0
+    timed_tokens = out.pop("timed_tokens") or 0
+    out["avg_tok_s"] = round(timed_tokens / timed_secs, 1) if timed_secs > 0 else None
+    if out.get("peak_tok_s") is not None:
+        out["peak_tok_s"] = round(out["peak_tok_s"], 1)
+    return out
+
+
+def usage_summary(since=0.0):
+    """Totals, plus breakdowns by machine and by model, for events since ``since``."""
+    with cur() as c:
+        c.execute(f"SELECT {_USAGE_AGG} FROM usage_events WHERE started_at >= ?", (since,))
+        totals = _usage_agg_row(c.fetchone())
+        # Imported history has token totals but no timing, so it is its own row.
+        c.execute(
+            "SELECT COALESCE(node, 'unknown') || CASE WHEN engine_run_id LIKE 'backfill%' "
+            "THEN ' (imported)' ELSE '' END AS node, " + _USAGE_AGG + " FROM usage_events "
+            "WHERE started_at >= ? GROUP BY 1 ORDER BY completion_tokens DESC",
+            (since,),
+        )
+        by_node = [dict(_usage_agg_row(r), node=r["node"]) for r in c.fetchall()]
+        c.execute(
+            f"SELECT COALESCE(model, '') AS model, {_USAGE_AGG} FROM usage_events "
+            "WHERE started_at >= ? GROUP BY model ORDER BY completion_tokens DESC",
+            (since,),
+        )
+        by_model = [dict(_usage_agg_row(r), model=r["model"]) for r in c.fetchall()]
+    return {"totals": totals, "by_node": by_node, "by_model": by_model}
+
+
+def engine_sample_insert_many(rows):
+    """Insert engine samples; rows whose id already exists are skipped, so
+    re-running a backfill is harmless. Returns how many were new."""
+    cols = ("id", "ts", "engine_run_id", "source", "running", "waiting",
+            "gen_tps", "peak_gen_tps", "prompt_tps", "cache_hit_pct")
+    params = [{k: r.get(k) for k in cols} for r in rows]
+    with cur() as c:
+        c.execute("SELECT COUNT(*) FROM engine_samples")
+        before = c.fetchone()[0]
+        c.executemany(
+            "INSERT OR IGNORE INTO engine_samples (" + ", ".join(cols) + ") "
+            "VALUES (" + ", ".join(":" + k for k in cols) + ")",
+            params,
+        )
+        c.execute("SELECT COUNT(*) FROM engine_samples")
+        return c.fetchone()[0] - before
+
+
+def engine_samples_since(since=0.0, limit=500):
+    with cur() as c:
+        c.execute(
+            "SELECT * FROM engine_samples WHERE ts >= ? ORDER BY ts DESC LIMIT ?",
+            (since, int(limit)),
+        )
+        return [dict(r) for r in c.fetchall()]
+
+
+def usage_first_live_start():
+    """Start time of the earliest request recorded live (not imported), or None."""
+    with cur() as c:
+        c.execute("SELECT MIN(started_at) FROM usage_events WHERE engine_run_id IS NULL OR engine_run_id NOT LIKE 'backfill%'")
+        return c.fetchone()[0]
+
+
+def usage_tool_calls_insert(event_id, ts, node, model, calls):
+    """Store the tool calls one request made, for the Tool calls section."""
+    with cur() as c:
+        c.executemany(
+            "INSERT INTO usage_tool_calls (event_id, ts, node, model, name, args_chars) VALUES (?, ?, ?, ?, ?, ?)",
+            [(event_id, ts, node, model, call["name"], call.get("args_chars")) for call in calls],
+        )
+
+
+def usage_tool_summary(since=0.0):
+    with cur() as c:
+        c.execute(
+            "SELECT name, COUNT(*) AS calls, COUNT(DISTINCT event_id) AS requests, "
+            "COALESCE(AVG(args_chars), 0) AS avg_args_chars FROM usage_tool_calls "
+            "WHERE ts >= ? GROUP BY name ORDER BY calls DESC",
+            (since,),
+        )
+        by_name = [dict(r) for r in c.fetchall()]
+        c.execute(
+            "SELECT id, event_id, ts, node, model, name, args_chars FROM usage_tool_calls "
+            "WHERE ts >= ? ORDER BY ts DESC, id DESC LIMIT 100",
+            (since,),
+        )
+        recent = [dict(r) for r in c.fetchall()]
+    return {"by_name": by_name, "recent": recent}
+

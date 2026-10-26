@@ -1047,6 +1047,13 @@ class _FakeEngine:
 class EnginePassthroughTests(unittest.TestCase):
     """`/api/engine/v1` is the stable URL Hermes' /model picker points at."""
 
+    def setUp(self):
+        # Requests through the proxy are recorded for Spark Usage; keep the
+        # test's fake traffic out of the real usage table.
+        patcher = mock.patch("db.usage_insert")
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
     def test_passthrough_follows_the_active_run_across_a_recipe_swap(self):
         first, second = _FakeEngine("recipe-one/model-A"), _FakeEngine("recipe-two/model-B")
         client = TestClient(server.app)

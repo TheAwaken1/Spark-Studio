@@ -35,6 +35,7 @@
       <a class="tab" data-tab="models"><i class="fa-solid fa-cubes"></i> Models</a>
       <a class="tab" data-tab="chat"><i class="fa-solid fa-comments"></i> Chat &amp; Canvas</a>
       <a class="tab" data-tab="bench"><i class="fa-solid fa-chart-line"></i> Benchmarks</a>
+      <a class="tab" data-tab="usage"><i class="fa-solid fa-chart-column"></i> Spark Usage</a>
       <a class="tab" data-tab="logs"><i class="fa-solid fa-terminal"></i> Runs &amp; Logs</a>
       <a class="tab" data-tab="agents"><i class="fa-solid fa-user-astronaut"></i> Agents</a>
       <a class="tab" data-tab="hermes"><i class="fa-solid fa-staff-snake"></i> Hermes</a>
@@ -431,6 +432,62 @@
     </section>
 
     <!-- LOGS -->
+    <section class="panel" data-panel="usage">
+      <header class="panel-header">
+        <h1>Spark Usage</h1>
+        <p>Every request your engines serve: this box, Hermes, and any machine on your tailnet that calls the API.</p>
+        <div class="usage-periods" id="usagePeriods" role="tablist" aria-label="Period">
+          <button class="btn active" data-period="session">This session</button>
+          <button class="btn" data-period="today">Today</button>
+          <button class="btn" data-period="year">This year</button>
+          <button class="btn" data-period="all">All time</button>
+        </div>
+      </header>
+      <div class="card usage-live">
+        <div class="usage-live-head">
+          <h3><i class="fa-solid fa-tower-broadcast"></i> Live now</h3>
+          <div class="usage-live-counters">
+            <div><span class="usage-big" id="usageStreamsNow">0</span><span class="muted"> streams</span></div>
+            <div><span class="usage-big" id="usageTokNow">—</span><span class="muted"> tok/s now (exact so far)</span></div>
+            <div><span class="usage-big" id="usagePeakStreams">0</span><span class="muted"> peak streams this session</span></div>
+            <div><span class="usage-big" id="usagePeakTok">0</span><span class="muted"> tok/s, fastest request this session</span></div>
+          </div>
+        </div>
+        <div class="usage-engine" id="usageEngine"></div>
+        <div id="usageLiveList"></div>
+      </div>
+      <div class="usage-actual" id="usageActual" aria-label="Actual compute for this period"></div>
+      <div class="usage-tiles" id="usageTiles"></div>
+      <div class="grid grid-2">
+        <div class="card"><h3><i class="fa-solid fa-server"></i> By machine</h3><div id="usageByNode"></div></div>
+        <div class="card"><h3><i class="fa-solid fa-cubes"></i> By model</h3><div id="usageByModel"></div></div>
+      </div>
+      <div class="card">
+        <h3><i class="fa-solid fa-wrench"></i> Tool calls</h3>
+        <p class="muted">Tools the models called through Spark Studio, by name, and the most recent calls.</p>
+        <div class="grid grid-2">
+          <div id="usageToolsByName"></div>
+          <div id="usageToolsRecent"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h3><i class="fa-solid fa-list"></i> Request log</h3>
+        <p class="muted">Click a request for its tokens, cache, thinking time and tok/s over time. Rows marked <em>imported</em> came from history found on this machine.</p>
+        <button class="btn" id="usageImport"><i class="fa-solid fa-file-import"></i> Import history from this machine</button>
+        <span class="muted" id="usageImportNote"></span>
+        <div id="usageLog"></div>
+        <button class="btn" id="usageMore" hidden>Load more</button>
+      </div>
+      <div class="modal" id="usageModal" hidden>
+        <div class="modal-body">
+          <div class="modal-header">
+            <h3 id="usageModalTitle">Request</h3>
+            <button class="btn" data-close>&times;</button>
+          </div>
+          <div class="modal-content" id="usageModalBody"></div>
+        </div>
+      </div>
+    </section>
     <section class="panel" data-panel="logs">
       <header class="panel-header"><h1>Runs &amp; Logs</h1><p>Live log streams for every engine run.</p></header>
       <div class="card runs-layout">

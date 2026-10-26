@@ -53,6 +53,8 @@ import hostinfo
 import hermes_terminal
 import hermes_mod_service
 import models
+import usage
+import usage_backfill
 import vitals as _vitals
 import recipe_brain
 import recommend as recommend_mod
@@ -2244,6 +2246,36 @@ async def engine_openai_proxy(path: str, request: Request):
     pointed here instead of at a concrete port, which is what makes a recipe
     launched mid-session discoverable and selectable from inside the TUI.
     """
+    return await _engine_proxy(path, request)
+
+
+@app.api_route("/api/engine/think/v1/{path:path}", methods=["GET", "POST"])
+async def engine_openai_proxy_thinking(path: str, request: Request):
+    """Same as ``/api/engine/v1``, but every chat request turns thinking on.
+
+    Use this as a client's base URL when that client should always think (Hermes
+    is pointed here). Requests on this path set ``enable_thinking`` explicitly,
+    so Studio's default for other clients is left alone.
+    """
+    return await _engine_proxy(path, request, force_thinking=True)
+
+
+def _force_thinking(body: bytes) -> bytes:
+    """Set the Qwen template's thinking switch on a chat request body."""
+    try:
+        payload = json.loads(body)
+    except ValueError:
+        return body
+    if not isinstance(payload, dict):
+        return body
+    ctk = payload.get("chat_template_kwargs")
+    ctk = dict(ctk) if isinstance(ctk, dict) else {}
+    ctk["enable_thinking"] = True
+    payload["chat_template_kwargs"] = ctk
+    return json.dumps(payload).encode()
+
+
+async def _engine_proxy(path: str, request: Request, force_thinking: bool = False):
     import httpx
 
     path = path.strip("/")
@@ -2255,8 +2287,24 @@ async def engine_openai_proxy(path: str, request: Request):
     base = run.url.rstrip("/").replace("://0.0.0.0", "://127.0.0.1")
 
     body = await request.body()
+    if force_thinking and body and path == "chat/completions":
+        body = _force_thinking(body)
     if body and path in {"chat/completions", "completions"}:
         body = await _retarget_engine_model(base, path, body)
+
+    # Usage tracking: note who asked for what before the engine answers.
+    rec = None
+    if body and path in {"chat/completions", "completions"}:
+        model_name, streamed = usage.request_meta(body)
+        body = usage.prepare_stream_body(body, path)
+        rec = usage.UsageRecorder(
+            client_ip=request.client.host if request.client else None,
+            engine_run_id=run.id,
+            model=model_name,
+            endpoint=f"/v1/{path}" + (" · thinking" if force_thinking else ""),
+            stream=streamed,
+            engine_url=base,
+        )
 
     # read=None: generation streams for as long as the engine needs.
     client = httpx.AsyncClient(
@@ -2277,6 +2325,8 @@ async def engine_openai_proxy(path: str, request: Request):
         upstream = await client.send(upstream_request, stream=True)
     except Exception as exc:  # noqa: BLE001
         await client.aclose()
+        if rec:
+            rec.finish("error", f"engine unreachable: {exc}")
         raise HTTPException(502, f"engine at {base} is unreachable: {exc}") from exc
 
     if path == "models" and upstream.status_code < 400:
@@ -2295,18 +2345,127 @@ async def engine_openai_proxy(path: str, request: Request):
         )
 
     async def relay():
+        completed = False
         try:
             async for chunk in upstream.aiter_raw():
+                if rec:
+                    rec.feed(chunk)
                 yield chunk
+            completed = True
         finally:
             await upstream.aclose()
             await client.aclose()
+            if rec:
+                if upstream.status_code >= 400:
+                    rec.finish("error", f"HTTP {upstream.status_code}")
+                else:
+                    # Clients often hang up right after [DONE], before the
+                    # relay reaches its end, so the marker counts as complete.
+                    rec.finish("ok" if (completed or rec.saw_done) else "aborted")
 
     return StreamingResponse(
         relay(),
         status_code=upstream.status_code,
         media_type=upstream.headers.get("content-type"),
     )
+
+
+# ----- Usage: what the engines have served -----------------------------------
+
+def _usage_since(period: str) -> float:
+    if period == "session":
+        return usage.SESSION_START
+    if period == "all":
+        return 0.0
+    now = time.localtime()
+    if period == "today":
+        return time.mktime((now.tm_year, now.tm_mon, now.tm_mday, 0, 0, 0, 0, 0, -1))
+    if period == "year":
+        return time.mktime((now.tm_year, 1, 1, 0, 0, 0, 0, 0, -1))
+    raise HTTPException(400, "period must be one of: session, today, year, all")
+
+
+async def _usage_sampler_loop() -> None:
+    """Every second, read the active engine's /metrics. The one-second rates feed
+    the live view and the busiest-second peaks; every ten seconds a summary row is
+    stored. Engines without a Prometheus page (llama.cpp, SGLang) are skipped.
+
+    Each pass is guarded: a failure is logged and the next pass still runs, so one
+    bad reading can never stop the sampler for good."""
+    import httpx
+
+    async with httpx.AsyncClient(timeout=2) as client:
+        tick = 0
+        while True:
+            await asyncio.sleep(1)
+            tick += 1
+            try:
+                if tick % 2 == 0:
+                    # Exact token counts for requests in flight, from the engine's tokenizer.
+                    await usage.refresh_live_tokens(client)
+                await _usage_sample_once(client)
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                print(f"[usage] sampler pass failed: {exc}", flush=True)
+
+
+async def _usage_sample_once(client) -> None:
+    run = runner.active()
+    if not run or not run.url:
+        return
+    base = run.url.rstrip("/").replace("://0.0.0.0", "://127.0.0.1")
+    try:
+        resp = await client.get(f"{base}/metrics")
+        if resp.status_code != 200:
+            return
+        counters = usage.parse_engine_metrics(resp.text)
+    except Exception:  # noqa: BLE001
+        return
+    if not counters:
+        return
+    row = usage.sampler.observe(run.id, counters, time.time())
+    if not row:
+        return
+    usage.note_engine_sample(row)
+    stored = usage.engine_persist.add(row)
+    if stored:
+        await asyncio.to_thread(db.engine_sample_insert_many, [stored])
+
+
+@app.get("/api/usage/tools")
+def usage_tools(period: str = "session"):
+    return db.usage_tool_summary(_usage_since(period))
+
+
+@app.get("/api/usage/live")
+def usage_live():
+    return usage.live_snapshot()
+
+
+@app.post("/api/usage/backfill")
+def usage_backfill_now():
+    """Re-run the history import now (it also runs on every startup)."""
+    return usage_backfill.run_all()
+
+
+@app.get("/api/usage/summary")
+def usage_summary(period: str = "session"):
+    since = _usage_since(period)
+    return {"period": period, "since": since, **db.usage_summary(since)}
+
+
+@app.get("/api/usage/events")
+def usage_events(period: str = "session", limit: int = 50, before: float | None = None):
+    return db.usage_list(since=_usage_since(period), limit=min(max(limit, 1), 200), before=before)
+
+
+@app.get("/api/usage/events/{event_id}")
+def usage_event(event_id: str):
+    row = db.usage_get(event_id)
+    if not row:
+        raise HTTPException(404, f"no usage event {event_id}")
+    return row
 
 
 # ----- Chat proxy to the active run ----------------------------------------
@@ -2490,52 +2649,79 @@ async def chat_proxy(request: Request):
         body["max_tokens"] = min(requested_mt, available) if requested_mt else available
 
     stream = bool(body.get("stream"))
+    # Usage tracking for the dashboard chat, same as the /api/engine/v1 proxy.
+    rec = usage.UsageRecorder(
+        client_ip=request.client.host if request.client else None,
+        engine_run_id=run.id,
+        model=str(body.get("model") or ""),
+        endpoint="/v1/chat/completions",
+        stream=stream,
+        engine_url=base,
+    )
     if stream:
+        # Ask for token counts on the final chunk; the chat UI already reads them.
+        body.setdefault("stream_options", {"include_usage": True})
+
         async def gen():
-            async with httpx.AsyncClient(timeout=300) as client:
-                for attempt in (1, 2):
-                    async with client.stream("POST", endpoint, json=body) as r:
-                        if r.status_code >= 400:
-                            err_bytes = await r.aread()
-                            msg = err_bytes.decode("utf-8", errors="replace")[:2000]
-                            # Context overflow: the engine's error carries the
-                            # actual prompt token count — clamp to it and retry
-                            # once instead of bothering the user.
-                            if (
-                                attempt == 1
-                                and r.status_code == 400
-                                and _shrink_max_tokens_from_error(body, msg, engine_max_len)
-                            ):
-                                continue
-                            # Surface upstream errors as a structured SSE frame so
-                            # the chat UI can render the message instead of an
-                            # empty bubble.
-                            payload = {
-                                "error": {
-                                    "status": r.status_code,
-                                    "message": msg or f"upstream returned {r.status_code}",
+            completed = False
+            try:
+                async with httpx.AsyncClient(timeout=300) as client:
+                    for attempt in (1, 2):
+                        async with client.stream("POST", endpoint, json=body) as r:
+                            if r.status_code >= 400:
+                                err_bytes = await r.aread()
+                                msg = err_bytes.decode("utf-8", errors="replace")[:2000]
+                                # Context overflow: the engine's error carries the
+                                # actual prompt token count — clamp to it and retry
+                                # once instead of bothering the user.
+                                if (
+                                    attempt == 1
+                                    and r.status_code == 400
+                                    and _shrink_max_tokens_from_error(body, msg, engine_max_len)
+                                ):
+                                    continue
+                                rec.finish("error", f"HTTP {r.status_code}: {msg[:200]}")
+                                # Surface upstream errors as a structured SSE frame so
+                                # the chat UI can render the message instead of an
+                                # empty bubble.
+                                payload = {
+                                    "error": {
+                                        "status": r.status_code,
+                                        "message": msg or f"upstream returned {r.status_code}",
+                                    }
                                 }
-                            }
-                            yield f"data: {json.dumps(payload)}\n\n".encode()
-                            yield b"data: [DONE]\n\n"
+                                yield f"data: {json.dumps(payload)}\n\n".encode()
+                                yield b"data: [DONE]\n\n"
+                                return
+                            async for chunk in r.aiter_bytes():
+                                rec.feed(chunk)
+                                yield chunk
+                            completed = True
                             return
-                        async for chunk in r.aiter_bytes():
-                            yield chunk
-                        return
+            finally:
+                if rec.status == "running":
+                    rec.finish("ok" if (completed or rec.saw_done) else "aborted")
 
         # Pass vLLM's SSE bytes through verbatim. The browser parses `data: …`
         # lines just like talking to vLLM directly.
         return StreamingResponse(gen(), media_type="text/event-stream")
 
-    async with httpx.AsyncClient(timeout=300) as client:
-        r = await client.post(endpoint, json=body)
-        if r.status_code == 400 and _shrink_max_tokens_from_error(
-            body, r.text, engine_max_len
-        ):
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
             r = await client.post(endpoint, json=body)
-        if r.status_code >= 400:
-            raise HTTPException(r.status_code, r.text)
-        return r.json()
+            if r.status_code == 400 and _shrink_max_tokens_from_error(
+                body, r.text, engine_max_len
+            ):
+                r = await client.post(endpoint, json=body)
+    except Exception as exc:  # noqa: BLE001
+        rec.finish("error", str(exc)[:200])
+        raise
+    if r.status_code >= 400:
+        rec.finish("error", f"HTTP {r.status_code}: {r.text[:200]}")
+        raise HTTPException(r.status_code, r.text)
+    rec.feed(r.content)
+    rec.finish("ok")
+    return r.json()
 
 
 @app.get("/api/models/served")
@@ -4307,6 +4493,12 @@ async def _bind_loop():
     asyncio.create_task(_boot_adoption())
     # Engine health watchdog: readiness probing, server-side working/failed
     # recipe tagging, and "container Up but engine dead" detection.
+    asyncio.create_task(_watchdog_loop())
+    # Spark Usage: sample running engines' /metrics, resolve tailnet names, and
+    # import history already on this machine (Hermes sessions, engine run logs).
+    usage.start_background()
+    asyncio.create_task(_usage_sampler_loop())
+    threading.Thread(target=usage_backfill.run_all, daemon=True, name="usage-backfill").start()
     asyncio.create_task(_watchdog_loop())
     # HTTPS terminal sessions deliberately survive a brief page navigation or
     # reload. Reap abandoned PTYs after their lease expires.
