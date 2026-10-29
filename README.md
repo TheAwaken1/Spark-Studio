@@ -32,6 +32,32 @@ Open **http://127.0.0.1:7860** (or `http://<spark-ip>:7860` from any machine on 
 ./start.sh --doctor   # full system health report at any time
 ```
 
+## Recipe start at boot
+
+Recipes do **not** start automatically unless you enable **Start at boot** on
+that saved recipe in Recipes. Set **Boot order** (lower first; ties use recipe
+ID) to choose the sequence. Spark Studio must itself be started by your usual
+service/login mechanism; this setting does not install a system service.
+
+After restart reconciliation and optional endpoint adoption, Spark Studio makes
+one background pass through the enabled recipes, using the normal Run path
+(run history, logs, watchdog, and Stop). Each launch waits for readiness before
+the next, up to `SPARK_STUDIO_AUTOSTART_TIMEOUT` seconds (default `600`). A timed
+out run is left up for diagnosis; the queue continues, without retrying it.
+
+- **Stop auto-start** cancels the remaining queue, not models already launched.
+- `SPARK_STUDIO_AUTOSTART=0` disables the whole queue without changing saved choices.
+- Re-adopted/running recipes and occupied ports are skipped, with reasons in
+  the server log. `GET /api/autostart` reports state and per-recipe results;
+  `POST /api/autostart/stop` latches the stop for this application boot.
+- Auto-start never uses force or disables the memory guard. Unlike manual Run,
+  it **does not evict resident models**: if a managed model is already resident,
+  another recipe is skipped. On a Spark with room for only one model, only the
+  first eligible model will start. Manual launches keep their existing policy.
+- A doctor memory `error` suppresses the pass; `warn` alone does not. The current
+  doctor has no disk probe, so no new disk check is introduced here.
+- Toggle/order changes take effect on the next application boot, not immediately.
+
 ## What you can do in 60 seconds
 
 1. Open the dashboard — the wizard checks your Spark and picks a starter model

@@ -23,6 +23,8 @@ import threading
 import time
 import urllib.parse
 import uuid
+from functools import wraps
+from contextvars import ContextVar
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -480,6 +482,20 @@ def endpoint_key(url: str) -> tuple[str, int] | None:
     return ("local" if _is_local_address(host) else host, port)
 
 
+# Internal launch policy, propagated through asyncio.to_thread; never a force bypass.
+preserve_resident_models = ContextVar("preserve_resident_models", default=False)
+_launch_lock = threading.RLock()
+
+
+def _serialized_launch(fn):
+    @wraps(fn)
+    def launch(*args, **kwargs):
+        # Guard through registration: a manual and boot launch cannot both pass.
+        with _launch_lock:
+            return fn(*args, **kwargs)
+    return launch
+
+
 class Runner:
     """Manages all engine subprocesses."""
 
@@ -514,7 +530,12 @@ class Runner:
         """Make room for a new model before launching. Returns log lines to
         attach to the new run; raises MemoryTooTight if it can't fit."""
         msgs: list[str] = []
-        if skip or os.environ.get("SPARK_STUDIO_NO_MEMORY_GUARD") == "1":
+        preserve = preserve_resident_models.get()
+        if preserve and any(r.status == "running" and r.engine in
+                            {"vllm", "sglang", "llamacpp", "sparkrun"}
+                            for r in self.runs.values()):
+            raise MemoryTooTight("Auto-start skipped: a resident model is already running; stop it manually first.")
+        if not preserve and (skip or os.environ.get("SPARK_STUDIO_NO_MEMORY_GUARD") == "1"):
             return msgs
         total = _mem_total_gb()
         if not total:
@@ -529,6 +550,8 @@ class Runner:
 
         # 1) Only one model fits — stop any other resident model first.
         others = self._running_model_runs()
+        if preserve and others:
+            raise MemoryTooTight("Auto-start skipped: a resident model appeared before launch.")
         for r in others:
             label = r.label or r.engine
             msgs.append(f"[guard] stopping running model '{label}' to free unified memory for the new launch")
@@ -583,6 +606,7 @@ class Runner:
                 )
         return msgs
 
+    @_serialized_launch
     def start(
         self,
         engine: str,
