@@ -2,6 +2,18 @@
 
 import { startUsageTab, stopUsageTab } from './usage.js';
 
+// ---------- i18n guard -----------------------------------------------------
+// i18n.js is a classic script loaded before this module, so window.t normally
+// exists by the time this runs. If it failed to load (404, parse error), the
+// dashboard must still work: fall back to the key itself rather than throwing
+// on the first translated label. i18n.js wins when it did load.
+if (typeof window.t !== 'function') {
+  window.t = (key) => key;
+}
+if (typeof window.ssLang !== 'string') {
+  window.ssLang = 'en';
+}
+
 // ---------- utilities -----------------------------------------------------
 const $ = (sel, root = document) => root.querySelector(sel);
 const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));

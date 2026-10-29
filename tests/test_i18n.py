@@ -448,5 +448,83 @@ class I18nMarkupTests(unittest.TestCase):
         self.assertEqual(bad, [], "<option> may only contain text; put data-i18n on the option")
 
 
+class I18nUsageTabTests(unittest.TestCase):
+    """The Spark Usage tab (web/usage.js, added on main) must be translated.
+
+    The upstream review asked for ss.usage.* keys so French users do not get
+    an English-only tab. These tests pin that contract.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.en = load_dict("en")
+        cls.fr = load_dict("fr")
+        cls.index_html = INDEX_HTML.read_text(encoding="utf-8")
+        cls.usage_js = (WEB / "usage.js").read_text(encoding="utf-8")
+        cls.app_js = APP_JS.read_text(encoding="utf-8")
+
+    def test_usage_keys_exist_in_both_dictionaries(self):
+        usage_keys = {k for k in self.en if k.startswith("ss.usage.")}
+        self.assertGreaterEqual(len(usage_keys), 80,
+                                "expected a substantial ss.usage.* key set")
+        self.assertEqual(sorted(k for k in usage_keys if k not in self.fr), [],
+                         "every ss.usage.* key must exist in FR too")
+
+    def test_usage_keys_used_in_js_exist_in_en(self):
+        used = set(re.findall(r"t\('(ss\.[a-z0-9_.]+)'", self.usage_js))
+        self.assertGreaterEqual(len(used), 40, "expected 40+ t() call sites in usage.js")
+        missing = sorted(k for k in used if k not in self.en)
+        self.assertEqual(missing, [], f"usage.js t() keys missing from EN: {missing}")
+
+    def test_usage_keys_used_in_html_exist_in_en(self):
+        used = set(re.findall(r'data-i18n(?:-title|-placeholder|-aria)?="(ss\.usage\.[a-z0-9_.]+)"',
+                              self.index_html))
+        self.assertGreaterEqual(len(used), 15, "expected the Usage panel markup to be tagged")
+        missing = sorted(k for k in used if k not in self.en)
+        self.assertEqual(missing, [], f"usage data-i18n keys missing from EN: {missing}")
+
+    def test_no_hardcoded_english_in_usage_js(self):
+        """User-facing literals of the Usage tab must go through t()."""
+        stale = (
+            "Actual compute",
+            "Real GPU work for this period",
+            "Actual prefill",
+            "Actual decode",
+            "Total compute",
+            "Cache savings",
+            "no prompt tokens yet",
+            "Import failed. Check the Studio log.",
+            "No tool calls in this period.",
+            "No recent tool calls.",
+            "No engine metrics yet.",
+            "Nothing generating right now.",
+            "No requests in this period.",
+            "No requests yet in this period.",
+            "No activity recorded for this request.",
+            "Stream activity",
+            "Time to first token",
+            "single response",
+            "Load more",
+        )
+        found = [lit for lit in stale if lit in self.usage_js]
+        self.assertEqual(found, [], f"stale English literals still hardcoded in usage.js: {found}")
+
+    def test_app_js_guards_the_i18n_runtime(self):
+        """app.js must not crash when i18n.js failed to load."""
+        self.assertRegex(self.app_js, r"typeof window\.t\s*!==\s*['\"]function['\"]",
+                         "app.js must guard window.t with a fallback")
+        self.assertRegex(self.app_js, r"window\.t\s*=\s*\(?\s*key\s*\)?\s*=>\s*key",
+                         "the fallback must return the key itself")
+        self.assertIn("window.ssLang = 'en';", self.app_js,
+                      "app.js must default ssLang to 'en'")
+
+    def test_usage_helper_falls_back_to_the_key(self):
+        """usage.js is an ES module: its t() helper must tolerate a missing i18n.js."""
+        self.assertRegex(self.usage_js, r"typeof window\.t\s*===\s*['\"]function['\"]",
+                         "usage.js must check window.t before using it")
+        self.assertRegex(self.usage_js, r"\(key\)\s*=>\s*key",
+                         "the usage.js fallback must return the key itself")
+
+
 if __name__ == "__main__":
     unittest.main()

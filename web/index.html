@@ -442,54 +442,54 @@
     <!-- LOGS -->
     <section class="panel" data-panel="usage">
       <header class="panel-header">
-        <h1>Spark Usage</h1>
-        <p>Every request your engines serve: this box, Hermes, and any machine on your tailnet that calls the API.</p>
-        <div class="usage-periods" id="usagePeriods" role="tablist" aria-label="Period">
-          <button class="btn active" data-period="session">This session</button>
-          <button class="btn" data-period="today">Today</button>
-          <button class="btn" data-period="year">This year</button>
-          <button class="btn" data-period="all">All time</button>
+        <h1 data-i18n="ss.usage.title">Spark Usage</h1>
+        <p data-i18n="ss.usage.subtitle">Every request your engines serve: this box, Hermes, and any machine on your tailnet that calls the API.</p>
+        <div class="usage-periods" id="usagePeriods" role="tablist" aria-label="Period" data-i18n-aria="ss.usage.period_aria">
+          <button class="btn active" data-period="session" data-i18n="ss.usage.period_session">This session</button>
+          <button class="btn" data-period="today" data-i18n="ss.usage.period_today">Today</button>
+          <button class="btn" data-period="year" data-i18n="ss.usage.period_year">This year</button>
+          <button class="btn" data-period="all" data-i18n="ss.usage.period_all">All time</button>
         </div>
       </header>
       <div class="card usage-live">
         <div class="usage-live-head">
-          <h3><i class="fa-solid fa-tower-broadcast"></i> Live now</h3>
+          <h3><i class="fa-solid fa-tower-broadcast"></i> <span data-i18n="ss.usage.live_now">Live now</span></h3>
           <div class="usage-live-counters">
-            <div><span class="usage-big" id="usageStreamsNow">0</span><span class="muted"> streams</span></div>
-            <div><span class="usage-big" id="usageTokNow">—</span><span class="muted"> tok/s now (exact so far)</span></div>
-            <div><span class="usage-big" id="usagePeakStreams">0</span><span class="muted"> peak streams this session</span></div>
-            <div><span class="usage-big" id="usagePeakTok">0</span><span class="muted"> tok/s, fastest request this session</span></div>
+            <div><span class="usage-big" id="usageStreamsNow">0</span><span class="muted" data-i18n="ss.usage.live_streams">streams</span></div>
+            <div><span class="usage-big" id="usageTokNow">—</span><span class="muted" data-i18n="ss.usage.live_tok_now">tok/s now (exact so far)</span></div>
+            <div><span class="usage-big" id="usagePeakStreams">0</span><span class="muted" data-i18n="ss.usage.live_peak_streams">peak streams this session</span></div>
+            <div><span class="usage-big" id="usagePeakTok">0</span><span class="muted" data-i18n="ss.usage.live_peak_tok">tok/s, fastest request this session</span></div>
           </div>
         </div>
         <div class="usage-engine" id="usageEngine"></div>
         <div id="usageLiveList"></div>
       </div>
-      <div class="usage-actual" id="usageActual" aria-label="Actual compute for this period"></div>
+      <div class="usage-actual" id="usageActual" aria-label="Actual compute for this period" data-i18n-aria="ss.usage.actual_aria"></div>
       <div class="usage-tiles" id="usageTiles"></div>
       <div class="grid grid-2">
-        <div class="card"><h3><i class="fa-solid fa-server"></i> By machine</h3><div id="usageByNode"></div></div>
-        <div class="card"><h3><i class="fa-solid fa-cubes"></i> By model</h3><div id="usageByModel"></div></div>
+        <div class="card"><h3><i class="fa-solid fa-server"></i> <span data-i18n="ss.usage.by_machine">By machine</span></h3><div id="usageByNode"></div></div>
+        <div class="card"><h3><i class="fa-solid fa-cubes"></i> <span data-i18n="ss.usage.by_model">By model</span></h3><div id="usageByModel"></div></div>
       </div>
       <div class="card">
-        <h3><i class="fa-solid fa-wrench"></i> Tool calls</h3>
-        <p class="muted">Tools the models called through Spark Studio, by name, and the most recent calls.</p>
+        <h3><i class="fa-solid fa-wrench"></i> <span data-i18n="ss.usage.tool_calls">Tool calls</span></h3>
+        <p class="muted" data-i18n="ss.usage.tool_calls_hint">Tools the models called through Spark Studio, by name, and the most recent calls.</p>
         <div class="grid grid-2">
           <div id="usageToolsByName"></div>
           <div id="usageToolsRecent"></div>
         </div>
       </div>
       <div class="card">
-        <h3><i class="fa-solid fa-list"></i> Request log</h3>
-        <p class="muted">Click a request for its tokens, cache, thinking time and tok/s over time. Rows marked <em>imported</em> came from history found on this machine.</p>
-        <button class="btn" id="usageImport"><i class="fa-solid fa-file-import"></i> Import history from this machine</button>
+        <h3><i class="fa-solid fa-list"></i> <span data-i18n="ss.usage.request_log">Request log</span></h3>
+        <p class="muted"><span data-i18n="ss.usage.request_log_hint_1">Click a request for its tokens, cache, thinking time and tok/s over time. Rows marked</span> <em data-i18n="ss.usage.imported">imported</em> <span data-i18n="ss.usage.request_log_hint_2">came from history found on this machine.</span></p>
+        <button class="btn" id="usageImport"><i class="fa-solid fa-file-import"></i> <span data-i18n="ss.usage.import_button">Import history from this machine</span></button>
         <span class="muted" id="usageImportNote"></span>
         <div id="usageLog"></div>
-        <button class="btn" id="usageMore" hidden>Load more</button>
+        <button class="btn" id="usageMore" hidden data-i18n="ss.usage.load_more">Load more</button>
       </div>
       <div class="modal" id="usageModal" hidden>
         <div class="modal-body">
           <div class="modal-header">
-            <h3 id="usageModalTitle">Request</h3>
+            <h3 id="usageModalTitle" data-i18n="ss.usage.request">Request</h3>
             <button class="btn" data-close>&times;</button>
           </div>
           <div class="modal-content" id="usageModalBody"></div>
