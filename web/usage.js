@@ -3,6 +3,15 @@
 
 const $u = (sel, root = document) => root.querySelector(sel);
 
+// ---------- i18n -----------------------------------------------------------
+// usage.js is an ES module; i18n.js is a classic script loaded before it, so
+// window.t is normally available. Fall back to the key itself if it did not
+// load, so a missing i18n.js degrades to English-ish keys instead of throwing.
+const t = (typeof window !== 'undefined' && typeof window.t === 'function')
+  ? window.t
+  : (key) => key;
+
+
 function usageEsc(s) {
   return String(s ?? '').replace(/[&<>"']/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[m]));
 }
@@ -50,16 +59,16 @@ function usageActualCards(t) {
   const card = (label, value, hint) =>
     `<div class="usage-actual-card"><div class="usage-tile-label">${label}</div>
        <div class="usage-actual-value">${value}</div><div class="muted usage-tile-hint">${hint}</div></div>`;
-  return `<div class="usage-actual-head"><h3><i class="fa-solid fa-microchip"></i> Actual compute</h3>
-      <span class="muted">Real GPU work for this period, not the raw prompt total</span></div>
+  return `<div class="usage-actual-head"><h3><i class="fa-solid fa-microchip"></i> ${t('ss.usage.actual_compute')}</h3>
+      <span class="muted">${t('ss.usage.actual_compute_hint')}</span></div>
     <div class="usage-actual-grid">
-      ${card('Actual prefill', `${usageFmt(uncached)} <span class="muted">tokens</span>`,
-        `uncached prompt tokens · ${usagePct(uncachedPct)} of ${usageFmt(prompt)} prompt`)}
-      ${card('Actual decode', `${usageFmt(completion)} <span class="muted">tokens</span>`, 'generated tokens')}
-      ${card('Total compute', `${usageFmt(uncached + completion)} <span class="muted">tokens</span>`,
-        'prefill + decode')}
-      ${card('Cache savings', `${usageFmt(cached)} <span class="muted">tokens</span>`,
-        cachePct == null ? 'no prompt tokens yet' : `${usagePct(cachePct)} of prompt tokens avoided by cache`)}
+      ${card(t('ss.usage.actual_prefill'), `${usageFmt(uncached)} <span class="muted">${t('ss.usage.unit_tokens')}</span>`,
+        t('ss.usage.actual_prefill_hint', { pct: usagePct(uncachedPct), total: usageFmt(prompt) }))}
+      ${card(t('ss.usage.actual_decode'), `${usageFmt(completion)} <span class="muted">${t('ss.usage.unit_tokens')}</span>`, t('ss.usage.actual_decode_hint'))}
+      ${card(t('ss.usage.actual_total'), `${usageFmt(uncached + completion)} <span class="muted">${t('ss.usage.unit_tokens')}</span>`,
+        t('ss.usage.actual_total_hint'))}
+      ${card(t('ss.usage.cache_savings'), `${usageFmt(cached)} <span class="muted">${t('ss.usage.unit_tokens')}</span>`,
+        cachePct == null ? t('ss.usage.no_prompt_tokens_yet') : t('ss.usage.cache_savings_hint', { pct: usagePct(cachePct) }))}
     </div>`;
 }
 
@@ -89,10 +98,13 @@ function usageWire() {
     try {
       const r = await fetch('/api/usage/backfill', { method: 'POST' });
       const counts = await r.json();
-      $u('#usageImportNote').textContent = `Imported ${usageFmt(counts.hermes_sessions)} Hermes rows and ${usageFmt(counts.engine_samples)} engine samples.`;
+      $u('#usageImportNote').textContent = t('ss.usage.import_done', {
+        hermes: usageFmt(counts.hermes_sessions),
+        engine: usageFmt(counts.engine_samples),
+      });
       usageLoadAll(true);
     } catch {
-      $u('#usageImportNote').textContent = 'Import failed. Check the Studio log.';
+      $u('#usageImportNote').textContent = t('ss.usage.import_failed');
     } finally {
       btn.disabled = false;
     }
@@ -137,16 +149,16 @@ async function usageTools() {
   }
   const byName = data.by_name || [];
   $u('#usageToolsByName').innerHTML = byName.length
-    ? `<table class="usage-table"><thead><tr><th>Tool</th><th>Calls</th><th>Requests</th><th>Avg args</th></tr></thead><tbody>${
-        byName.map((r) => `<tr><td class="mono">${usageEsc(r.name)}</td><td>${usageFmt(r.calls)}</td><td>${usageFmt(r.requests)}</td><td>${usageFmt(r.avg_args_chars)} chars</td></tr>`).join('')
+    ? `<table class="usage-table"><thead><tr><th>${t('ss.usage.th_tool')}</th><th>${t('ss.usage.th_calls')}</th><th>${t('ss.usage.th_requests')}</th><th>${t('ss.usage.th_avg_args')}</th></tr></thead><tbody>${
+        byName.map((r) => `<tr><td class="mono">${usageEsc(r.name)}</td><td>${usageFmt(r.calls)}</td><td>${usageFmt(r.requests)}</td><td>${t('ss.usage.unit_chars', { n: usageFmt(r.avg_args_chars) })}</td></tr>`).join('')
       }</tbody></table>`
-    : '<p class="muted">No tool calls in this period.</p>';
+    : `<p class="muted">${t('ss.usage.no_tool_calls')}</p>`;
   const recent = data.recent || [];
   $u('#usageToolsRecent').innerHTML = recent.length
-    ? `<table class="usage-table"><thead><tr><th>When</th><th>Machine</th><th>Tool</th></tr></thead><tbody>${
+    ? `<table class="usage-table"><thead><tr><th>${t('ss.usage.th_when')}</th><th>${t('ss.usage.th_machine')}</th><th>${t('ss.usage.th_tool')}</th></tr></thead><tbody>${
         recent.slice(0, 20).map((r) => `<tr><td>${usageTime(r.ts)}</td><td>${usageEsc(r.node)}</td><td class="mono">${usageEsc(r.name)}</td></tr>`).join('')
       }</tbody></table>`
-    : '<p class="muted">No recent tool calls.</p>';
+    : `<p class="muted">${t('ss.usage.no_recent_tool_calls')}</p>`;
 }
 
 async function usageLive() {
@@ -162,29 +174,29 @@ async function usageLive() {
   $u('#usagePeakTok').textContent = usageFmt(live.session_peak_tok_s, 1);
   const eng = live.engine;
   $u('#usageEngine').innerHTML = eng
-    ? `<span class="muted">Engine</span>
-       <span class="mono">${usageFmt(eng.running)}</span> running ·
-       <span class="mono">${usageFmt(eng.waiting)}</span> waiting ·
-       cache <span class="mono">${usagePct(eng.cache_hit_pct)}</span>`
-    : '<span class="muted">No engine metrics yet.</span>';
+    ? `<span class="muted">${t('ss.usage.engine')}</span>
+       <span class="mono">${usageFmt(eng.running)}</span> ${t('ss.usage.running')} ·
+       <span class="mono">${usageFmt(eng.waiting)}</span> ${t('ss.usage.waiting')} ·
+       ${t('ss.usage.cache')} <span class="mono">${usagePct(eng.cache_hit_pct)}</span>`
+    : `<span class="muted">${t('ss.usage.no_engine_metrics')}</span>`;
   const list = $u('#usageLiveList');
   if (!live.streams.length) {
-    list.innerHTML = '<p class="muted">Nothing generating right now. Requests from this box and your other machines appear here while they run.</p>';
+    list.innerHTML = `<p class="muted">${t('ss.usage.nothing_generating')}</p>`;
     return;
   }
   list.innerHTML = live.streams.map((s) => {
     const phase = s.phase === 'thinking'
-      ? '<span class="usage-badge think"><i class="fa-solid fa-brain"></i> thinking</span>'
+      ? `<span class="usage-badge think"><i class="fa-solid fa-brain"></i> ${t('ss.usage.phase_thinking')}</span>`
       : s.phase === 'answering'
-        ? '<span class="usage-badge answer"><i class="fa-solid fa-pen"></i> answering</span>'
-        : '<span class="usage-badge"><i class="fa-solid fa-hourglass-half"></i> waiting</span>';
+        ? `<span class="usage-badge answer"><i class="fa-solid fa-pen"></i> ${t('ss.usage.phase_answering')}</span>`
+        : `<span class="usage-badge"><i class="fa-solid fa-hourglass-half"></i> ${t('ss.usage.phase_waiting')}</span>`;
     return `<div class="usage-live-row">
-      <div class="usage-live-who"><strong>${usageEsc(s.node)}</strong> <span class="muted mono">${usageEsc(s.model || 'model')}</span></div>
+      <div class="usage-live-who"><strong>${usageEsc(s.node)}</strong> <span class="muted mono">${usageEsc(s.model || t('ss.usage.model'))}</span></div>
       ${phase}
-      <div class="usage-live-rate">${s.tok_s == null ? '<span class="muted">counting…</span>' : `<span class="mono">${usageFmt(s.tok_s, 1)}</span> tok/s`}</div>
+      <div class="usage-live-rate">${s.tok_s == null ? `<span class="muted">${t('ss.usage.counting')}</span>` : `<span class="mono">${usageFmt(s.tok_s, 1)}</span> ${t('ss.usage.unit_tok_s', { n: '' }).trim()}`}</div>
       <div class="usage-live-tools">${(s.tools || []).map((n) => `<span class="usage-badge"><i class="fa-solid fa-wrench"></i> ${usageEsc(n)}</span>`).join('')}</div>
-      <div class="usage-live-trend">${usageMiniSpark(s.recent, { w: 200, h: 34, label: 'stream activity, last 40 seconds' })}</div>
-      <div class="muted">${s.tokens_exact ? '' : '≈ '}${usageFmt(s.tokens_so_far)} tokens · ${usageDuration(s.elapsed)}</div>
+      <div class="usage-live-trend">${usageMiniSpark(s.recent, { w: 200, h: 34, label: t('ss.usage.trend_aria') })}</div>
+      <div class="muted">${s.tokens_exact ? '' : '≈ '}${usageFmt(s.tokens_so_far)} ${t('ss.usage.unit_tokens')} · ${usageDuration(s.elapsed)}</div>
     </div>`;
   }).join('');
 }
@@ -199,22 +211,22 @@ async function usageSummary() {
   const t = data.totals;
   $u('#usageActual').innerHTML = usageActualCards(t);
   const tiles = [
-    ['Requests', usageFmt(t.requests), `${usageFmt(t.failed_requests)} failed`],
-    ['Prompt tokens', usageFmt(t.prompt_tokens), 'in'],
-    ['Completion tokens', usageFmt(t.completion_tokens), 'out'],
-    ['Cache hit', usagePct(t.cache_hit_pct), `${usageFmt(t.cached_tokens)} cached tokens`],
-    ['Avg tok/s', usageFmt(t.avg_tok_s, 1), 'exact tokens ÷ time to last token'],
-    ['Peak tok/s', usageFmt(t.peak_tok_s, 1), 'fastest single request'],
-    ['Thinking', t.requests ? usagePct((100 * t.thinking_requests) / t.requests) : '—', `${usageFmt(t.thinking_requests)} requests`],
-    ['Peak streams', usageFmt(t.peak_streams), 'at once'],
+    [t('ss.usage.tile_requests'), usageFmt(t.requests), t('ss.usage.tile_failed', { n: usageFmt(t.failed_requests) })],
+    [t('ss.usage.tile_prompt_tokens'), usageFmt(t.prompt_tokens), t('ss.usage.tile_in')],
+    [t('ss.usage.tile_completion_tokens'), usageFmt(t.completion_tokens), t('ss.usage.tile_out')],
+    [t('ss.usage.tile_cache_hit'), usagePct(t.cache_hit_pct), t('ss.usage.tile_cached_tokens', { n: usageFmt(t.cached_tokens) })],
+    [t('ss.usage.tile_avg_tok_s'), usageFmt(t.avg_tok_s, 1), t('ss.usage.tile_avg_tok_s_hint')],
+    [t('ss.usage.tile_peak_tok_s'), usageFmt(t.peak_tok_s, 1), t('ss.usage.tile_peak_tok_s_hint')],
+    [t('ss.usage.tile_thinking'), t.requests ? usagePct((100 * t.thinking_requests) / t.requests) : '—', t('ss.usage.tile_requests_n', { n: usageFmt(t.thinking_requests) })],
+    [t('ss.usage.tile_peak_streams'), usageFmt(t.peak_streams), t('ss.usage.tile_at_once')],
   ];
   $u('#usageTiles').innerHTML = tiles.map(([label, value, hint]) =>
     `<div class="usage-tile"><div class="usage-tile-label">${label}</div><div class="usage-tile-value">${value}</div><div class="muted usage-tile-hint">${usageEsc(hint)}</div></div>`
   ).join('');
 
   const table = (rows, key, head) => {
-    if (!rows.length) return '<p class="muted">No requests in this period.</p>';
-    return `<table class="usage-table"><thead><tr><th>${head}</th><th>Requests</th><th>Completion</th><th>Avg tok/s</th><th>Peak tok/s</th><th>Cache</th></tr></thead><tbody>${
+    if (!rows.length) return `<p class="muted">${t('ss.usage.no_requests_period')}</p>`;
+    return `<table class="usage-table"><thead><tr><th>${head}</th><th>${t('ss.usage.th_requests')}</th><th>${t('ss.usage.th_completion')}</th><th>${t('ss.usage.th_tok_s')}</th><th>${t('ss.usage.tile_peak_tok_s')}</th><th>${t('ss.usage.th_cache')}</th></tr></thead><tbody>${
       rows.map((r) => `<tr>
         <td>${usageEsc(r[key] || '—')}</td>
         <td>${usageFmt(r.requests)}</td>
@@ -225,8 +237,8 @@ async function usageSummary() {
       </tr>`).join('')
     }</tbody></table>`;
   };
-  $u('#usageByNode').innerHTML = table(data.by_node, 'node', 'Machine');
-  $u('#usageByModel').innerHTML = table(data.by_model, 'model', 'Model');
+  $u('#usageByNode').innerHTML = table(data.by_node, 'node', t('ss.usage.by_machine'));
+  $u('#usageByModel').innerHTML = table(data.by_model, 'model', t('ss.usage.by_model'));
 }
 
 async function usageLoadEvents(reset) {
@@ -251,16 +263,16 @@ async function usageLoadEvents(reset) {
   $u('#usageMore').hidden = rows.length < 50;
   const log = $u('#usageLog');
   if (!usageEvents.length) {
-    log.innerHTML = '<p class="muted">No requests yet in this period.</p>';
+    log.innerHTML = `<p class="muted">${t('ss.usage.no_requests_yet')}</p>`;
     return;
   }
   log.innerHTML = `<table class="usage-table usage-log"><thead><tr>
-      <th>When</th><th>Machine</th><th>Model</th><th>Endpoint</th><th>Prompt</th><th>Completion</th><th>Cache</th><th>Tok/s</th><th></th>
+      <th>${t('ss.usage.th_when')}</th><th>${t('ss.usage.th_machine')}</th><th>${t('ss.usage.th_model')}</th><th>${t('ss.usage.th_endpoint')}</th><th>${t('ss.usage.th_prompt')}</th><th>${t('ss.usage.th_completion')}</th><th>${t('ss.usage.th_cache')}</th><th>${t('ss.usage.th_tok_s')}</th><th></th>
     </tr></thead><tbody>${
       usageEvents.map((e) => `<tr class="usage-row ${e.status !== 'ok' ? 'failed' : ''}" data-id="${usageEsc(e.id)}">
         <td>${usageTime(e.started_at)}</td>
         <td>${usageEsc(e.node)}</td>
-        <td class="mono">${usageEsc(e.model || '—')}${String(e.engine_run_id || '').startsWith('backfill') ? ' <span class="usage-badge">imported</span>' : ''}</td>
+        <td class="mono">${usageEsc(e.model || '—')}${String(e.engine_run_id || '').startsWith('backfill') ? ` <span class="usage-badge">${t('ss.usage.imported')}</span>` : ''}</td>
         <td class="muted mono">${usageEsc(e.endpoint)}</td>
         <td>${usageFmt(e.prompt_tokens)}</td>
         <td>${usageFmt(e.completion_tokens)}</td>
@@ -275,18 +287,18 @@ async function usageLoadEvents(reset) {
 }
 
 function usageSparkline(samples) {
-  if (!samples || !samples.length) return '<p class="muted">No activity recorded for this request.</p>';
+  if (!samples || !samples.length) return `<p class="muted">${t('ss.usage.no_activity')}</p>`;
   const w = 600;
   const h = 120;
   const max = Math.max(1, ...samples);
   const step = samples.length > 1 ? w / (samples.length - 1) : w;
   const pts = samples.map((v, i) => `${(i * step).toFixed(1)},${(h - (v / max) * (h - 8) - 4).toFixed(1)}`).join(' ');
   const area = `0,${h} ${pts} ${(samples.length - 1) * step},${h}`;
-  return `<svg class="usage-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="tokens per second over time">
+  return `<svg class="usage-spark" viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" role="img" aria-label="${t('ss.usage.sparkline_aria')}">
       <polygon points="${area}" class="usage-spark-area"></polygon>
       <polyline points="${pts}" class="usage-spark-line"></polyline>
     </svg>
-    <div class="muted usage-spark-axis"><span>0 s</span><span>max ${usageFmt(max)} chunks/s</span><span>${samples.length} s</span></div>`;
+    <div class="muted usage-spark-axis"><span>${t('ss.usage.axis_zero')}</span><span>${t('ss.usage.axis_max', { n: usageFmt(max) })}</span><span>${t('ss.usage.axis_seconds', { n: samples.length })}</span></div>`;
 }
 
 async function usageOpenDetail(id) {
@@ -297,27 +309,27 @@ async function usageOpenDetail(id) {
     return;
   }
   const facts = [
-    ['Machine', `${e.node}${e.client_ip ? ` (${e.client_ip})` : ''}`],
-    ['Model', e.model || '—'],
-    ['Endpoint', e.endpoint],
-    ['Started', usageTime(e.started_at)],
-    ['Duration', usageDuration((e.ended_at || e.started_at) - e.started_at)],
-    ['Status', e.error ? `${e.status}: ${e.error}` : e.status],
-    ['Mode', e.stream ? 'streamed' : 'single response'],
-    ['Thinking', e.thinking ? 'yes' : 'no'],
-    ['Streams on this engine', usageFmt(e.concurrency)],
-    ['Prompt tokens', usageFmt(e.prompt_tokens)],
-    ['Completion tokens', usageFmt(e.completion_tokens)],
-    ['Cached prompt tokens', usageFmt(e.cached_tokens)],
-    ['Cache hit', usagePct(e.cache_hit_pct)],
-    ['Time to first token', e.ttft_ms == null ? '—' : `${usageFmt(e.ttft_ms)} ms`],
-    ['Decode time', usageDuration(e.decode_secs)],
-    ['Tok/s (exact tokens ÷ time from first token to end)', usageFmt(e.tok_s, 1)],
+    [t('ss.usage.fact_machine'), `${e.node}${e.client_ip ? ` (${e.client_ip})` : ''}`],
+    [t('ss.usage.fact_model'), e.model || '—'],
+    [t('ss.usage.fact_endpoint'), e.endpoint],
+    [t('ss.usage.fact_started'), usageTime(e.started_at)],
+    [t('ss.usage.fact_duration'), usageDuration((e.ended_at || e.started_at) - e.started_at)],
+    [t('ss.usage.fact_status'), e.error ? `${e.status}: ${e.error}` : e.status],
+    [t('ss.usage.fact_mode'), e.stream ? t('ss.usage.mode_streamed') : t('ss.usage.mode_single')],
+    [t('ss.usage.fact_thinking'), e.thinking ? t('ss.usage.yes') : t('ss.usage.no')],
+    [t('ss.usage.fact_streams'), usageFmt(e.concurrency)],
+    [t('ss.usage.fact_prompt_tokens'), usageFmt(e.prompt_tokens)],
+    [t('ss.usage.fact_completion_tokens'), usageFmt(e.completion_tokens)],
+    [t('ss.usage.fact_cached_tokens'), usageFmt(e.cached_tokens)],
+    [t('ss.usage.fact_cache_hit'), usagePct(e.cache_hit_pct)],
+    [t('ss.usage.fact_ttft'), e.ttft_ms == null ? '—' : `${usageFmt(e.ttft_ms)} ms`],
+    [t('ss.usage.fact_decode'), usageDuration(e.decode_secs)],
+    [t('ss.usage.fact_tok_s'), usageFmt(e.tok_s, 1)],
   ];
-  $u('#usageModalTitle').textContent = `Request ${e.id}`;
+  $u('#usageModalTitle').textContent = t('ss.usage.request_title', { id: e.id });
   $u('#usageModalBody').innerHTML = `
     <dl class="usage-facts">${facts.map(([k, v]) => `<dt>${usageEsc(k)}</dt><dd>${usageEsc(v)}</dd>`).join('')}</dl>
-    <h4>Stream activity</h4>
+    <h4>${t('ss.usage.stream_activity')}</h4>
     ${usageSparkline(e.samples)}`;
   $u('#usageModal').hidden = false;
 }
