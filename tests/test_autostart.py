@@ -83,8 +83,10 @@ class AutostartQueueTests(unittest.IsolatedAsyncioTestCase):
             self.runs[run.id] = run
             return dict(id=run.id)
         self.launch = launch
+        self.network = [True]
         self.queue = autostart.BootQueue(lambda: self.recipes, lambda: self.memory,
-                                        lambda r: self.launch(r), lambda: list(self.runs.values()))
+                                        lambda r: self.launch(r), lambda: list(self.runs.values()),
+                                        network_ready=lambda: self.network.pop(0) if len(self.network) > 1 else self.network[0])
 
     async def test_ready_before_next_and_only_one_pass(self):
         def launch(recipe):
@@ -247,6 +249,7 @@ class AutostartIntegrationTests(unittest.TestCase):
                 self.server._autostart_launch(self.recipe())
         self.assertEqual(raised.exception.status_code, 507)
         self.assertIn('resident model', raised.exception.detail)
+        self.assertIn('(resident)', raised.exception.detail)  # names the blocking run
         stop.assert_not_called()
         self.assertEqual(resident.status, 'running')
 
@@ -473,4 +476,88 @@ class LaunchLockScopeTests(unittest.TestCase):
                 worker.join(5)
                 for r in list(manager.runs.values()):
                     manager.stop(r.id)
+                deadline = time.monotonic() + 5
+                while any(r.status != 'exited' for r in manager.runs.values()) and time.monotonic() < deadline:
+                    time.sleep(.01)
             self.assertFalse(worker.is_alive())
+            self.assertTrue(all(r.status == 'exited' for r in manager.runs.values()))
+
+
+class BootNetworkAndLauncherTests(unittest.IsolatedAsyncioTestCase):
+    """Found by a real DGX Spark reboot: the pass ran before the network was up."""
+
+    def setUp(self):
+        import autostart
+        self.autostart = autostart
+        self.runs, self.calls = {}, []
+        p = mock.patch.dict(os.environ, {'SPARK_STUDIO_AUTOSTART': '1',
+                                         'SPARK_STUDIO_AUTOSTART_TIMEOUT': '30'})
+        p.start()
+        self.addCleanup(p.stop)
+
+    def queue(self, network, launch=None):
+        def default_launch(recipe):
+            self.calls.append(recipe['id'])
+            run = SimpleNamespace(id=str(recipe['id']), recipe_id=recipe['id'], status='running', ready=True)
+            self.runs[run.id] = run
+            return dict(id=run.id)
+        q = self.autostart.BootQueue(lambda: [dict(id=1), dict(id=2)], lambda: {'status': 'ok'},
+                                     launch or default_launch, lambda: list(self.runs.values()),
+                                     network_ready=network)
+        q._network_poll = .01
+        return q
+
+    async def test_waits_for_a_default_route_before_the_first_launch(self):
+        checks = iter([False, False, True])
+        seen = []
+        def network():
+            ready = next(checks, True)
+            seen.append((ready, list(self.calls)))
+            return ready
+        q = self.queue(network)
+        await q.run()
+        self.assertEqual(seen[:3], [(False, []), (False, []), (True, [])])
+        self.assertEqual(self.calls, [1, 2])
+
+    async def test_network_wait_is_bounded_and_stop_still_wins(self):
+        with mock.patch.dict(os.environ, {'SPARK_STUDIO_AUTOSTART_NETWORK_TIMEOUT': '0.05'}):
+            await self.queue(lambda: False).run()
+        self.assertEqual(self.calls, [1, 2])  # no route after the bound: launch anyway
+        self.calls.clear()
+        q = self.queue(lambda: False)
+        task = asyncio.create_task(q.run())
+        await asyncio.sleep(.03)
+        self.assertEqual(q.status()['reason'], 'waiting for network')
+        q.stop()
+        await task
+        self.assertEqual(self.calls, [])
+        self.assertEqual(q.status()['state'], 'stopped')
+
+    async def test_dead_detached_launcher_fails_fast_instead_of_waiting(self):
+        def launch(recipe):
+            self.calls.append(recipe['id'])
+            dead = recipe['id'] == 1
+            run = SimpleNamespace(id=str(recipe['id']), recipe_id=recipe['id'], status='running',
+                                  ready=not dead, detached=True,
+                                  proc=SimpleNamespace(poll=lambda: 1 if dead else None))
+            self.runs[run.id] = run
+            return dict(id=run.id)
+        start = asyncio.get_running_loop().time()
+        q = self.queue(lambda: True, launch)
+        await q.run()
+        self.assertLess(asyncio.get_running_loop().time() - start, 5)  # not the 30 s timeout
+        results = q.status()['results']
+        self.assertEqual((results[0]['status'], results[0]['reason']),
+                         ('failed', 'launcher exited with code 1 before ready'))
+        self.assertEqual(self.calls, [1, 2])
+
+    def test_default_route_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            header = 'Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\n'
+            up = Path(tmp, 'up')
+            up.write_text(header + 'eth0\t00000000\t0101A8C0\t0003\t0\t0\t100\t00000000\n')
+            local = Path(tmp, 'local')
+            local.write_text(header + 'eth0\t0001A8C0\t00000000\t0001\t0\t0\t100\t00FFFFFF\n')
+            self.assertTrue(self.autostart._has_default_route(str(up)))
+            self.assertFalse(self.autostart._has_default_route(str(local)))
+            self.assertTrue(self.autostart._has_default_route(str(Path(tmp, 'missing'))))

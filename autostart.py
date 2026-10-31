@@ -5,10 +5,37 @@ import os
 import time
 
 
+def _has_default_route(path='/proc/net/route'):
+    """Linux: True once an IPv4 default route is up. Elsewhere, don't wait."""
+    try:
+        with open(path) as f:
+            next(f, None)
+            for line in f:
+                fields = line.split()
+                if len(fields) > 3 and fields[1] == '00000000' and int(fields[3], 16) & 1:
+                    return True
+        return False
+    except (OSError, ValueError):
+        return True
+
+
+def _env_seconds(name, default):
+    try:
+        value = float(os.environ.get(name, default))
+        if not math.isfinite(value) or value < 0:
+            raise ValueError
+        return value
+    except ValueError:
+        return float(default)
+
+
 class BootQueue:
-    def __init__(self, recipes, memory_check, launch, runs):
+    _network_poll = 1.0  # seconds between default-route checks at boot
+
+    def __init__(self, recipes, memory_check, launch, runs, network_ready=_has_default_route):
         self._recipes, self._memory_check = recipes, memory_check
         self._launch, self._runs = launch, runs
+        self._network_ready = network_ready
         self._attempted = False
         self._stopped = False
         self._state = 'pending'
@@ -57,6 +84,17 @@ class BootQueue:
                     raise ValueError
             except ValueError:
                 timeout = 600.0
+            # A user service starts before the network: `After=network-online.target`
+            # has no effect in a user unit, and launches (sparkrun SSH to this
+            # host, image pulls) fail with "Network is unreachable" at boot.
+            net_deadline = time.monotonic() + _env_seconds('SPARK_STUDIO_AUTOSTART_NETWORK_TIMEOUT', 120)
+            while not self._stopped and not await asyncio.to_thread(self._network_ready):
+                if time.monotonic() >= net_deadline:
+                    print('[autostart] no default network route yet; launching anyway', flush=True)
+                    break
+                self._reason = 'waiting for network'
+                await asyncio.sleep(self._network_poll)
+            self._reason = None
             for recipe in recipes:
                 if self._stopped:
                     break
@@ -78,6 +116,13 @@ class BootQueue:
                         break
                     if run.ready:
                         self._record(recipe, 'ready', 'serving')
+                        break
+                    # Detached launchers (sparkrun) keep the run 'running' after they
+                    # exit; a failed launcher will never become ready.
+                    proc = getattr(run, 'proc', None)
+                    code = proc.poll() if proc is not None else None
+                    if code not in (None, 0):
+                        self._record(recipe, 'failed', f'launcher exited with code {code} before ready')
                         break
                     remaining = deadline - time.monotonic()
                     if remaining <= 0:

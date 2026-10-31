@@ -64,6 +64,13 @@ out run is left up for diagnosis; the queue continues, without retrying it.
 - Boot launches share the manual Run launch lock only from the memory guard to
   run registration; readiness is awaited outside it, so a manual Run never waits
   behind a model that is still loading.
+- Before the first launch the pass waits for a default network route, up to
+  `SPARK_STUDIO_AUTOSTART_NETWORK_TIMEOUT` seconds (default `120`): the user
+  service starts before the network, and `After=network-online.target` has no
+  effect in a user unit (sparkrun launches failed with "Network is unreachable"
+  on a real reboot without this wait). A launcher that exits with an error
+  before readiness is reported as failed at once instead of waiting for the
+  timeout.
 - Toggle/order changes take effect on the next application boot, not immediately.
 
 ## What you can do in 60 seconds

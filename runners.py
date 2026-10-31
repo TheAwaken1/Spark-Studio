@@ -537,10 +537,12 @@ class Runner:
         attach to the new run; raises MemoryTooTight if it can't fit."""
         msgs: list[str] = []
         preserve = preserve_resident_models.get()
-        if preserve and any(r.status == "running" and r.engine in
-                            {"vllm", "sglang", "llamacpp", "sparkrun"}
-                            for r in self.runs.values()):
-            raise MemoryTooTight("Auto-start skipped: a resident model is already running; stop it manually first.")
+        blocking = [r for r in self.runs.values() if r.status == "running"
+                    and r.engine in {"vllm", "sglang", "llamacpp", "sparkrun"}] if preserve else []
+        if blocking:
+            r = blocking[0]
+            raise MemoryTooTight(f"Auto-start skipped: model run '{r.label or r.engine}' ({r.id}) is "
+                                 f"registered as running (a resident model is never evicted); stop it first.")
         if not preserve and (skip or os.environ.get("SPARK_STUDIO_NO_MEMORY_GUARD") == "1"):
             return msgs
         total = _mem_total_gb()
