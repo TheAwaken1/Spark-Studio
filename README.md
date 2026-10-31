@@ -56,6 +56,14 @@ out run is left up for diagnosis; the queue continues, without retrying it.
   first eligible model will start. Manual launches keep their existing policy.
 - A doctor memory `error` suppresses the pass; `warn` alone does not. The current
   doctor has no disk probe, so no new disk check is introduced here.
+- Recipes that run a **raw shell command** verbatim (not sparkrun or registry
+  recipes) need an explicit confirmation of that exact command before Start at
+  boot is enabled (UI dialog; API `PATCH /api/recipes/{id}` with
+  `"confirm_raw_cmd": true`). Imports and saves cannot enable it on their own,
+  and editing the command turns Start at boot off until it is confirmed again.
+- Boot launches share the manual Run launch lock only from the memory guard to
+  run registration; readiness is awaited outside it, so a manual Run never waits
+  behind a model that is still loading.
 - Toggle/order changes take effect on the next application boot, not immediately.
 
 ## What you can do in 60 seconds

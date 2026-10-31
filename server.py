@@ -185,6 +185,8 @@ class RecipePatch(BaseModel):
     name: str | None = None
     auto_start: bool | None = None
     auto_start_order: int | None = None
+    # Required to enable Start at boot on a recipe that runs its raw command.
+    confirm_raw_cmd: bool | None = None
 
 
 class ExternalReq(BaseModel):
@@ -739,6 +741,12 @@ def patch_recipe(rid: int, patch: RecipePatch):
     if patch.name is not None:
         r["name"] = patch.name
     if patch.auto_start is not None:
+        if patch.auto_start and not r.get("auto_start"):
+            if _runs_raw_cmd(r) and not patch.confirm_raw_cmd:
+                raise HTTPException(409, "This recipe runs a raw shell command verbatim. Enabling Start at "
+                                         "boot runs it unattended after every reboot; confirm it explicitly "
+                                         "(confirm_raw_cmd=true).")
+            r["_confirm_raw_autostart"] = True
         r["auto_start"] = patch.auto_start
     if patch.auto_start_order is not None:
         r["auto_start_order"] = patch.auto_start_order
@@ -752,6 +760,13 @@ def delete_recipe(rid: int):
 
 
 # ----- Opt-in boot launches --------------------------------------------------
+
+def _runs_raw_cmd(recipe) -> bool:
+    """True when Run executes the recipe's raw_cmd verbatim (bash -lc). sparkrun
+    recipes launch from their ref; registry recipes regenerate their command."""
+    return bool(recipe.get("raw_cmd")) and recipe.get("engine") != "sparkrun" \
+        and not docker_recipe.is_registry_shaped(recipe.get("args") or {})
+
 
 def _autostart_launch(recipe):
     """Same launch path as Run, with an internal no-eviction memory policy."""

@@ -299,14 +299,25 @@ def recipes_upsert(data, _snapshot=True):
     args_json = json.dumps(data.get("args") or {})
     env_json = json.dumps(data.get("env") or {})
     raw_cmd = data.get("raw_cmd")
+    confirmed_raw = bool(data.pop("_confirm_raw_autostart", False))
     if data.get("id") and _snapshot:
         recipe_snapshot_take(data["id"], source=data.pop("_snapshot_source", "edit"))
     with cur() as c:
+        previous = None
         if data.get("id"):
-            c.execute("SELECT auto_start, auto_start_order FROM recipes WHERE id=?", (data["id"],))
+            c.execute("SELECT auto_start, auto_start_order, raw_cmd FROM recipes WHERE id=?", (data["id"],))
             previous = c.fetchone()
             if previous:
                 data = {**{key: previous[key] for key in ("auto_start", "auto_start_order")}, **data}
+        # A verbatim shell command only runs unattended at boot once the user has
+        # confirmed that exact command (PATCH confirm_raw_cmd). Every other write
+        # path (import, editor, Auto-Fix) fails closed: a new or edited raw
+        # command drops the opt-in until it is confirmed again.
+        if (data.get("auto_start") and raw_cmd and data.get("engine") != "sparkrun"
+                and not confirmed_raw
+                and not (previous and previous["auto_start"] and previous["raw_cmd"] == raw_cmd)):
+            data = {**data, "auto_start": False}
+        if data.get("id"):
             c.execute(
                 "UPDATE recipes SET name=?, engine=?, model=?, args_json=?, env_json=?, notes=?, tags=?, raw_cmd=?, auto_start=?, auto_start_order=?, updated_at=? WHERE id=?",
                 (

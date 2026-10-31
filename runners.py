@@ -491,6 +491,12 @@ def _serialized_launch(fn):
     @wraps(fn)
     def launch(*args, **kwargs):
         # Guard through registration: a manual and boot launch cannot both pass.
+        # Held only for memory guard -> Popen -> run registration; Runner.start()
+        # returns right after spawning and never waits for readiness under it
+        # (the boot queue polls run.ready after release). Only bounded guard
+        # steps block here: a manual launch's eviction wait for reclaimed memory
+        # (SPARK_STUDIO_MEM_GUARD_TIMEOUT, default 120 s) and one cache drop.
+        # Boot launches never evict, so they skip that wait.
         with _launch_lock:
             return fn(*args, **kwargs)
     return launch
