@@ -217,6 +217,10 @@
           <input type="file" id="recImportFile" accept=".json,.yaml,.yml,.txt" hidden />
           <input id="recSearch" type="text" placeholder="Search…" />
         </div>
+        <div class="toolbar">
+          <span id="autostartStatus" role="status" aria-live="polite"></span>
+          <button class="btn danger" id="autostartStop" title="Stops the boot queue only; running models stay up">Stop auto-start</button>
+        </div>
         <div id="recipesList" class="recipes-grid"></div>
       </div>
       <div class="card" style="margin-top:16px">

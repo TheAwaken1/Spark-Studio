@@ -181,6 +181,8 @@ def init():
         CREATE INDEX IF NOT EXISTS idx_usage_tool_ts ON usage_tool_calls(ts);
         """
     )
+    _add_col_if_missing("recipes", "auto_start", "INTEGER NOT NULL DEFAULT 0")
+    _add_col_if_missing("recipes", "auto_start_order", "INTEGER NOT NULL DEFAULT 0")
 
 
 def now():
@@ -199,6 +201,12 @@ def cur():
 def recipes_list():
     with cur() as c:
         c.execute("SELECT * FROM recipes ORDER BY updated_at DESC")
+        return [_recipe_row(r) for r in c.fetchall()]
+
+
+def recipes_list_autostart():
+    with cur() as c:
+        c.execute("SELECT * FROM recipes WHERE auto_start=1 ORDER BY auto_start_order, id")
         return [_recipe_row(r) for r in c.fetchall()]
 
 
@@ -291,12 +299,27 @@ def recipes_upsert(data, _snapshot=True):
     args_json = json.dumps(data.get("args") or {})
     env_json = json.dumps(data.get("env") or {})
     raw_cmd = data.get("raw_cmd")
+    confirmed_raw = bool(data.pop("_confirm_raw_autostart", False))
     if data.get("id") and _snapshot:
         recipe_snapshot_take(data["id"], source=data.pop("_snapshot_source", "edit"))
     with cur() as c:
+        previous = None
+        if data.get("id"):
+            c.execute("SELECT auto_start, auto_start_order, raw_cmd FROM recipes WHERE id=?", (data["id"],))
+            previous = c.fetchone()
+            if previous:
+                data = {**{key: previous[key] for key in ("auto_start", "auto_start_order")}, **data}
+        # A verbatim shell command only runs unattended at boot once the user has
+        # confirmed that exact command (PATCH confirm_raw_cmd). Every other write
+        # path (import, editor, Auto-Fix) fails closed: a new or edited raw
+        # command drops the opt-in until it is confirmed again.
+        if (data.get("auto_start") and raw_cmd and data.get("engine") != "sparkrun"
+                and not confirmed_raw
+                and not (previous and previous["auto_start"] and previous["raw_cmd"] == raw_cmd)):
+            data = {**data, "auto_start": False}
         if data.get("id"):
             c.execute(
-                "UPDATE recipes SET name=?, engine=?, model=?, args_json=?, env_json=?, notes=?, tags=?, raw_cmd=?, updated_at=? WHERE id=?",
+                "UPDATE recipes SET name=?, engine=?, model=?, args_json=?, env_json=?, notes=?, tags=?, raw_cmd=?, auto_start=?, auto_start_order=?, updated_at=? WHERE id=?",
                 (
                     data["name"],
                     data["engine"],
@@ -306,6 +329,8 @@ def recipes_upsert(data, _snapshot=True):
                     data.get("notes", ""),
                     data.get("tags", ""),
                     raw_cmd,
+                    int(bool(data.get("auto_start", False))),
+                    int(data.get("auto_start_order", 0)),
                     t,
                     data["id"],
                 ),
@@ -313,7 +338,7 @@ def recipes_upsert(data, _snapshot=True):
             return recipes_get(data["id"])
         else:
             c.execute(
-                "INSERT INTO recipes (name, engine, model, args_json, env_json, notes, tags, raw_cmd, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO recipes (name, engine, model, args_json, env_json, notes, tags, raw_cmd, auto_start, auto_start_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     data["name"],
                     data["engine"],
@@ -323,6 +348,8 @@ def recipes_upsert(data, _snapshot=True):
                     data.get("notes", ""),
                     data.get("tags", ""),
                     raw_cmd,
+                    int(bool(data.get("auto_start", False))),
+                    int(data.get("auto_start_order", 0)),
                     t,
                     t,
                 ),

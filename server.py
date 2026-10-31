@@ -39,6 +39,7 @@ from sse_starlette.sse import EventSourceResponse
 import yaml
 
 import agents
+import autostart
 import agentlab
 import bench
 import benchy
@@ -157,6 +158,8 @@ class Recipe(BaseModel):
     notes: str = ""
     tags: str = ""
     raw_cmd: str | None = None
+    auto_start: bool = False
+    auto_start_order: int = 0
 
 
 class StartReq(BaseModel):
@@ -180,6 +183,10 @@ class FixReq(BaseModel):
 class RecipePatch(BaseModel):
     tags: str | None = None
     name: str | None = None
+    auto_start: bool | None = None
+    auto_start_order: int | None = None
+    # Required to enable Start at boot on a recipe that runs its raw command.
+    confirm_raw_cmd: bool | None = None
 
 
 class ExternalReq(BaseModel):
@@ -628,6 +635,11 @@ async def _native_context_for(model: str | None) -> int | None:
 @app.post("/api/recipes")
 async def save_recipe(recipe: Recipe):
     data = recipe.model_dump()
+    existing = db.recipes_get(recipe.id) if recipe.id else None
+    if existing:
+        for field in ("auto_start", "auto_start_order"):
+            if field not in recipe.model_fields_set:
+                data[field] = existing[field]
     if docker_recipe.is_registry_shaped(data.get("args") or {}):
         data["raw_cmd"] = None
     else:
@@ -728,6 +740,16 @@ def patch_recipe(rid: int, patch: RecipePatch):
         r["tags"] = patch.tags
     if patch.name is not None:
         r["name"] = patch.name
+    if patch.auto_start is not None:
+        if patch.auto_start and not r.get("auto_start"):
+            if _runs_raw_cmd(r) and not patch.confirm_raw_cmd:
+                raise HTTPException(409, "This recipe runs a raw shell command verbatim. Enabling Start at "
+                                         "boot runs it unattended after every reboot; confirm it explicitly "
+                                         "(confirm_raw_cmd=true).")
+            r["_confirm_raw_autostart"] = True
+        r["auto_start"] = patch.auto_start
+    if patch.auto_start_order is not None:
+        r["auto_start_order"] = patch.auto_start_order
     return db.recipes_upsert(r)
 
 
@@ -735,6 +757,61 @@ def patch_recipe(rid: int, patch: RecipePatch):
 def delete_recipe(rid: int):
     db.recipes_delete(rid)
     return {"ok": True}
+
+
+# ----- Opt-in boot launches --------------------------------------------------
+
+def _runs_raw_cmd(recipe) -> bool:
+    """True when Run executes the recipe's raw_cmd verbatim (bash -lc). sparkrun
+    recipes launch from their ref; registry recipes regenerate their command."""
+    return bool(recipe.get("raw_cmd")) and recipe.get("engine") != "sparkrun" \
+        and not docker_recipe.is_registry_shaped(recipe.get("args") or {})
+
+
+def _autostart_launch(recipe):
+    """Same launch path as Run, with an internal no-eviction memory policy."""
+    from runners import preserve_resident_models
+
+    args = dict(recipe.get("args") or {})
+    if not recipe.get("raw_cmd"):
+        args = {"model": recipe.get("model"), **args}
+    port = args.get("port")
+    if recipe["engine"] == "sparkrun":
+        opts = args.get("_sparkrun") or {}
+        ref = opts.get("ref")
+        if not ref:
+            match = sparkrun_service.REF_RE.search(recipe.get("raw_cmd") or "")
+            ref = match.group(0) if match else ""
+        target = sparkrun_service.resolve_recipe_target(sparkrun_service.canonical_recipe_ref(ref))
+        port = (opts.get("overrides") or {}).get("port") or _sparkrun_launch_port(target, opts)
+    elif recipe.get("raw_cmd"):
+        match = re.search(r"(?:--port(?:=|\s+)|-p\s+(?:[\d.]+:)?)(\d+)", recipe["raw_cmd"])
+        if match:
+            port = match.group(1)
+    # Registry recipes get a fresh free port in prepare_run(), like manual Run.
+    if not docker_recipe.is_registry_shaped(args) and port and doctor._port_in_use(int(port)):
+        raise RuntimeError(f"port {port} is occupied; leaving the existing service up")
+    token = preserve_resident_models.set(True)
+    try:
+        return start_run(StartReq(engine=recipe["engine"], args=args,
+                                  env=recipe.get("env") or {}, recipe_id=recipe["id"],
+                                  raw_cmd=recipe.get("raw_cmd")))
+    finally:
+        preserve_resident_models.reset(token)
+
+
+_autostart = autostart.BootQueue(db.recipes_list_autostart, doctor._probe_memory,
+                                _autostart_launch, lambda: list(runner.runs.values()))
+
+
+@app.get("/api/autostart")
+async def autostart_status():
+    return _autostart.status()
+
+
+@app.post("/api/autostart/stop")
+async def autostart_stop():
+    return _autostart.stop()
 
 
 # ----- Runs -----------------------------------------------------------------
@@ -4871,8 +4948,11 @@ async def _boot_adoption() -> None:
     try:
         await _reconcile_on_boot()
     except Exception as e:  # noqa: BLE001
-        print(f"[startup] run reconciliation failed: {e}", flush=True)
+        print(f"[startup] run reconciliation failed: {e}; auto-start suppressed", flush=True)
+        _autostart.stop()  # fail closed: unknown surviving runs must not be replaced
+        return
     await _adopt_ports_on_boot()
+    await _autostart.run()
 
 
 async def _watchdog_loop() -> None:

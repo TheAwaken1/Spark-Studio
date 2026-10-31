@@ -890,7 +890,24 @@ function bindFavButtons(listSel, refresh) {
   }));
 }
 
+async function refreshAutostart() {
+  try {
+    const state = await api('/autostart');
+    $('#autostartStatus').textContent = `Auto-start: ${state.state}${state.current_recipe_id ? ` · recipe ${state.current_recipe_id}` : ''}${state.reason ? ` · ${state.reason}` : ''}`;
+    $('#autostartStop').disabled = !['pending', 'running'].includes(state.state);
+  } catch { $('#autostartStatus').textContent = 'Auto-start status unavailable'; }
+}
+$('#autostartStop').addEventListener('click', async () => {
+  try {
+    await api('/autostart/stop', { method: 'POST' });
+    toast('Auto-start stopped; running models stay up');
+    refreshAutostart();
+  } catch (e) { toast(e.message, 'danger'); }
+});
+setInterval(() => { if ($('.tab.active')?.dataset.tab === 'recipes') refreshAutostart(); }, 2000);
+
 async function refreshRecipes() {
+  refreshAutostart();
   const [recipes, runs] = await Promise.all([
     api('/recipes').catch(() => []),
     api('/runs').catch(() => []),
@@ -934,6 +951,9 @@ async function refreshRecipes() {
       ${r._details?.length ? `<div class="rc-notes">${escapeHtml(r._details.join(' · '))}</div>` : ''}
       ${r.notes ? `<div class="rc-notes">${escapeHtml(r.notes)}</div>` : ''}
       ${displayTags.length ? `<div class="rc-tags">${displayTags.map((t) => `<span>${escapeHtml(t)}</span>`).join('')}</div>` : ''}
+      <label><input type="checkbox" data-autostart="${r.id}" ${r.auto_start ? 'checked' : ''} /> Start at boot</label>
+      ${r.engine !== 'sparkrun' && r.raw_cmd ? '<span class="muted" title="Start at boot runs this command unattended after every reboot">⚠ raw command</span>' : ''}
+      <label>Boot order <input type="number" data-autostart-order="${r.id}" value="${Number(r.auto_start_order) || 0}" style="width:70px" /></label>
       <div class="rc-actions">
         <button class="btn primary" data-run="${r.id}">▶ Run</button>
         <button class="btn" data-edit="${r.id}">Edit</button>
@@ -945,6 +965,27 @@ async function refreshRecipes() {
   `}).join('');
   $('#recipesList').innerHTML = html || '<div class="muted">No recipes yet. Create one or Forge from an HF model.</div>';
   bindFavButtons('#recipesList', refreshRecipes);
+  $$('#recipesList [data-autostart], #recipesList [data-autostart-order]').forEach((input) => {
+    input.addEventListener('change', async () => {
+      const toggle = input.dataset.autostart;
+      const id = toggle || input.dataset.autostartOrder;
+      const body = toggle ? { auto_start: input.checked } : { auto_start_order: Number(input.value) };
+      const rec = recipes.find((x) => String(x.id) === String(id));
+      if (toggle && input.checked && rec && rec.engine !== 'sparkrun' && rec.raw_cmd) {
+        const cmd = rec.raw_cmd.length > 600 ? `${rec.raw_cmd.slice(0, 600)}…` : rec.raw_cmd;
+        if (!confirm(`This recipe runs a raw shell command. With Start at boot on, Spark Studio runs it unattended after every reboot:\n\n${cmd}\n\nOnly enable this for a command you wrote or reviewed. Editing the command later turns Start at boot off until you confirm again.`)) {
+          input.checked = false;
+          return;
+        }
+        body.confirm_raw_cmd = true;
+      }
+      try {
+        input.disabled = true;
+        await api(`/recipes/${id}`, { method: 'PATCH', body });
+      } catch (e) { toast(e.message, 'danger'); refreshRecipes(); }
+      finally { input.disabled = false; }
+    });
+  });
   $$('#recipesList [data-run]').forEach((b) => b.addEventListener('click', async () => {
     try {
       const r = await api(`/recipes/${b.dataset.run}`);

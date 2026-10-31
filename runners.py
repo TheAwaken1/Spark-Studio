@@ -23,6 +23,8 @@ import threading
 import time
 import urllib.parse
 import uuid
+from functools import wraps
+from contextvars import ContextVar
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -480,6 +482,26 @@ def endpoint_key(url: str) -> tuple[str, int] | None:
     return ("local" if _is_local_address(host) else host, port)
 
 
+# Internal launch policy, propagated through asyncio.to_thread; never a force bypass.
+preserve_resident_models = ContextVar("preserve_resident_models", default=False)
+_launch_lock = threading.RLock()
+
+
+def _serialized_launch(fn):
+    @wraps(fn)
+    def launch(*args, **kwargs):
+        # Guard through registration: a manual and boot launch cannot both pass.
+        # Held only for memory guard -> Popen -> run registration; Runner.start()
+        # returns right after spawning and never waits for readiness under it
+        # (the boot queue polls run.ready after release). Only bounded guard
+        # steps block here: a manual launch's eviction wait for reclaimed memory
+        # (SPARK_STUDIO_MEM_GUARD_TIMEOUT, default 120 s) and one cache drop.
+        # Boot launches never evict, so they skip that wait.
+        with _launch_lock:
+            return fn(*args, **kwargs)
+    return launch
+
+
 class Runner:
     """Manages all engine subprocesses."""
 
@@ -514,7 +536,14 @@ class Runner:
         """Make room for a new model before launching. Returns log lines to
         attach to the new run; raises MemoryTooTight if it can't fit."""
         msgs: list[str] = []
-        if skip or os.environ.get("SPARK_STUDIO_NO_MEMORY_GUARD") == "1":
+        preserve = preserve_resident_models.get()
+        blocking = [r for r in self.runs.values() if r.status == "running"
+                    and r.engine in {"vllm", "sglang", "llamacpp", "sparkrun"}] if preserve else []
+        if blocking:
+            r = blocking[0]
+            raise MemoryTooTight(f"Auto-start skipped: model run '{r.label or r.engine}' ({r.id}) is "
+                                 f"registered as running (a resident model is never evicted); stop it first.")
+        if not preserve and (skip or os.environ.get("SPARK_STUDIO_NO_MEMORY_GUARD") == "1"):
             return msgs
         total = _mem_total_gb()
         if not total:
@@ -529,6 +558,8 @@ class Runner:
 
         # 1) Only one model fits — stop any other resident model first.
         others = self._running_model_runs()
+        if preserve and others:
+            raise MemoryTooTight("Auto-start skipped: a resident model appeared before launch.")
         for r in others:
             label = r.label or r.engine
             msgs.append(f"[guard] stopping running model '{label}' to free unified memory for the new launch")
@@ -583,6 +614,7 @@ class Runner:
                 )
         return msgs
 
+    @_serialized_launch
     def start(
         self,
         engine: str,
